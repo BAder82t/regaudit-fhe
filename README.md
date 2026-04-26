@@ -1,13 +1,14 @@
 # regaudit-fhe
 
-**Encrypted regulatory audit primitives for AI systems.**
+Depth-tracked regulatory audit primitives for privacy-preserving AI audits.
 
-A small Python library of six audit operations that can be evaluated on
-encrypted inputs under fully-homomorphic encryption (CKKS, multiplicative
-depth six) without bootstrapping. Designed so a regulated AI vendor can
-run mandatory audits — fairness, drift, calibration, provenance,
-disagreement, survival concordance — without ever exposing raw labels,
-predictions, protected attributes, or training data.
+`regaudit-fhe` provides a plaintext slot-vector reference model, TenSEAL
+CKKS backend support, signed audit envelopes, schema validation, and
+regulatory audit-evidence helpers.
+
+The default execution path is plaintext. Install the `[fhe]` extra to
+enable the TenSEAL CKKS backend where supported. OpenFHE is not
+included in this repository.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
@@ -160,28 +161,32 @@ envelope by `regaudit_fhe.envelope(...)`:
 ```json
 {
   "schema": "regaudit-fhe.report.v1",
+  "library_version": "current release",
   "primitive": "fairness",
-  "regulations": ["NYC_LL144", "EU_AI_ACT_ART10",
-                  "EU_AI_ACT_ART15", "COLORADO_AI_ACT",
-                  "CFPB_ALG_DISCRIM"],
+  "backend": "plaintext-slotvec",
+  "parameter_set_hash": "sha256:6b8aedc173e2c94e…",
+  "input_commitments": {
+    "y_true": "sha256:a5c4…",
+    "y_pred": "sha256:7e91…"
+  },
   "result": {
-    "demographic_parity_diff": 0.083,
-    "equal_opportunity_diff": 0.041,
-    "predictive_parity_diff": 0.022,
+    "max_gap": 0.0312,
     "threshold_breached": false
   },
-  "depth_budget": {"declared": 6, "consumed": 4},
-  "issued_at": "2026-04-26T20:30:11.482910+00:00",
   "receipt": {
-    "sha256": "9f3c…b4a7",
-    "version": "0.0.1"
+    "sha256":        "sha256:9f3c…b4a7",
+    "signature_alg": "Ed25519",
+    "signature":     "base64:MEUCIQDX…",
+    "key_id":        "auditor-key-2026-04"
   }
 }
 ```
 
-`schema` and `regulations` give a regulator the exact citation they
-need. `receipt.sha256` is computed over the canonical JSON of every
-other field; `verify_receipt(env)` returns `False` if anything changed.
+`schema`, `parameter_set_hash`, and `input_commitments` give a
+regulator the exact citation, parameter binding, and input fingerprint
+they need. Unsigned SHA-256 receipts are useful for tamper evidence
+only; signed receipts (the default since `regaudit-fhe` v0.0.2)
+provide issuer authenticity when the verifier trusts the signing key.
 
 ---
 
@@ -287,7 +292,7 @@ change a regulatory threshold decision at the audit precision targets.
 > the OpenFHE-specific build is part of the closed-source platform
 > roadmap.
 
-`regaudit-fhe` v0.0.1 ships:
+The current release ships:
 
 - the plaintext SlotVec model with strict depth-budget enforcement,
 - a TenSEAL CKKS backend that mirrors the SlotVec algebra and passes
