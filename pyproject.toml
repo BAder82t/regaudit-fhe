@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fhe = [
-  "tenseal>=0.3.14",
+  "tenseal>=0.3.16",
 ]
 server = [
   "fastapi>=0.115",
