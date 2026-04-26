@@ -11,9 +11,10 @@ fit in the d=6 budget without bootstrap. Operations match CKKS semantics:
 - Cross-slot sum (sum_all): free in depth; uses log2(n) Halevi-Shoup
   rotate-and-add steps.
 
-A plaintext numerical model is sufficient for the patent-defensive prototype:
-the encrypted execution path lives behind an optional OpenFHE backend (under
-the [fhe] extra) and uses identical algebraic structure.
+A plaintext numerical model is sufficient for the audit-primitive
+contract: the encrypted execution path lives behind an optional
+TenSEAL CKKS backend (``regaudit_fhe.fhe``) under the ``[fhe]`` extra
+and uses identical algebraic structure.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.

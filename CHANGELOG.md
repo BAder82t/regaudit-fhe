@@ -4,6 +4,21 @@ All notable changes to **regaudit-fhe** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.4] - 2026-04-27
+### Fixed
+- README quick-start install line said `[fhe]` "adds OpenFHE"; the
+  `[fhe]` extra installs **TenSEAL**. Reworded the line to match
+  reality.
+- Example `openfhe_fairness_roundtrip.py` now prints
+  ``backend: tenseal-ckks (open-source)`` instead of the placeholder
+  ``backend: openfhe`` so the demo summary tells the truth about
+  which backend executed.
+- `_slot.py` module docstring updated: the optional encrypted
+  backend is TenSEAL CKKS (`regaudit_fhe.fhe`), not OpenFHE.
+- `docs/specs/01_egf_imss.md` reference deployment line: TenSEAL is
+  the active backend; OpenFHE deployment lives in the closed-source
+  roadmap.
+
 ## [0.0.3] - 2026-04-27
 ### Removed
 - `src/regaudit_fhe/backends/` (the empty `OpenFHE` skeleton).

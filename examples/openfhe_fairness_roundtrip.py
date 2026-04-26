@@ -1,9 +1,10 @@
 """Example — CKKS fairness audit: encrypt → evaluate → decrypt → verify.
 
 Demonstrates the full encrypted-execution path against the open-source
-TenSEAL CKKS backend (the file name keeps the original ``openfhe_*``
-convention; the production backend is OpenFHE in the closed-source
-companion product). The script:
+**TenSEAL CKKS** backend (`regaudit_fhe.fhe`). The file name retains
+the historical ``openfhe_*`` prefix because OpenFHE is the *target*
+production backend; the active backend in this repo is TenSEAL, and
+this script reports that backend honestly. The script:
 
   1. Generates synthetic labels, predictions, and protected-attribute
      vectors (the kind of data NYC LL144 / EU AI Act §15 audits run
@@ -109,7 +110,7 @@ def main() -> int:
     )
 
     print("─── audit summary " + "─" * 40)
-    print(f"backend:            openfhe")
+    print(f"backend:            tenseal-ckks (open-source)")
     print(f"depth consumed:     {fhe_p.declared_depth('fairness')} / 6")
     print(f"max decrypt error:  {max_err:.2e}")
     print(f"receipt verified:   {str(out.sha256_valid).lower()}")

@@ -80,7 +80,9 @@ them with composite-output noise flooding before decryption.
 
 ## Reference deployment
 
-- Build with OpenFHE 1.5.x and `regaudit_fhe[fhe]`.
+- Active backend in this repo: TenSEAL CKKS (`pip install regaudit-fhe[fhe]`).
+  Production OpenFHE deployment is part of the closed-source companion
+  product roadmap.
 - Bench targets: COMPAS, Folktables-Adult, BRSET-fairness.
 - Goal wall-clock: ≤ 90 s per 1 k-row audit at `d = 6`, `N = 2^15`.
 

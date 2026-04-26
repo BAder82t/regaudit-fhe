@@ -60,7 +60,7 @@ def test_schema_field_must_be_recognised_v1():
     env = _sample_envelope()
     assert env.schema == "regaudit-fhe.report.v1"
     assert env.schema_version == "regaudit-fhe.report.v1"
-    assert env.algorithm_version == "0.0.3"
+    assert env.algorithm_version == "0.0.4"
 
 
 def test_unknown_schema_version_does_not_match_signature():

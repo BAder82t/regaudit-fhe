@@ -104,7 +104,7 @@ The plaintext model that runs the depth-budgeted slot-vector circuits
 encrypted execution path lives behind the optional `[fhe]` extra:
 
 ```bash
-pip install regaudit-fhe[fhe]    # adds OpenFHE
+pip install regaudit-fhe[fhe]    # adds the TenSEAL CKKS backend
 ```
 
 ---
