@@ -34,7 +34,7 @@ def test_envelope_carries_full_security_block() -> None:
     body = env.to_dict()
     assert body["schema"] == "regaudit-fhe.report.v1"
     assert body["schema_version"] == "regaudit-fhe.report.v1"
-    assert body["algorithm_version"] == "0.0.6"
+    assert body["algorithm_version"] == "0.0.7"
     assert body["backend"] == "tenseal-ckks"
     assert body["parameter_set"]["poly_modulus_degree"] == 32768
     assert body["parameter_set"]["security_bits"] == 128

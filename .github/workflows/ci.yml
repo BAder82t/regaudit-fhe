@@ -11,6 +11,26 @@ permissions:
   contents: read
 
 jobs:
+  release-gate:
+    name: release-gate (fresh-clone verify)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: |
+          python -m py_compile src/regaudit_fhe/*.py \
+                                src/regaudit_fhe/fhe/*.py \
+                                tests/*.py
+      - run: python -c "import regaudit_fhe; print(regaudit_fhe.__version__)"
+      - run: regaudit-fhe --help
+      - run: regaudit-fhe schema --list
+      - run: pytest -q
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

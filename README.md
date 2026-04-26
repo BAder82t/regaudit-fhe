@@ -10,6 +10,9 @@ The default execution path is plaintext. Install the `[fhe]` extra to
 enable the TenSEAL CKKS backend where supported. OpenFHE is not
 included in this repository.
 
+[![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
+[![Python](https://img.shields.io/pypi/pyversions/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 > Maintained by **VaultBytes Innovations Ltd**. Licensed under
@@ -209,11 +212,35 @@ Run any of them after `pip install -e .[dev]`.
 ## Layout
 
 ```
-src/regaudit_fhe/      depth-tracked plaintext model + 6 primitives + reports + CLI
+src/regaudit_fhe/
+  _slot.py             plaintext SlotVec model with depth-budget enforcement
+  _validation.py       finite/binary/length input guards
+  cli.py               regaudit-fhe CLI entrypoint
+  reports.py           audit envelope: canonical JSON, parameter-set hash,
+                       input commitments, Ed25519 signing
+  schemas.py           JSON Schema loader + validator
+  schemas/             bundled Draft-2020-12 schemas (one per input/output + envelope)
+  server.py            hardened FastAPI HTTP audit server
+  egf_imss.py          fairness primitive
+  etk_fpa_hbc.py       provenance primitive
+  esc_cia.py           concordance primitive
+  ecp_qssp.py          calibration primitive
+  ew1_cdsf.py          drift primitive
+  ecmd_jps.py          disagreement primitive
+  fhe/                 TenSEAL CKKS encrypted backend (optional [fhe] extra):
+    context.py           build_d6_context, CKKSContext
+    params.py            validated CKKSParams
+    slot_vec.py          EncryptedSlotVec mirroring the plaintext SlotVec API
+    primitives.py        encrypted variants of every audit primitive
+
 docs/specs/            per-primitive technical specifications
-docs/THREAT_MODEL.md   roles, key custody, public surface per primitive
-schemas/               JSON Schemas (Draft 2020-12) for every input, output, and the envelope
-tests/                 pytest unit, integration, edge-case, property-based, schema, security tests
+docs/THREAT_MODEL.md   roles, key custody, per-primitive public-surface tables
+docs/COMPLIANCE.md     regulator-facing scope statement and disclaimers
+docs/DEPLOYMENT.md     server hardening guide + production checklist
+docs/SUPPLY_CHAIN.md   Sigstore verification, SBOM, reproducible build notes
+docs/roadmap/          design notes for non-shipping work
+schemas/               source-of-truth JSON Schemas
+tests/                 unit, integration, edge-case, property-based, schema, security
 examples/              client + regulator end-to-end flows
 benchmarks/            d=6 CKKS wall-clock + memory benchmarks
 ```
@@ -279,6 +306,61 @@ encrypted circuit to disagree with the plaintext circuit on a boolean
 breach decision over 10–20 trials with inputs sampled near the breach
 boundary. Zero flips across both rings means CKKS noise does not
 change a regulatory threshold decision at the audit precision targets.
+
+## Verify a fresh clone
+
+The release gate is one shell block. Anything that fails this block
+is a release blocker:
+
+```bash
+git clone https://github.com/BAder82t/regaudit-fhe.git
+cd regaudit-fhe
+python -m venv .venv && source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+
+python -m py_compile src/regaudit_fhe/*.py src/regaudit_fhe/fhe/*.py tests/*.py
+python -c "import regaudit_fhe; print(regaudit_fhe.__version__)"
+regaudit-fhe --help
+regaudit-fhe schema --list
+pytest -q
+```
+
+CI runs an equivalent matrix on every push (see
+[.github/workflows/ci.yml](.github/workflows/ci.yml)) and the badge at
+the top of this README reflects the latest result.
+
+---
+
+## Production / regulator readiness — what is and isn't validated
+
+> The release gate above guarantees the package builds, imports,
+> exposes the documented CLI / API, and passes its test suite. That
+> is **not** the same as being validated for regulated production use.
+> The matrix below is the honest current state.
+
+| Property                                | Status                                               |
+| --------------------------------------- | ---------------------------------------------------- |
+| Python syntax + imports                 | Verified by CI on every push.                        |
+| 233-test pytest suite                   | Verified by CI on every push.                        |
+| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.           |
+| Signed audit envelope (Ed25519)         | Shipped; canonical-JSON + tamper tests.              |
+| JSON Schemas                            | Shipped; validated on every CLI / API request.       |
+| Hardened HTTP server                    | Shipped; auth, scopes, rate limit, CORS, audit log.  |
+| Real benchmarks at N=2^14, N=2^15       | Shipped; reproducible from `benchmarks/bench_fhe.py`.|
+| Independent cryptography review         | **Not yet performed.**                               |
+| Independent security / pen-test review  | **Not yet performed.**                               |
+| Regulator endorsement                   | **None claimed.** Output is technical evidence only. |
+| Pilot deployment with a regulated buyer | **None public.**                                     |
+| Compliance mapping reviewed by counsel  | **Not yet performed.**                               |
+| SOC 2 / ISO 27001 / HIPAA attestation   | **Not applicable to the library; deployment-side.**  |
+
+`regaudit-fhe` is a dependency you can bring into a compliance
+workflow today; it is not, by itself, a finished compliance product.
+[COMPLIANCE.md](COMPLIANCE.md) lists what each primitive does NOT
+prove, regulation by regulation.
+
+---
 
 ## Maturity and status
 
