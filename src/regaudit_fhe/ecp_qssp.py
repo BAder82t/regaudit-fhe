@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
+from ._validation import assert_finite, assert_nonempty
 
 
 @dataclass
@@ -27,6 +28,9 @@ class ConformalReport:
 
 def conformal_oracle(scores: np.ndarray, quantiles: np.ndarray) -> ConformalReport:
     """Plaintext split-conformal membership."""
+    scores = assert_finite("scores", assert_nonempty("scores", scores))
+    quantiles = assert_finite("quantiles",
+                              assert_nonempty("quantiles", quantiles))
     if scores.shape != quantiles.shape:
         raise ValueError(f"shape mismatch: {scores.shape} vs {quantiles.shape}")
     membership = (scores <= quantiles).astype(np.float64)
@@ -44,6 +48,11 @@ def conformal_circuit_d6(scores: np.ndarray, quantiles: np.ndarray) -> Conformal
         - sign_poly_d3 to produce a smooth membership signal: 2 levels.
       Total: 2 levels.
     """
+    scores = assert_finite("scores", assert_nonempty("scores", scores))
+    quantiles = assert_finite("quantiles",
+                              assert_nonempty("quantiles", quantiles))
+    if scores.shape != quantiles.shape:
+        raise ValueError(f"shape mismatch: {scores.shape} vs {quantiles.shape}")
     n = pad_pow2(scores).shape[0]
     scores_ct = SlotVec.encrypt(pad_pow2(scores))
     quantiles_pt = pad_pow2(quantiles)

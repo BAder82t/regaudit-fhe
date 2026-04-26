@@ -23,7 +23,10 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-from . import ecmd_jps, ecp_qssp, esc_cia, etk_fpa_hbc, ew1_cdsf, egf_imss, reports
+from . import (ecmd_jps, ecp_qssp, esc_cia, etk_fpa_hbc, ew1_cdsf, egf_imss,
+                reports, schemas)
+from .schemas import (SchemaError, list_schemas, load_schema, validate,
+                       validate_envelope, validate_input, validate_output)
 from ._slot import MAX_DEPTH, DepthBudgetExceeded, SlotVec
 from .ecmd_jps import DisagreementReport, disagreement_circuit_d6, disagreement_oracle
 from .ecp_qssp import ConformalReport, conformal_circuit_d6, conformal_oracle
@@ -31,9 +34,12 @@ from .esc_cia import CIndexReport, c_index_circuit_d6, c_index_oracle
 from .etk_fpa_hbc import ProvenanceReport, topk_provenance_circuit_d6, topk_provenance_oracle
 from .ew1_cdsf import DriftReport, cvm_oracle, w1_circuit_d6, w1_oracle
 from .egf_imss import FairnessReport, fairness_circuit_d6, fairness_oracle
-from .reports import AuditEnvelope, REGULATION_MAP, envelope, verify_receipt
+from .reports import (AuditEnvelope, ParameterSet, REGULATION_MAP, Signer,
+                      TimestampAuthority, VerificationOutcome,
+                      canonical_json, commit_input, commitments_for,
+                      envelope, verify_envelope, verify_receipt)
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 
 audit_fairness = fairness_circuit_d6
@@ -82,7 +88,23 @@ __all__ = [
     "ecmd_jps",
     "reports",
     "AuditEnvelope",
+    "ParameterSet",
     "REGULATION_MAP",
+    "Signer",
+    "TimestampAuthority",
+    "VerificationOutcome",
+    "canonical_json",
+    "commit_input",
+    "commitments_for",
     "envelope",
+    "verify_envelope",
     "verify_receipt",
+    "schemas",
+    "SchemaError",
+    "list_schemas",
+    "load_schema",
+    "validate",
+    "validate_envelope",
+    "validate_input",
+    "validate_output",
 ]

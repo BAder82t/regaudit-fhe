@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/provenance.output.json",
+  "title": "Top-K provenance audit output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bucket_aggregates", "topk_indices", "topk_indicator"],
+  "properties": {
+    "bucket_aggregates": {
+      "type": "array",
+      "items": {"type": "number"}
+    },
+    "topk_indices": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0}
+    },
+    "topk_indicator": {
+      "type": "array",
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]}
+    }
+  }
+}

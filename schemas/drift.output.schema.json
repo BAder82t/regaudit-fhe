@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/drift.output.json",
+  "title": "Drift-detection audit output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["distance", "w1_distance", "drift_bit"],
+  "properties": {
+    "distance":     {"type": "number", "minimum": 0},
+    "w1_distance":  {"type": "number", "minimum": 0},
+    "drift_bit":    {"type": "boolean"}
+  }
+}

@@ -18,6 +18,7 @@ from typing import List, Sequence
 import numpy as np
 
 from ._slot import SlotVec, sign_poly_d3
+from ._validation import assert_finite, assert_nonempty
 
 
 @dataclass
@@ -33,6 +34,8 @@ def disagreement_oracle(per_model_predictions: np.ndarray, threshold: float = 0.
     Returns the average pairwise squared difference across the M models.
     """
     p = np.asarray(per_model_predictions, dtype=np.float64)
+    p = assert_finite("per_model_predictions",
+                      assert_nonempty("per_model_predictions", p))
     if p.ndim == 1:
         p = p[:, None]
     M = p.shape[0]
@@ -74,7 +77,17 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
       auditor decryption to keep the on-encrypted depth strictly below six and
       to leave headroom for downstream commit-and-verify chaining.
     """
+    test_input = assert_finite("test_input",
+                               assert_nonempty("test_input", test_input))
+    if not model_polynomials:
+        raise ValueError("model_polynomials must be non-empty")
     M = len(model_polynomials)
+    for i, c in enumerate(model_polynomials):
+        if len(c) != 4:
+            raise ValueError(
+                f"each surrogate must be a deg-3 poly (4 coefficients); "
+                f"model {i} has {len(c)}"
+            )
     if M < 3:
         raise ValueError("requires M >= 3 model versions")
     n = len(test_input)

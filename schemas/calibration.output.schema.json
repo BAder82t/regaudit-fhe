@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/calibration.output.json",
+  "title": "Conformal calibration audit output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["membership", "set_size"],
+  "properties": {
+    "membership": {
+      "type": "array",
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]}
+    },
+    "set_size": {"type": "integer", "minimum": 0}
+  }
+}

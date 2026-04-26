@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, cdf_in_place, pad_pow2
+from ._validation import assert_finite, assert_nonempty, assert_same_length
 
 
 @dataclass
@@ -32,6 +33,8 @@ class DriftReport:
 
 def w1_oracle(p: np.ndarray, q: np.ndarray) -> float:
     """Plaintext W1 reference: ``sum_k |F_p(k) - F_q(k)|``."""
+    p = assert_finite("p", assert_nonempty("p", p))
+    q = assert_finite("q", assert_nonempty("q", q))
     if p.shape != q.shape:
         raise ValueError(f"shape mismatch: {p.shape} vs {q.shape}")
     p_n = p / max(float(np.sum(p)), 1e-12)
@@ -44,6 +47,8 @@ def cvm_oracle(p: np.ndarray, q: np.ndarray) -> float:
 
     ``cvm(p, q) = sum_k (F_p(k) - F_q(k))^2``.
     """
+    p = assert_finite("p", assert_nonempty("p", p))
+    q = assert_finite("q", assert_nonempty("q", q))
     if p.shape != q.shape:
         raise ValueError(f"shape mismatch: {p.shape} vs {q.shape}")
     p_n = p / max(float(np.sum(p)), 1e-12)
@@ -53,6 +58,12 @@ def cvm_oracle(p: np.ndarray, q: np.ndarray) -> float:
 
 
 def w1_circuit_d6(p: np.ndarray, q: np.ndarray, drift_threshold: float = 0.005) -> DriftReport:
+    p = assert_finite("p", assert_nonempty("p", p))
+    q = assert_finite("q", assert_nonempty("q", q))
+    if p.shape != q.shape:
+        raise ValueError(f"shape mismatch: {p.shape} vs {q.shape}")
+    if drift_threshold < 0:
+        raise ValueError(f"drift_threshold must be non-negative; got {drift_threshold}")
     """Depth-budgeted circuit producing the encrypted drift distance.
 
     Depth:

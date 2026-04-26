@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/envelope.json",
+  "title": "regaudit-fhe audit envelope",
+  "description": "The signed, regulator-facing artefact every audit primitive emits. See docs/THREAT_MODEL.md for the security model and reports.py for canonical-JSON / signing conventions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "algorithm_version",
+               "primitive", "backend", "parameter_set",
+               "parameter_set_hash", "regulations", "result",
+               "input_commitments", "depth_budget",
+               "issued_at", "issuer", "receipt"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "regaudit-fhe.report.v1"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^regaudit-fhe\\.report\\.v[0-9]+$"
+    },
+    "algorithm_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.]+)?$"
+    },
+    "primitive": {
+      "type": "string",
+      "enum": ["fairness", "provenance", "concordance",
+               "calibration", "drift", "disagreement"]
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["plaintext", "tenseal-ckks", "openfhe-ckks", "lattigo-ckks"]
+    },
+    "parameter_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "poly_modulus_degree", "security_bits",
+                   "multiplicative_depth", "coeff_mod_bit_sizes",
+                   "scaling_factor_bits", "library_version",
+                   "backend_version"],
+      "properties": {
+        "backend": {"type": "string"},
+        "poly_modulus_degree": {"type": "integer", "minimum": 0},
+        "security_bits": {"type": "integer", "minimum": 128},
+        "multiplicative_depth": {"type": "integer", "minimum": 0, "maximum": 6},
+        "coeff_mod_bit_sizes": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 0}
+        },
+        "scaling_factor_bits": {"type": "integer", "minimum": 0},
+        "library_version": {"type": "string"},
+        "backend_version": {"type": "string"}
+      }
+    },
+    "parameter_set_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "regulations": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "result": {
+      "type": "object",
+      "description": "Primitive-specific output; conforms to the matching <primitive>.output.schema.json."
+    },
+    "input_commitments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256"],
+        "properties": {
+          "name":   {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    "depth_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "consumed"],
+      "properties": {
+        "declared": {"type": "integer", "minimum": 0, "maximum": 6},
+        "consumed": {"type": "integer", "minimum": 0, "maximum": 6}
+      }
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "issuer": {
+      "type": "string"
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "signature_alg", "signature_b64",
+                   "key_id", "public_key_pem"],
+      "properties": {
+        "sha256":         {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "signature_alg":  {"type": "string", "const": "Ed25519"},
+        "signature_b64":  {"type": "string"},
+        "key_id":         {"type": "string"},
+        "public_key_pem": {"type": "string"}
+      }
+    },
+    "timestamp": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issuer", "token_b64", "issued_at"],
+          "properties": {
+            "issuer":     {"type": "string"},
+            "token_b64":  {"type": "string"},
+            "issued_at":  {"type": "string", "format": "date-time"}
+          }
+        }
+      ]
+    }
+  }
+}

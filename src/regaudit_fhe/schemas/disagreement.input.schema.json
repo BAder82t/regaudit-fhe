@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/disagreement.input.json",
+  "title": "Cross-model disagreement audit input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model_polynomials", "test_input"],
+  "properties": {
+    "model_polynomials": {
+      "type": "array",
+      "minItems": 3,
+      "description": "M ≥ 3 model surrogates, each as a length-4 (a0, a1, a2, a3) coefficient vector.",
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {"type": "number"}
+      }
+    },
+    "test_input": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number"}
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.05
+    }
+  }
+}

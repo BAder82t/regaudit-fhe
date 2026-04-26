@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/fairness.output.json",
+  "title": "Fairness audit output",
+  "description": "Decoded result for the fairness audit primitive.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["demographic_parity_diff", "equal_opportunity_diff",
+               "predictive_parity_diff", "threshold_breached"],
+  "properties": {
+    "demographic_parity_diff": {"type": "number"},
+    "equal_opportunity_diff":  {"type": "number"},
+    "predictive_parity_diff":  {"type": "number"},
+    "threshold_breached":      {"type": "boolean"}
+  }
+}

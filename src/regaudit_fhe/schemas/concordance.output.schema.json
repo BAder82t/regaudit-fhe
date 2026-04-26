@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/concordance.output.json",
+  "title": "Survival concordance audit output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["concordant_pairs", "comparable_pairs", "c_index"],
+  "properties": {
+    "concordant_pairs": {"type": "number", "minimum": 0},
+    "comparable_pairs": {"type": "number", "minimum": 0},
+    "c_index":          {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/fairness.input.json",
+  "title": "Fairness audit input",
+  "description": "Input payload accepted by `regaudit-fhe audit fairness` and POST /v1/audit/fairness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["y_true", "y_pred", "group_a", "group_b"],
+  "properties": {
+    "y_true": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]},
+      "description": "Binary outcome labels."
+    },
+    "y_pred": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]},
+      "description": "Binary model predictions."
+    },
+    "group_a": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]},
+      "description": "Protected-group A indicator vector (per-row 0/1)."
+    },
+    "group_b": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]},
+      "description": "Protected-group B indicator vector (per-row 0/1)."
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "default": 0.1,
+      "description": "Disparity magnitude that triggers a breach."
+    }
+  }
+}

@@ -2,12 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,6 +25,51 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: pip install -e .[dev]
+      - run: pip install -e ".[dev,server]"
       - run: pytest tests/ -q --cov=regaudit_fhe --cov-report=term-missing
-      - run: python benchmarks/bench_all.py
+
+  benchmark:
+    name: benchmarks (smoke, py3.12)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,fhe]"
+      - run: python benchmarks/bench_fhe.py --rings 14 --reps 1 --flip-trials 5
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip pip-audit
+      - run: pip install -e ".[dev,server,fhe]"
+      - run: pip-audit --strict --vulnerability-service osv
+
+  sbom:
+    name: sbom (cyclonedx)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip cyclonedx-bom
+      - run: pip install -e ".[server,fhe]"
+      - run: cyclonedx-py environment --output-format JSON --output-file sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json

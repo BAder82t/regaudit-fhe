@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/disagreement.output.json",
+  "title": "Cross-model disagreement audit output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pairwise_variance", "breach", "per_model_outputs"],
+  "properties": {
+    "pairwise_variance": {"type": "number", "minimum": 0},
+    "breach":            {"type": "boolean"},
+    "per_model_outputs": {"type": "array", "items": {"type": "number"}}
+  }
+}

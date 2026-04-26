@@ -4,6 +4,48 @@ All notable changes to **regaudit-fhe** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.2] - 2026-04-27
+### Added
+- Real CKKS encrypted backend (TenSEAL) under the `[fhe]` extra,
+  including end-to-end ciphertext / plaintext equivalence tests.
+- Validated `CKKSParams` parameter set (128-bit security, modulus-chain
+  depth, scale stability, rotation-key minimality, precision-loss
+  bounds) plus `build_d6_context_from_params`.
+- Ed25519-signed audit envelope: canonical JSON, parameter-set hash,
+  input commitments, optional RFC-3161 timestamp authority.
+- `docs/THREAT_MODEL.md` — formal threat / leakage model, per-primitive
+  public-surface tables, regulator-side verification checklist.
+- `docs/COMPLIANCE.md` — binding scope statement covering 16
+  regulations with what-we-do-NOT-prove columns.
+- 13 JSON Schemas (Draft 2020-12) for every primitive input / output
+  and the audit envelope; CLI `regaudit-fhe schema` subcommand and
+  HTTP `/v1/schemas` endpoint.
+- Hardened HTTP server: bearer-token auth + scopes, body-size limit,
+  in-process token-bucket rate limiter, per-request timeout, JSON
+  access logs that never echo audit payloads, CORS allow-list,
+  `/healthz`, `/readyz` (with privacy-boundary warning), `/version`.
+- `Dockerfile` (multi-stage, non-root UID 10001) and
+  `docs/DEPLOYMENT.md` with Kubernetes reference manifests and a
+  production checklist.
+- Five new examples: `openfhe_fairness_roundtrip`, `signed_envelope`,
+  `server_client`, `regulator_verify_signature`, `benchmark_reproduce`.
+- Real CKKS benchmarks at `N = 2^14` and `N = 2^15`; results in
+  `benchmarks/results/SUMMARY.md` + per-ring JSON.
+- Adversarial / edge-case test suite (NaN/Inf rejection, empty
+  arrays, single-group cases, extreme thresholds), envelope
+  robustness tests (tampering, schema mismatch, key swap), and
+  Hypothesis property-based tests for FHE↔plaintext equivalence,
+  canonical-JSON byte stability, and commitment uniqueness.
+- Supply-chain controls: weekly Dependabot, `pip-audit`, CycloneDX
+  SBOM generation, pinned `requirements-dev.txt`, Sigstore-attested
+  PyPI Trusted-Publisher release workflow, `docs/SUPPLY_CHAIN.md`.
+
+### Changed
+- Project description repositioned to "Depth-tracked regulatory audit
+  primitives for future FHE-CKKS execution." to match maturity.
+- Drift primitive switched from sign-poly-based W1 (~25 % relative
+  error) to Cramer-von-Mises CDF L2² (depth 1, exact under encryption).
+
 ## [0.0.1] - 2026-04-26
 ### Added
 - Six audit primitives, each evaluable inside a CKKS multiplicative-depth

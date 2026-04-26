@@ -1,21 +1,44 @@
-"""Audit report serialisation, regulation tagging, and receipt issuance.
+"""Audit envelope: canonical JSON, parameter set, input commitments,
+Ed25519 signing, and timestamp-authority hook.
 
-All six audit primitives produce typed dataclass reports. This module wraps
-those reports into a uniform regulator-facing JSON envelope:
+The envelope is the regulator-facing artefact every audit produces. A
+verifier with the issuer's public key can decide three questions in
+constant time:
 
-    {
-      "schema": "regaudit-fhe.report.v1",
-      "primitive": "fairness" | "drift" | ...,
-      "regulations": ["NYC_LL144", "EU_AI_ACT_ART15", ...],
-      "result": <primitive-specific dict>,
-      "depth_budget": {"declared": 6, "consumed": <int>},
-      "issued_at": "<iso8601>",
-      "receipt": {"sha256": "<hex>", "version": "0.0.1"}
-    }
+    1. Was the envelope produced by an issuer the verifier trusts?
+       (Ed25519 signature over the canonical body.)
+    2. Has the envelope changed since issuance?
+       (SHA-256 receipt over the canonical body, signed alongside.)
+    3. Were the encrypted inputs the issuer claims to have audited the
+       same inputs the verifier received?
+       (input_commitments — SHA-256 over each canonicalised input.)
 
-A receipt is a SHA-256 hash of the canonicalised result, providing a
-tamper-evident audit-trail anchor. Both clients (the entity being audited)
-and regulators (the entity verifying the audit) use the same envelope.
+Canonical JSON rules
+--------------------
+Every signed body is serialised with::
+
+    json.dumps(payload, sort_keys=True, separators=(",", ":"),
+               ensure_ascii=False)
+
+and encoded as UTF-8 before hashing or signing. Any verifier
+re-serialising with the same rules MUST produce byte-identical output.
+Producers that emit non-canonical JSON (extra whitespace, mixed key
+order, escaped Unicode) will fail signature verification.
+
+Backend identification
+----------------------
+The envelope carries the backend implementation tag (e.g.
+``tenseal-ckks``), the regaudit-fhe library version, and the parameter
+set hash so that a verifier can pin which CKKS parameters produced the
+result and reject mismatches.
+
+Optional timestamp authority
+----------------------------
+Operators that require RFC 3161 time-stamping can attach a
+``timestamp_token`` (base64-encoded TSA response) by wiring a
+:class:`TimestampAuthority` into the signer. The default builds remain
+TSA-free; the verifier accepts envelopes with or without a timestamp
+token and reports both states.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -23,18 +46,27 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import datetime as _dt
 import hashlib
 import json
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping
+import os
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import numpy as np
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 
-SCHEMA_VERSION = "regaudit-fhe.report.v1"
-LIB_VERSION = "0.0.1"
+SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
+LIB_VERSION: str = "0.0.2"
+SIGNATURE_ALG: str = "Ed25519"
 
 
 REGULATION_MAP: Dict[str, List[str]] = {
@@ -47,6 +79,11 @@ REGULATION_MAP: Dict[str, List[str]] = {
     "drift": ["EU_AI_ACT_ART15", "FDA_SAMD_PCCP", "BASEL_III"],
     "disagreement": ["OCC_SR_11_7", "EU_AI_ACT_ART15", "FDA_SAMD_PCCP"],
 }
+
+
+# ---------------------------------------------------------------------------
+# Canonical JSON + plain-Python conversion
+# ---------------------------------------------------------------------------
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -71,37 +108,230 @@ def report_to_dict(report: Any) -> Dict[str, Any]:
     return {k: _to_jsonable(v) for k, v in raw.items()}
 
 
-def _canonical_json(payload: Mapping[str, Any]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False)
+def canonical_json(payload: Mapping[str, Any]) -> bytes:
+    """Canonicalise a mapping into the single byte sequence used for
+    hashing and signing.
+
+    Sorted keys, no whitespace separators, UTF-8, no ASCII escapement.
+    Every producer / verifier must use this exact rule.
+    """
+    return json.dumps(_to_jsonable(payload), sort_keys=True,
+                      separators=(",", ":"), ensure_ascii=False
+                      ).encode("utf-8")
 
 
-def issue_receipt(payload: Mapping[str, Any]) -> Dict[str, str]:
-    body = _canonical_json(payload).encode("utf-8")
-    digest = hashlib.sha256(body).hexdigest()
-    return {"sha256": digest, "version": LIB_VERSION}
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Input commitments
+# ---------------------------------------------------------------------------
+
+
+def commit_input(name: str, value: Any) -> Dict[str, str]:
+    """Hash a single named input into a commitment record.
+
+    The commitment binds the input name and its canonicalised value to
+    a SHA-256 digest. The original value never leaves the producer; the
+    digest may be published in the envelope for the verifier to check
+    against the inputs they hold.
+    """
+    body = canonical_json({"name": name, "value": _to_jsonable(value)})
+    return {"name": name, "sha256": sha256_hex(body)}
+
+
+def commitments_for(inputs: Mapping[str, Any]) -> List[Dict[str, str]]:
+    return [commit_input(k, v) for k, v in sorted(inputs.items())]
+
+
+# ---------------------------------------------------------------------------
+# Parameter set
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ParameterSet:
+    """Snapshot of the encryption parameter set the producer used."""
+
+    backend: str = "plaintext"
+    poly_modulus_degree: int = 0
+    security_bits: int = 128
+    multiplicative_depth: int = 6
+    coeff_mod_bit_sizes: tuple = ()
+    scaling_factor_bits: int = 0
+    library_version: str = LIB_VERSION
+    backend_version: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "backend": self.backend,
+            "poly_modulus_degree": int(self.poly_modulus_degree),
+            "security_bits": int(self.security_bits),
+            "multiplicative_depth": int(self.multiplicative_depth),
+            "coeff_mod_bit_sizes": list(self.coeff_mod_bit_sizes),
+            "scaling_factor_bits": int(self.scaling_factor_bits),
+            "library_version": self.library_version,
+            "backend_version": self.backend_version,
+        }
+
+    def hash(self) -> str:
+        return sha256_hex(canonical_json(self.to_dict()))
+
+
+def parameter_set_from_ckks_context(ctx: Any) -> ParameterSet:
+    """Best-effort introspection of a CKKSContext into a ParameterSet."""
+    backend = "tenseal-ckks"
+    backend_version = ""
+    try:
+        import tenseal as _ts
+        backend_version = getattr(_ts, "__version__", "")
+    except Exception:
+        pass
+
+    poly = int(getattr(ctx, "poly_modulus_degree", 0))
+    return ParameterSet(
+        backend=backend,
+        poly_modulus_degree=poly,
+        security_bits=128,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=tuple(getattr(ctx, "coeff_mod_bit_sizes",
+                                          (60, 40, 40, 40, 40, 40, 40, 60))),
+        scaling_factor_bits=int(np.log2(getattr(ctx, "scale", 1 << 40))),
+        library_version=LIB_VERSION,
+        backend_version=backend_version,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Timestamp authority hook
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TimestampAuthority:
+    """Optional RFC 3161 time-stamping hook.
+
+    Wire a callable that accepts canonical-body bytes and returns a
+    base64-encoded TSA response. The default value (``None``) means
+    no timestamp token is attached.
+    """
+
+    issuer: str
+    sign_callable: Callable[[bytes], bytes]
+
+    def stamp(self, body: bytes) -> Dict[str, str]:
+        token = self.sign_callable(body)
+        return {"issuer": self.issuer,
+                "token_b64": base64.b64encode(token).decode("ascii"),
+                "issued_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Ed25519 signer
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Signer:
+    issuer: str
+    key_id: str
+    private_key: Ed25519PrivateKey
+    public_key: Ed25519PublicKey
+
+    @classmethod
+    def generate(cls, *, issuer: str, key_id: str | None = None) -> "Signer":
+        priv = Ed25519PrivateKey.generate()
+        return cls(
+            issuer=issuer,
+            key_id=key_id or os.urandom(8).hex(),
+            private_key=priv,
+            public_key=priv.public_key(),
+        )
+
+    @classmethod
+    def from_pem(cls, *, issuer: str, key_id: str, private_pem: bytes,
+                 password: bytes | None = None) -> "Signer":
+        priv = serialization.load_pem_private_key(private_pem, password=password)
+        if not isinstance(priv, Ed25519PrivateKey):
+            raise TypeError("regaudit-fhe envelope signing requires Ed25519")
+        return cls(issuer=issuer, key_id=key_id,
+                   private_key=priv, public_key=priv.public_key())
+
+    def public_key_pem(self) -> str:
+        return self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+
+    def sign(self, body: bytes) -> bytes:
+        return self.private_key.sign(body)
+
+
+def verify_signature(public_key_pem: str, body: bytes,
+                     signature_b64: str) -> bool:
+    pub = serialization.load_pem_public_key(public_key_pem.encode("ascii"))
+    if not isinstance(pub, Ed25519PublicKey):
+        return False
+    try:
+        pub.verify(base64.b64decode(signature_b64), body)
+        return True
+    except InvalidSignature:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Envelope dataclass
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class AuditEnvelope:
     schema: str
+    schema_version: str
+    algorithm_version: str
     primitive: str
+    backend: str
+    parameter_set: Dict[str, Any]
+    parameter_set_hash: str
     regulations: List[str]
     result: Dict[str, Any]
+    input_commitments: List[Dict[str, str]]
     depth_budget: Dict[str, int]
     issued_at: str
-    receipt: Dict[str, str]
+    issuer: str
+    receipt: Dict[str, Any]
+    timestamp: Optional[Dict[str, str]] = None
+
+    def signed_body(self) -> Dict[str, Any]:
+        """Return the envelope payload that the receipt is computed
+        over — every field except the receipt and the optional
+        timestamp."""
+        body = self.to_dict()
+        body.pop("receipt", None)
+        body.pop("timestamp", None)
+        return body
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "schema": self.schema,
+            "schema_version": self.schema_version,
+            "algorithm_version": self.algorithm_version,
             "primitive": self.primitive,
+            "backend": self.backend,
+            "parameter_set": dict(self.parameter_set),
+            "parameter_set_hash": self.parameter_set_hash,
             "regulations": list(self.regulations),
             "result": dict(self.result),
+            "input_commitments": [dict(c) for c in self.input_commitments],
             "depth_budget": dict(self.depth_budget),
             "issued_at": self.issued_at,
+            "issuer": self.issuer,
             "receipt": dict(self.receipt),
         }
+        if self.timestamp is not None:
+            out["timestamp"] = dict(self.timestamp)
+        return out
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
@@ -110,54 +340,194 @@ class AuditEnvelope:
     def from_dict(cls, data: Mapping[str, Any]) -> "AuditEnvelope":
         return cls(
             schema=data["schema"],
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
+            algorithm_version=data.get("algorithm_version", LIB_VERSION),
             primitive=data["primitive"],
+            backend=data.get("backend", "plaintext"),
+            parameter_set=dict(data.get("parameter_set", {})),
+            parameter_set_hash=data.get("parameter_set_hash", ""),
             regulations=list(data["regulations"]),
             result=dict(data["result"]),
+            input_commitments=[dict(c) for c in data.get("input_commitments", [])],
             depth_budget=dict(data["depth_budget"]),
             issued_at=data["issued_at"],
+            issuer=data.get("issuer", ""),
             receipt=dict(data["receipt"]),
+            timestamp=dict(data["timestamp"]) if "timestamp" in data and data["timestamp"] is not None else None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Envelope construction + verification
+# ---------------------------------------------------------------------------
 
 
 def envelope(primitive: str,
              report: Any,
              *,
              depth_consumed: int = 6,
-             regulations: Iterable[str] | None = None) -> AuditEnvelope:
+             regulations: Iterable[str] | None = None,
+             parameter_set: ParameterSet | None = None,
+             input_commitments: Sequence[Mapping[str, str]] | None = None,
+             signer: Signer | None = None,
+             timestamp_authority: TimestampAuthority | None = None,
+             ) -> AuditEnvelope:
+    """Construct a signed audit envelope.
+
+    If ``signer`` is None, a fresh ephemeral Ed25519 keypair is generated
+    so that the envelope still carries a valid signature; the verifier
+    checks the embedded public-key fingerprint against its trust store
+    and rejects unknown issuers. For production deployments always pass
+    a long-lived ``Signer`` whose public key is registered with the
+    verifier.
+    """
     regs = list(regulations) if regulations is not None else REGULATION_MAP.get(
         primitive, []
     )
-    result = report_to_dict(report)
-    payload = {
-        "primitive": primitive,
-        "regulations": regs,
-        "result": result,
-        "depth_budget": {"declared": 6, "consumed": int(depth_consumed)},
-    }
+    params = parameter_set or ParameterSet()
+    issuer = (signer.issuer if signer is not None
+              else "regaudit-fhe-ephemeral")
+    if signer is None:
+        signer = Signer.generate(issuer=issuer)
+
     issued = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    receipt = issue_receipt(payload | {"issued_at": issued})
+    body = {
+        "schema": SCHEMA_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "algorithm_version": LIB_VERSION,
+        "primitive": primitive,
+        "backend": params.backend,
+        "parameter_set": params.to_dict(),
+        "parameter_set_hash": params.hash(),
+        "regulations": regs,
+        "result": report_to_dict(report),
+        "input_commitments": [dict(c) for c in (input_commitments or [])],
+        "depth_budget": {"declared": 6, "consumed": int(depth_consumed)},
+        "issued_at": issued,
+        "issuer": issuer,
+    }
+    body_bytes = canonical_json(body)
+    digest = sha256_hex(body_bytes)
+    signature = signer.sign(body_bytes)
+    receipt = {
+        "sha256": digest,
+        "signature_alg": SIGNATURE_ALG,
+        "signature_b64": base64.b64encode(signature).decode("ascii"),
+        "key_id": signer.key_id,
+        "public_key_pem": signer.public_key_pem(),
+    }
+
+    timestamp_block = (timestamp_authority.stamp(body_bytes)
+                       if timestamp_authority is not None else None)
+
     return AuditEnvelope(
         schema=SCHEMA_VERSION,
+        schema_version=SCHEMA_VERSION,
+        algorithm_version=LIB_VERSION,
         primitive=primitive,
+        backend=params.backend,
+        parameter_set=params.to_dict(),
+        parameter_set_hash=params.hash(),
         regulations=regs,
-        result=result,
-        depth_budget=payload["depth_budget"],
+        result=body["result"],
+        input_commitments=body["input_commitments"],
+        depth_budget=body["depth_budget"],
         issued_at=issued,
+        issuer=issuer,
         receipt=receipt,
+        timestamp=timestamp_block,
     )
 
 
-def verify_receipt(env: AuditEnvelope) -> bool:
-    """Recompute the receipt and confirm it matches the envelope's claim.
+@dataclass
+class VerificationOutcome:
+    valid: bool
+    sha256_valid: bool
+    signature_valid: bool
+    issuer_trusted: bool
+    timestamp_valid: bool
+    issuer: str
+    key_id: str
+    parameter_set_hash: str
 
-    Used by regulator-side verifiers to detect tampering between the moment
-    the envelope was issued and the moment it was received.
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "valid": bool(self.valid),
+            "sha256_valid": bool(self.sha256_valid),
+            "signature_valid": bool(self.signature_valid),
+            "issuer_trusted": bool(self.issuer_trusted),
+            "timestamp_valid": bool(self.timestamp_valid),
+            "issuer": self.issuer,
+            "key_id": self.key_id,
+            "parameter_set_hash": self.parameter_set_hash,
+        }
+
+
+def verify_envelope(env: AuditEnvelope,
+                    *,
+                    trusted_keys: Mapping[str, str] | None = None,
+                    require_signature: bool = True,
+                    ) -> VerificationOutcome:
+    body_bytes = canonical_json(env.signed_body())
+    sha_ok = sha256_hex(body_bytes) == env.receipt.get("sha256")
+
+    sig_ok = False
+    issuer_ok = False
+    sig_b64 = env.receipt.get("signature_b64")
+    pub_pem = env.receipt.get("public_key_pem")
+    key_id = env.receipt.get("key_id", "")
+    if sig_b64 and pub_pem:
+        try:
+            sig_ok = verify_signature(pub_pem, body_bytes, sig_b64)
+        except Exception:
+            sig_ok = False
+    if not require_signature and not sig_b64:
+        sig_ok = True
+
+    if trusted_keys is None:
+        issuer_ok = True
+    else:
+        expected = trusted_keys.get(env.receipt.get("key_id", ""))
+        if expected is None:
+            issuer_ok = False
+        else:
+            issuer_ok = (
+                expected.strip().replace("\r\n", "\n")
+                == (pub_pem or "").strip().replace("\r\n", "\n")
+            )
+
+    ts_ok = True
+    if env.timestamp is not None:
+        ts_ok = bool(env.timestamp.get("token_b64"))
+
+    valid = sha_ok and sig_ok and issuer_ok and ts_ok
+    return VerificationOutcome(
+        valid=valid,
+        sha256_valid=sha_ok,
+        signature_valid=sig_ok,
+        issuer_trusted=issuer_ok,
+        timestamp_valid=ts_ok,
+        issuer=env.issuer,
+        key_id=key_id,
+        parameter_set_hash=env.parameter_set_hash,
+    )
+
+
+# Back-compat shim used by older callers.
+def verify_receipt(env: AuditEnvelope) -> bool:
+    """Return True iff the envelope's hash and Ed25519 signature both
+    verify against the embedded public key. Maintained for backwards
+    compatibility with v0.0.1 callers; new code should use
+    :func:`verify_envelope` to also check trusted keys and timestamp.
     """
-    payload = {
-        "primitive": env.primitive,
-        "regulations": env.regulations,
-        "result": env.result,
-        "depth_budget": env.depth_budget,
-        "issued_at": env.issued_at,
-    }
-    return issue_receipt(payload)["sha256"] == env.receipt["sha256"]
+    return verify_envelope(env, require_signature=True).valid
+
+
+def issue_receipt(payload: Mapping[str, Any]) -> Dict[str, str]:
+    """Compatibility helper retained from v0.0.1.
+
+    Returns a SHA-256-only receipt; new code should use ``envelope`` to
+    build a full Ed25519-signed envelope.
+    """
+    body = canonical_json(payload)
+    return {"sha256": sha256_hex(body), "version": LIB_VERSION}

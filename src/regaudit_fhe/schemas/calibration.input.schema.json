@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/calibration.input.json",
+  "title": "Conformal calibration audit input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scores", "quantiles"],
+  "properties": {
+    "scores":    {"type": "array", "minItems": 1, "items": {"type": "number"}},
+    "quantiles": {"type": "array", "minItems": 1, "items": {"type": "number"}}
+  }
+}

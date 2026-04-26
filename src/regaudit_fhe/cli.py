@@ -26,6 +26,8 @@ import numpy as np
 from . import (audit_calibration, audit_concordance, audit_disagreement,
                audit_drift, audit_fairness, audit_provenance)
 from .reports import AuditEnvelope, envelope, verify_receipt
+from .schemas import (SchemaError, list_schemas, load_schema,
+                       validate_envelope, validate_input)
 
 
 PRIMITIVES = {
@@ -71,6 +73,7 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
 
 
 def _audit_dispatch(primitive: str, payload: Dict[str, Any]) -> AuditEnvelope:
+    validate_input(primitive, payload)
     if primitive == "fairness":
         report = audit_fairness(
             np.asarray(payload["y_true"], dtype=float),
@@ -123,12 +126,33 @@ def _cmd_audit(args: argparse.Namespace) -> int:
         print(json.dumps(SCHEMAS[args.primitive], indent=2))
         return 0
     payload = json.loads(Path(args.input).read_text())
-    env = _audit_dispatch(args.primitive, payload)
+    try:
+        env = _audit_dispatch(args.primitive, payload)
+    except SchemaError as exc:
+        sys.stderr.write(f"input rejected: {exc}\n")
+        return 2
     out = env.to_json()
     if args.output:
         Path(args.output).write_text(out + "\n")
     else:
         sys.stdout.write(out + "\n")
+    return 0
+
+
+def _cmd_schema(args: argparse.Namespace) -> int:
+    if args.list:
+        for name in list_schemas():
+            print(name)
+        return 0
+    if not args.name:
+        sys.stderr.write("regaudit-fhe schema: --list or NAME required\n")
+        return 2
+    try:
+        schema = load_schema(args.name)
+    except KeyError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    print(json.dumps(schema, indent=2))
     return 0
 
 
@@ -182,6 +206,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", "-p", type=int, default=8080)
     serve.set_defaults(func=_cmd_serve)
+
+    schema = sub.add_parser("schema",
+                            help="Dump a bundled JSON Schema by name.")
+    schema.add_argument("name", nargs="?",
+                        help="Schema name (e.g. fairness.input, envelope).")
+    schema.add_argument("--list", action="store_true",
+                        help="List all bundled schema names.")
+    schema.set_defaults(func=_cmd_schema)
     return p
 
 

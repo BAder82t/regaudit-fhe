@@ -17,6 +17,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
+from ._validation import (assert_at_least_one_member, assert_binary,
+                          assert_in_range, assert_nonempty, assert_same_length)
 
 
 @dataclass
@@ -41,6 +43,16 @@ def fairness_oracle(y_true: np.ndarray,
                     group_b: np.ndarray,
                     threshold: float = 0.1) -> FairnessReport:
     """Plaintext reference. Computes three disparity metrics between two groups."""
+    assert_nonempty("y_true", y_true)
+    y_true = assert_binary("y_true", y_true)
+    y_pred = assert_binary("y_pred", y_pred)
+    group_a = assert_binary("group_a", group_a)
+    group_b = assert_binary("group_b", group_b)
+    assert_same_length(("y_true", y_true), ("y_pred", y_pred),
+                       ("group_a", group_a), ("group_b", group_b))
+    assert_at_least_one_member("group_a", group_a)
+    assert_at_least_one_member("group_b", group_b)
+    assert_in_range("threshold", threshold, low=0.0, high=1.0)
     n_a = max(float(np.sum(group_a)), 1.0)
     n_b = max(float(np.sum(group_b)), 1.0)
     tp_a, fp_a, fn_a, _ = _confusion_oracle(y_true, y_pred, group_a)
@@ -76,6 +88,16 @@ def fairness_circuit_d6(y_true: np.ndarray,
         - sign_poly_d3 threshold check: 2 levels.
       Total: 4 levels.
     """
+    assert_nonempty("y_true", y_true)
+    y_true = assert_binary("y_true", y_true)
+    y_pred = assert_binary("y_pred", y_pred)
+    group_a = assert_binary("group_a", group_a)
+    group_b = assert_binary("group_b", group_b)
+    assert_same_length(("y_true", y_true), ("y_pred", y_pred),
+                       ("group_a", group_a), ("group_b", group_b))
+    assert_at_least_one_member("group_a", group_a)
+    assert_at_least_one_member("group_b", group_b)
+    assert_in_range("threshold", threshold, low=0.0, high=1.0)
     y_t = SlotVec.encrypt(pad_pow2(y_true))
     y_p = SlotVec.encrypt(pad_pow2(y_pred))
     g_a = pad_pow2(group_a)

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
+from ._validation import (assert_binary, assert_finite, assert_nonempty,
+                          assert_same_length)
 
 
 @dataclass
@@ -30,6 +32,10 @@ def c_index_oracle(risk: np.ndarray,
                    time: np.ndarray,
                    event: np.ndarray) -> CIndexReport:
     """Plaintext Harrell C-index."""
+    risk = assert_finite("risk", assert_nonempty("risk", risk))
+    time = assert_finite("time", assert_nonempty("time", time))
+    event = assert_binary("event", event)
+    assert_same_length(("risk", risk), ("time", time), ("event", event))
     n = len(risk)
     concordant = 0.0
     comparable = 0.0
@@ -67,6 +73,10 @@ def c_index_circuit_d6(risk: np.ndarray,
         - cross-slot sum: 4 levels.
       Total: 4 levels.
     """
+    risk = assert_finite("risk", assert_nonempty("risk", risk))
+    time = assert_finite("time", assert_nonempty("time", time))
+    event = assert_binary("event", event)
+    assert_same_length(("risk", risk), ("time", time), ("event", event))
     n_pad = pad_pow2(risk).shape[0]
     risk_ct = SlotVec.encrypt(pad_pow2(risk))
     time_ct = SlotVec.encrypt(pad_pow2(time))

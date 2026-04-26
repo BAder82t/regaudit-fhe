@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/concordance.input.json",
+  "title": "Survival concordance audit input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["risk", "time", "event"],
+  "properties": {
+    "risk":  {"type": "array", "minItems": 1, "items": {"type": "number"}},
+    "time":  {"type": "array", "minItems": 1, "items": {"type": "number", "minimum": 0}},
+    "event": {"type": "array", "minItems": 1, "items": {"type": "number", "enum": [0, 1, 0.0, 1.0]}}
+  }
+}

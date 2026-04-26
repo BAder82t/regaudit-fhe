@@ -18,6 +18,7 @@ from typing import List
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
+from ._validation import assert_finite, assert_nonempty, assert_same_length
 
 
 @dataclass
@@ -53,6 +54,15 @@ def topk_provenance_oracle(attributions: np.ndarray,
                            n_buckets: int,
                            k: int) -> ProvenanceReport:
     """Plaintext reference."""
+    attributions = assert_finite("attributions",
+                                 assert_nonempty("attributions", attributions))
+    row_ids = np.asarray(assert_nonempty("row_ids", row_ids))
+    assert_same_length(("attributions", attributions), ("row_ids", row_ids))
+    if n_buckets < 1:
+        raise ValueError(f"n_buckets must be ≥ 1; got {n_buckets}")
+    if k < 1 or k > n_buckets:
+        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, "
+                         f"n_buckets={n_buckets}")
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     aggregates = np.zeros(n_buckets, dtype=np.float64)
     for b in range(n_buckets):
@@ -77,6 +87,15 @@ def topk_provenance_circuit_d6(attributions: np.ndarray,
           plaintext threshold: 2 levels.
       Total: 3 levels.
     """
+    attributions = assert_finite("attributions",
+                                 assert_nonempty("attributions", attributions))
+    row_ids = np.asarray(assert_nonempty("row_ids", row_ids))
+    assert_same_length(("attributions", attributions), ("row_ids", row_ids))
+    if n_buckets < 1:
+        raise ValueError(f"n_buckets must be ≥ 1; got {n_buckets}")
+    if k < 1 or k > n_buckets:
+        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, "
+                         f"n_buckets={n_buckets}")
     n_slots = max(pad_pow2(attributions).shape[0], n_buckets)
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     masks = bucket_masks(bucket_ids, n_buckets, n_slots)

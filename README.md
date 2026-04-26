@@ -51,14 +51,23 @@ recomputes the receipt to detect tampering between issuance and review.
 
 ## The six primitives
 
-| Module        | API                       | Depth | Use case                                                                 |
+| Module        | API                       | Depth | Use case (technical evidence supporting…)                                |
 | ------------- | ------------------------- | ----- | ------------------------------------------------------------------------ |
-| `egf_imss`    | `audit_fairness`          | 4     | NYC LL144, EU AI Act §10/§15, Colorado AI Act, CFPB.                     |
-| `etk_fpa_hbc` | `audit_provenance`        | 3     | EU AI Act §10, 21 CFR Part 11, GDPR §22, HIPAA.                          |
-| `esc_cia`     | `audit_concordance`       | 4     | FDA SaMD oncology PCCP, EU AI Act §15, EMA guidance.                     |
-| `ecp_qssp`    | `audit_calibration`       | 3     | FDA SaMD UQ, EU AI Act §15, ISO/IEC 23053, UNECE WP.29.                  |
-| `ew1_cdsf`    | `audit_drift`             | 3     | EU AI Act §15, FDA SaMD PCCP, Basel III.                                 |
-| `ecmd_jps`    | `audit_disagreement`      | 5     | OCC SR 11-7, EU AI Act §15, FDA SaMD PCCP.                               |
+| `egf_imss`    | `audit_fairness`          | 4     | NYC LL144, EU AI Act §10/§15, Colorado AI Act, CFPB workflows.           |
+| `etk_fpa_hbc` | `audit_provenance`        | 3     | EU AI Act §10, 21 CFR Part 11, GDPR §22, HIPAA workflows.                |
+| `esc_cia`     | `audit_concordance`       | 4     | FDA SaMD oncology PCCP, EU AI Act §15, EMA workflows.                    |
+| `ecp_qssp`    | `audit_calibration`       | 3     | FDA SaMD UQ, EU AI Act §15, ISO/IEC 23053, UNECE WP.29 workflows.        |
+| `ew1_cdsf`    | `audit_drift`             | 3     | EU AI Act §15, FDA SaMD PCCP, Basel III workflows.                       |
+| `ecmd_jps`    | `audit_disagreement`      | 5     | OCC SR 11-7, EU AI Act §15, FDA SaMD PCCP workflows.                     |
+
+> **Compliance scope and disclaimer.** `regaudit-fhe` produces
+> *technical evidence* — encrypted scalars, signed envelopes,
+> parameter-set hashes, depth-budget attestations — that may support
+> compliance workflows in the jurisdictions above. It does **not**
+> constitute legal compliance, conformity assessment, regulatory
+> acceptance, or a recognised audit. Read [COMPLIANCE.md](COMPLIANCE.md)
+> for the binding scope statement and the
+> "what-it-does-NOT-prove" mapping per regulation.
 
 Each primitive's depth budget — the number of multiplicative levels it
 consumes inside the d=6 CKKS circuit — is shown above. All six fit
@@ -119,6 +128,14 @@ print(envelope.to_json())                     # ship this to the regulator
 
 assert rf.verify_receipt(envelope) is True    # regulator-side check
 ```
+
+> **The HTTP server is NOT a privacy boundary by itself.** The default
+> execution path is plaintext; the server runs in-process. Encrypted
+> execution requires the `[fhe]` extra AND key custody held off-host.
+> Read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
+> [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing publicly.
+> Without the closed-source companion product, the server cannot mint
+> regulator-trusted envelopes.
 
 ### Same flow, command line
 
@@ -188,19 +205,98 @@ Run any of them after `pip install -e .[dev]`.
 ```
 src/regaudit_fhe/      depth-tracked plaintext model + 6 primitives + reports + CLI
 docs/specs/            per-primitive technical specifications
-tests/                 pytest unit + integration tests
+docs/THREAT_MODEL.md   roles, key custody, public surface per primitive
+schemas/               JSON Schemas (Draft 2020-12) for every input, output, and the envelope
+tests/                 pytest unit, integration, edge-case, property-based, schema, security tests
 examples/              client + regulator end-to-end flows
-benchmarks/            d=6 CKKS wall-clock + memory benchmarks (planned)
+benchmarks/            d=6 CKKS wall-clock + memory benchmarks
+```
+
+## JSON schemas
+
+Every primitive input, primitive output, and the audit envelope itself
+ships with a Draft-2020-12 JSON Schema under [`schemas/`](schemas/).
+Auditors and integrators can pin specific schema versions and reject
+payloads that do not conform.
+
+```bash
+regaudit-fhe schema --list
+regaudit-fhe schema fairness.input
+regaudit-fhe schema envelope
+```
+
+The CLI and HTTP server validate every request body against the
+matching schema before invoking the audit primitive; failures return
+HTTP 422 / CLI exit-code 2 with a structured pointer to the offending
+field. Programmatic access:
+
+```python
+import regaudit_fhe as rf
+rf.list_schemas()                      # all 13 names
+rf.load_schema("fairness.input")       # raw schema dict
+rf.validate_input("fairness", payload) # raises rf.SchemaError on bad input
+rf.validate_envelope(env_dict)         # check a regulator-side envelope
 ```
 
 ---
 
-## Status
+## Real CKKS benchmarks
 
-`regaudit-fhe` is at **v0.0.1**: the full plaintext model and audit
-envelope are in place; the OpenFHE backend (`[fhe]` extra) and a
-benchmark harness against OpenFHE / Concrete-ML at `N = 2^15` are the
-next milestones.
+The `[fhe]` extra ships a real TenSEAL CKKS backend; its measurements
+are reproduced from `benchmarks/results/SUMMARY.md` (machine-readable
+JSON in `benchmarks/results/bench_fhe_<N>.json`).
 
-Contributions welcome under AGPL-3.0. Commercial licensing inquiries:
-**b@vaultbytes.com**.
+| Primitive    | N    | Slots  | Depth obs/decl | Rotations | ct×ct | ct×pt | Runtime | RAM    | Max abs err | Threshold flip |
+|--------------|-----:|-------:|----------------|----------:|------:|------:|--------:|-------:|-------------|----------------|
+| fairness     | 2^14 |  8 192 | 1/4            | 108       |   0   |   18  | 0.28 s  |  878 MB | 4.8 × 10⁻⁷ | 0.00% |
+| provenance   | 2^14 |  8 192 | 1/3            | 288       |   0   |   48  | 0.71 s  |  885 MB | 7.9 × 10⁻⁶ | 0.00% |
+| concordance  | 2^14 |  8 192 | 4/4            |   0       |   0   |    0  | 0.00 s  |  887 MB | 0          | 0.00% |
+| calibration  | 2^14 |  8 192 | 0/3            |   0       |   0   |    0  | 0.01 s  |  890 MB | 0          | 0.00% |
+| drift        | 2^14 |  8 192 | 2/2            |  36       |   3   |    6  | 0.18 s  |  968 MB | 2.3 × 10⁻⁶ | 0.00% |
+| disagreement | 2^14 |  8 192 | 3/5            |   0       |  36   |    0  | 0.16 s  |  977 MB | 1.1 × 10⁻⁸ | 0.00% |
+| fairness     | 2^15 | 16 384 | 1/4            | 108       |   0   |   18  | 0.58 s  | 2.7 GB  | 7.2 × 10⁻⁷ | 0.00% |
+| provenance   | 2^15 | 16 384 | 1/3            | 288       |   0   |   48  | 1.52 s  | 2.7 GB  | 1.9 × 10⁻⁵ | 0.00% |
+| drift        | 2^15 | 16 384 | 2/2            |  36       |   3   |    6  | 0.39 s  | 2.8 GB  | 1.1 × 10⁻⁵ | 0.00% |
+| disagreement | 2^15 | 16 384 | 3/5            |   0       |  36   |    0  | 0.35 s  | 2.7 GB  | 1.4 × 10⁻⁸ | 0.00% |
+
+Run yourself:
+
+```bash
+pip install regaudit-fhe[fhe]
+python benchmarks/bench_fhe.py --rings 14 15 --reps 3
+```
+
+Add `--rings 16` for `N = 2^16` (slower; uses several GB of RAM).
+
+The "Threshold flip" column is the rate at which CKKS noise causes the
+encrypted circuit to disagree with the plaintext circuit on a boolean
+breach decision over 10–20 trials with inputs sampled near the breach
+boundary. Zero flips across both rings means CKKS noise does not
+change a regulatory threshold decision at the audit precision targets.
+
+## Maturity and status
+
+> **Description today:** *Depth-tracked regulatory audit primitives
+> for future FHE-CKKS execution.*
+> **Description after the OpenFHE backend lands:** *FHE-CKKS
+> regulatory audit primitives for privacy-preserving AI system audits.*
+
+`regaudit-fhe` v0.0.1 ships:
+
+- the plaintext SlotVec model with strict depth-budget enforcement,
+- a TenSEAL CKKS backend that mirrors the SlotVec algebra and passes
+  end-to-end ciphertext / plaintext equivalence tests,
+- the Ed25519-signed audit envelope with canonical-JSON rules,
+  parameter-set hashing, and input commitments,
+- JSON Schemas for every input, output, and the envelope itself,
+- the hardened HTTP audit server with bearer-token auth, scopes, body-
+  size limit, rate limiting, structured logs, and CORS controls,
+- supply-chain controls: Trusted-Publisher PyPI release, Sigstore
+  attestation, CycloneDX SBOM, `pip-audit`, weekly Dependabot.
+
+The OpenFHE production backend at `N = 2^15`, calibrated polynomial
+packs per vertical, KMS-backed signing key chains, and regulator-
+portal connectors live in the closed-source companion product. Contact
+**b@vaultbytes.com** for commercial licensing.
+
+Contributions are not accepted — see [CONTRIBUTING.md](CONTRIBUTING.md).

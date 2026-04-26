@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/schemas/v1/provenance.input.json",
+  "title": "Top-K provenance audit input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["attributions", "row_ids", "n_buckets", "k"],
+  "properties": {
+    "attributions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "number"},
+      "description": "Per-row influence/attribution magnitudes."
+    },
+    "row_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "integer", "minimum": 0},
+      "description": "Per-row training-data identifiers."
+    },
+    "n_buckets": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of provenance buckets."
+    },
+    "k": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Top-K bucket count (must be ≤ n_buckets)."
+    }
+  }
+}
