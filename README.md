@@ -132,11 +132,12 @@ assert rf.verify_receipt(envelope) is True    # regulator-side check
 
 > **The HTTP server is NOT a privacy boundary by itself.** The default
 > execution path is plaintext; the server runs in-process. Encrypted
-> execution requires the `[fhe]` extra AND key custody held off-host.
-> Read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
-> [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing publicly.
-> Without the closed-source companion product, the server cannot mint
-> regulator-trusted envelopes.
+> execution requires the `[fhe]` extra AND CKKS secret-key custody
+> held off-host. Issuer authenticity is whatever Ed25519 key you
+> supply; verifiers decide which `key_id` to trust. Read
+> [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
+> [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing
+> publicly.
 
 ### Same flow, command line
 
@@ -281,16 +282,13 @@ change a regulatory threshold decision at the audit precision targets.
 
 ## Maturity and status
 
-> **Description today:** *Depth-tracked regulatory audit primitives
-> for future FHE-CKKS execution.*
-> **Description once the production OpenFHE / Lattigo backend ships
-> (closed-source companion product):** *FHE-CKKS regulatory audit
-> primitives for privacy-preserving AI system audits.*
+> **Description:** *Depth-tracked regulatory audit primitives for
+> privacy-preserving AI audits.*
 >
-> **Active backend in this open-source repo:** TenSEAL CKKS
-> (`regaudit_fhe.fhe`). There is no OpenFHE backend in this repo;
-> the OpenFHE-specific build is part of the closed-source platform
-> roadmap.
+> **Active backend:** TenSEAL CKKS (`regaudit_fhe.fhe`). OpenFHE is
+> not currently included; see
+> [docs/roadmap/openfhe_backend.md](docs/roadmap/openfhe_backend.md)
+> for the design note.
 
 The current release ships:
 
@@ -304,10 +302,5 @@ The current release ships:
   size limit, rate limiting, structured logs, and CORS controls,
 - supply-chain controls: Trusted-Publisher PyPI release, Sigstore
   attestation, CycloneDX SBOM, `pip-audit`, weekly Dependabot.
-
-The OpenFHE production backend at `N = 2^15`, calibrated polynomial
-packs per vertical, KMS-backed signing key chains, and regulator-
-portal connectors live in the closed-source companion product. Contact
-**b@vaultbytes.com** for commercial licensing.
 
 Contributions are not accepted — see [CONTRIBUTING.md](CONTRIBUTING.md).

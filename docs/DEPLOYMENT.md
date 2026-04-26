@@ -7,10 +7,10 @@ its threat model, see [README.md](../README.md), [LICENSING.md](../LICENSING.md)
 
 > **PRIVACY-BOUNDARY WARNING.** The HTTP server is a thin reference
 > deployment. By itself it is **not a privacy boundary**. Production
-> regulator-trusted deployments require the closed-source companion
-> product (KMS-backed signing, audit-trail database, regulator-portal
-> connectors). Read [docs/THREAT_MODEL.md](THREAT_MODEL.md) before
-> exposing the server to untrusted clients.
+> deployments must hold the CKKS secret key off-host (KMS / HSM),
+> terminate TLS at the ingress, and apply the controls listed below.
+> Read [docs/THREAT_MODEL.md](THREAT_MODEL.md) before exposing the
+> server to untrusted clients.
 
 ---
 
@@ -107,8 +107,9 @@ synchronise across replicas. Two production patterns work:
    `REGAUDIT_FHE_RATE_LIMIT_PER_MIN` to a generous per-replica cap so
    a single misbehaving client cannot saturate one replica.
 
-If you require strict global limits, the closed-source VaultBytes
-Audit Platform ships a Redis-backed limiter; contact b@vaultbytes.com.
+If you require strict global limits across replicas, swap the
+in-process token bucket for a Redis-backed counter; the
+`TokenBucketRateLimiter` interface is small enough to subclass.
 
 ---
 
@@ -180,8 +181,9 @@ spec:
           limits:   { cpu: "1",    memory: "512Mi" }
 ```
 
-Add a NetworkPolicy that allows ingress only from your API gateway and
-egress only to the closed-source signing / audit-DB sidecar.
+Add a NetworkPolicy that restricts ingress to your API gateway and
+limits egress to the destinations the deployment actually requires
+(KMS, observability, regulator portal — whichever apply).
 
 ---
 
@@ -208,14 +210,12 @@ egress only to the closed-source signing / audit-DB sidecar.
 
 - Encrypt the network payload itself — that is your TLS terminator's
   job.
-- Provide a regulator-trusted audit envelope — the open-source binary
-  signs with whatever Ed25519 key it generates or is given. Regulators
-  who require VaultBytes-backed signing must be on the closed-source
-  product.
-- Hold the CKKS secret key — that key MUST live in a separate KMS
+- Authenticate the issuer for you. The server signs envelopes with
+  whatever Ed25519 key you generate or pass in; the verifying party
+  decides which `key_id` to trust.
+- Hold the CKKS secret key. That key MUST live in a separate KMS
   account / HSM, accessed only by the auditor decryption host.
 - Replace your incident-response or vulnerability-management programme.
 
-For a deployment that closes those gaps, see the closed-source
-companion product `vaultbytes-audit-platform`. Contact
-**b@vaultbytes.com**.
+Each of those gaps is operator-side: TLS, KMS, and runbooks live with
+the deployment, not with this binary.

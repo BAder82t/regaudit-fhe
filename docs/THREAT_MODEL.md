@@ -227,9 +227,9 @@ The library does not defend against:
   parameters BEFORE signing produces an envelope whose
   `parameter_set_hash` will not match the Auditor's pinned list, and
   verification rejects it. A truly malicious Operator that controls
-  the signing key entirely is out of scope — defense is delegated to
-  KMS-backed signing and the closed-source VaultBytes Audit Platform's
-  key-chain rotation.
+  the signing key entirely is out of scope — defense relies on
+  KMS-backed signing keys and key-chain rotation handled at the
+  deployment layer.
 - **Malicious Auditor.** An Auditor who decrypts and then leaks the
   decrypted aggregate is a policy / contract / regulator-discipline
   problem, not a cryptographic problem. The library does not blind
@@ -261,10 +261,10 @@ assumptions:
 | Operator + Subject              | Operator gains nothing extra; Subject already encrypted the inputs and so could just as well decrypt their own data. |
 | **Operator + non-Auditor third party** | **NOT TOLERATED.** Such collusion would imply the third party gained access to ciphertexts with the cooperation of the Operator. The cryptographic protection survives by the IND-CPA property of CKKS — the third party still cannot decrypt without the secret key — but operational compromise (key exfiltration) IS possible and depends on the Operator's host security. |
 
-In production deployments backed by the closed-source VaultBytes Audit
-Platform, the Operator's signing-key holder and the CKKS secret-key
-holder are placed in distinct KMS accounts with logged dual-control
-access to break this last category.
+Production deployments should place the Operator's signing-key
+holder and the CKKS secret-key holder in distinct KMS accounts with
+logged dual-control access; that operator-level control breaks the
+last category.
 
 ---
 

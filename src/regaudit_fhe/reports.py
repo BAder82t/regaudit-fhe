@@ -65,7 +65,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
-LIB_VERSION: str = "0.0.5"
+LIB_VERSION: str = "0.0.6"
 SIGNATURE_ALG: str = "Ed25519"
 
 

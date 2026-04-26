@@ -3,14 +3,10 @@
 > **Status: roadmap, not shipping.** This file documents the
 > integration surface for a future OpenFHE-CKKS backend. It is **not
 > installed by the `[fhe]` extra** — that extra installs **TenSEAL**
-> today. Until this note is replaced by a real implementation, the
-> open-source repository's only encrypted backend is TenSEAL CKKS at
+> today. The repository's only encrypted backend is TenSEAL CKKS at
 > `regaudit_fhe.fhe`.
 
 ## Why a separate OpenFHE build is on the roadmap
-
-OpenFHE is the long-term production target inside the closed-source
-companion product (`vaultbytes-audit-platform`) for three reasons:
 
 1. **Native rotation primitive.** OpenFHE exposes
    `EvalRotate(ct, k)` directly, so the rotation-based prefix-sum and
@@ -21,11 +17,10 @@ companion product (`vaultbytes-audit-platform`) for three reasons:
 2. **Calibrated polynomial libraries.** OpenFHE ships
    minimax-calibrated sign and reciprocal polynomials at higher
    degrees, supporting tighter precision bounds than the textbook
-   degree-3 polynomials we ship in the open-source release.
+   degree-3 polynomials shipped today.
 3. **Bootstrapping support.** Even though the audit primitives are
    designed to run inside the d=6 budget without bootstrapping, an
-   OpenFHE build can support depth-7+ extensions for the
-   regulatory-evidence scenarios the closed-source product covers.
+   OpenFHE build can support depth-7+ extensions if needed.
 
 ## Integration surface (target)
 
@@ -49,16 +44,14 @@ change: the SlotVec algebra is identical.
   `parameter_set.backend` field of the audit envelope will read
   `openfhe-ckks`.
 - We will not add OpenFHE as a hard dependency of the open-source
-  package. It will live behind a separate extra (``[openfhe]``) so the
+  package. It will live behind a separate extra (`[openfhe]`) so the
   baseline install footprint stays small.
-- We will not move OpenFHE into the open-source repo without first
-  shipping a full equivalence-test matrix against the existing TenSEAL
-  backend.
+- We will not move OpenFHE into the repo without first shipping a
+  full equivalence-test matrix against the existing TenSEAL backend.
 
 ## How to follow this work
 
-The OpenFHE-specific build is part of the closed-source companion
-product roadmap. Open-source contributions that wire OpenFHE bindings
-behind a `[openfhe]` extra are not currently accepted (see
-[CONTRIBUTING.md](../../CONTRIBUTING.md)). Commercial inquiries:
-**b@vaultbytes.com**.
+Outside contributions are not accepted — see
+[CONTRIBUTING.md](../../CONTRIBUTING.md). Track the roadmap by
+watching the repository or the `[fhe]` extra contents in the next
+release.

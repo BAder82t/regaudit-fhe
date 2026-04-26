@@ -39,7 +39,7 @@ from .reports import (AuditEnvelope, ParameterSet, REGULATION_MAP, Signer,
                       canonical_json, commit_input, commitments_for,
                       envelope, verify_envelope, verify_receipt)
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 
 audit_fairness = fairness_circuit_d6

@@ -21,14 +21,13 @@ This server is **not a privacy boundary** by itself.
     Inputs are visible to the host process, the operating system, and
     any sidecar with shared memory access.
   - Encrypted execution requires the optional ``[fhe]`` extra AND a
-    deployment that withholds the CKKS secret key from the audit host.
-  - Without the closed-source companion product (KMS-backed signing,
-    audit-trail database, regulator-portal connectors), this binary
-    cannot mint VaultBytes-signed envelopes that regulators recognise.
+    deployment that withholds the CKKS secret key from the audit host
+    (KMS / HSM / dedicated decryptor).
+  - Issuer authenticity is whatever Ed25519 key you supply. Verifiers
+    decide which ``key_id`` to trust.
 
 The server logs the warning on startup and surfaces it in the
-``/readyz`` response. Operators who need a regulator-trusted audit
-boundary should contact b@vaultbytes.com.
+``/readyz`` response.
 
 Optional dependency. Install with::
 
