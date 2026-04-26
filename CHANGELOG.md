@@ -4,10 +4,25 @@ All notable changes to **regaudit-fhe** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.3] - 2026-04-27
+### Removed
+- `src/regaudit_fhe/backends/` (the empty `OpenFHE` skeleton).
+  It was a leftover from earlier scaffolding that contradicted
+  v0.0.2's claim of a working CKKS backend. The real, exercised CKKS
+  backend lives at `regaudit_fhe.fhe` (TenSEAL); the OpenFHE-specific
+  variant is part of the closed-source companion product roadmap, not
+  the open-source repo.
+
+### Changed
+- Documentation and changelog rewording to make the active backend
+  unambiguous: **TenSEAL CKKS today, no OpenFHE in this repo**.
+
 ## [0.0.2] - 2026-04-27
 ### Added
-- Real CKKS encrypted backend (TenSEAL) under the `[fhe]` extra,
-  including end-to-end ciphertext / plaintext equivalence tests.
+- TenSEAL CKKS encrypted backend under the `[fhe]` extra, exposed as
+  `regaudit_fhe.fhe` with end-to-end ciphertext / plaintext
+  equivalence tests. (The misleading `regaudit_fhe.backends.openfhe`
+  skeleton was retired in v0.0.3.)
 - Validated `CKKSParams` parameter set (128-bit security, modulus-chain
   depth, scale stability, rotation-key minimality, precision-loss
   bounds) plus `build_d6_context_from_params`.
@@ -64,8 +79,9 @@ the project follows [Semantic Versioning](https://semver.org/).
 - Command-line interface: `regaudit-fhe audit ...`, `... verify ...`,
   `... serve ...`.
 - Optional HTTP server (`[server]` extra) backed by FastAPI.
-- OpenFHE backend skeleton (`[fhe]` extra) documenting the integration
-  surface.
+- Initial scaffold for an OpenFHE-specific backend (later removed in
+  v0.0.3 because it never carried a working implementation; the real
+  CKKS backend ships under `regaudit_fhe.fhe`).
 - Per-primitive technical specifications under `docs/specs/`.
 - Four end-to-end examples covering local audits, regulator submissions,
   receipt verification, and a pure-CLI workflow.

@@ -278,8 +278,14 @@ change a regulatory threshold decision at the audit precision targets.
 
 > **Description today:** *Depth-tracked regulatory audit primitives
 > for future FHE-CKKS execution.*
-> **Description after the OpenFHE backend lands:** *FHE-CKKS
-> regulatory audit primitives for privacy-preserving AI system audits.*
+> **Description once the production OpenFHE / Lattigo backend ships
+> (closed-source companion product):** *FHE-CKKS regulatory audit
+> primitives for privacy-preserving AI system audits.*
+>
+> **Active backend in this open-source repo:** TenSEAL CKKS
+> (`regaudit_fhe.fhe`). There is no OpenFHE backend in this repo;
+> the OpenFHE-specific build is part of the closed-source platform
+> roadmap.
 
 `regaudit-fhe` v0.0.1 ships:
 

@@ -19,7 +19,7 @@ RNG = np.random.default_rng(20260426)
 
 
 def test_version_and_modules():
-    assert rf.__version__ == "0.0.2"
+    assert rf.__version__ == "0.0.3"
     for name in ["egf_imss", "etk_fpa_hbc", "esc_cia",
                  "ecp_qssp", "ew1_cdsf", "ecmd_jps"]:
         assert hasattr(rf, name)
