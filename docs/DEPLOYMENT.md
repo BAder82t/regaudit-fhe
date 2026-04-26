@@ -117,7 +117,7 @@ Audit Platform ships a Redis-backed limiter; contact b@vaultbytes.com.
 A multi-stage `Dockerfile` is shipped at the repository root. Build:
 
 ```bash
-docker build -t regaudit-fhe:0.0.1 .
+docker build -t regaudit-fhe:current .
 ```
 
 Run:
@@ -126,7 +126,7 @@ Run:
 docker run --rm -p 8080:8080 \
   -e REGAUDIT_FHE_API_KEYS="$(cat api_keys.txt)" \
   -e REGAUDIT_FHE_RATE_LIMIT_PER_MIN=120 \
-  regaudit-fhe:0.0.1
+  regaudit-fhe:current
 ```
 
 The image runs as the unprivileged `regaudit` (UID 10001) account, has
@@ -157,7 +157,7 @@ spec:
       automountServiceAccountToken: false
       containers:
       - name: server
-        image: regaudit-fhe:0.0.1
+        image: regaudit-fhe:current
         ports: [{ containerPort: 8080 }]
         readinessProbe:
           httpGet: { path: /readyz, port: 8080 }

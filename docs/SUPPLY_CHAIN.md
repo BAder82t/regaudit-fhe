@@ -38,7 +38,7 @@ attached to the matching GitHub Release page.
 1. **Download the wheel and signed publish attestation.**
 
    ```bash
-   pip download regaudit-fhe==0.0.1 --no-deps --dest dl/
+   pip download regaudit-fhe==<VERSION> --no-deps --dest dl/
    ```
 
 2. **Verify the Sigstore publish attestation.** PyPI exposes the
@@ -47,10 +47,10 @@ attached to the matching GitHub Release page.
 
    ```bash
    sigstore verify identity \
-     --bundle dl/regaudit_fhe-0.0.1-py3-none-any.whl.sigstore \
-     --cert-identity "https://github.com/BAder82t/regaudit-fhe/.github/workflows/publish.yml@refs/tags/v0.0.1" \
+     --bundle dl/regaudit_fhe-<VERSION>-py3-none-any.whl.sigstore \
+     --cert-identity "https://github.com/BAder82t/regaudit-fhe/.github/workflows/publish.yml@refs/tags/v<VERSION>" \
      --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
-     dl/regaudit_fhe-0.0.1-py3-none-any.whl
+     dl/regaudit_fhe-<VERSION>-py3-none-any.whl
    ```
 
    The verifier confirms (a) the artefact was produced by the
@@ -115,7 +115,7 @@ Caveats:
 
 To reproduce locally::
 
-    git checkout v0.0.1
+    git checkout v<VERSION>
     python -m pip install --upgrade pip build
     python -m build
     sha256sum dist/*

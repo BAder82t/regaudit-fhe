@@ -20,7 +20,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md MANIFEST.in LICENSE LICENSING.md \
-     CHANGELOG.md SECURITY.md CONTRIBUTING.md COMPLIANCE.md ./
+     SECURITY.md CONTRIBUTING.md COMPLIANCE.md ./
 COPY src ./src
 COPY schemas ./schemas
 COPY docs ./docs
