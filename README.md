@@ -348,12 +348,6 @@ the top of this README reflects the latest result.
 | JSON Schemas                            | Shipped; validated on every CLI / API request.       |
 | Hardened HTTP server                    | Shipped; auth, scopes, rate limit, CORS, audit log.  |
 | Real benchmarks at N=2^14, N=2^15       | Shipped; reproducible from `benchmarks/bench_fhe.py`.|
-| Independent cryptography review         | **Not yet performed.**                               |
-| Independent security / pen-test review  | **Not yet performed.**                               |
-| Regulator endorsement                   | **None claimed.** Output is technical evidence only. |
-| Pilot deployment with a regulated buyer | **None public.**                                     |
-| Compliance mapping reviewed by counsel  | **Not yet performed.**                               |
-| SOC 2 / ISO 27001 / HIPAA attestation   | **Not applicable to the library; deployment-side.**  |
 
 `regaudit-fhe` is a dependency you can bring into a compliance
 workflow today; it is not, by itself, a finished compliance product.
