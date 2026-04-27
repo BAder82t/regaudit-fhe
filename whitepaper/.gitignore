@@ -1,0 +1,8 @@
+# whitepaper sources are kept locally only; the published artefact is the PDF.
+*.tex
+*.png
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
