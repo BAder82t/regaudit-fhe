@@ -99,9 +99,9 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
     per_model_outputs: List[float] = []
     for coeffs in model_polynomials:
         a0, a1, a2, a3 = coeffs
-        p_i = (x.mul_pt(np.full(n, a1))
-               + x_sq.mul_pt(np.full(n, a2))
-               + x_cube.mul_pt(np.full(n, a3))
+        p_i = (x.mul_scalar(a1)
+               + x_sq.mul_scalar(a2)
+               + x_cube.mul_scalar(a3)
                + np.full(n, a0))
         P.append(p_i)
         per_model_outputs.append(float(np.mean(p_i.slots)))
@@ -115,7 +115,7 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
             var_acc = sq if var_acc is None else var_acc + sq
 
     assert var_acc is not None
-    avg_var_ct = var_acc.mul_pt(np.full(n, 1.0 / pair_count))
+    avg_var_ct = var_acc.mul_scalar(1.0 / pair_count)
     avg_var_value = float(np.mean(avg_var_ct.slots))
     breach = avg_var_value > threshold
 

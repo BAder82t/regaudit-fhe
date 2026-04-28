@@ -113,10 +113,6 @@ def fairness_circuit_d6(y_true: np.ndarray,
     pred_b = y_p.mul_pt(g_b)
     true_pos_a = y_p.mul_pt(g_a * pad_pow2(y_true))
     true_pos_b = y_p.mul_pt(g_b * pad_pow2(y_true))
-    pred_pos_a = y_p.mul_pt(g_a)
-    pred_pos_b = y_p.mul_pt(g_b)
-    label_a = y_t.mul_pt(g_a)
-    label_b = y_t.mul_pt(g_b)
 
     dp_a = pred_a.sum_all().mul_pt(np.full(n, 1.0 / n_a))
     dp_b = pred_b.sum_all().mul_pt(np.full(n, 1.0 / n_b))

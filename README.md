@@ -75,20 +75,24 @@ recomputes the receipt to detect tampering between issuance and review.
 
 Each primitive's depth budget — the number of multiplicative levels it
 consumes inside the d=6 CKKS circuit — is shown above. All six fit
-comfortably under six, leaving headroom for downstream commit-and-verify
-chaining.
+under six on the TenSEAL backend, leaving headroom for downstream
+commit-and-verify chaining. The values below are observed at runtime
+on the real CKKS execution path; the source of truth is
+`benchmarks/results/SUMMARY.md` and the `LAST_DEPTH` recorder in
+`regaudit_fhe.fhe.primitives`.
 
 ```
-Depth budget visualisation (each ▮ = 1 level)
+Depth budget visualisation (each ▮ = 1 consumed level; observed on TenSEAL)
 
-    primitive             0 1 2 3 4 5 6
-    ─────────────────────────────────────
-    audit_calibration     ▮ ▮ ▮ . . . .   3 of 6
-    audit_provenance      ▮ ▮ ▮ . . . .   3 of 6
-    audit_drift           ▮ ▮ ▮ . . . .   3 of 6
-    audit_fairness        ▮ ▮ ▮ ▮ . . .   4 of 6
-    audit_concordance     ▮ ▮ ▮ ▮ . . .   4 of 6
-    audit_disagreement    ▮ ▮ ▮ ▮ ▮ . .   5 of 6
+    primitive             1 2 3 4 5 6
+    ───────────────────────────────────
+    audit_fairness        ▮ ▮ . . . .   2 of 6   (encrypt + mul_pt + mul_scalar)
+    audit_provenance      ▮ ▮ . . . .   2 of 6   (encrypt + mul_pt fold per bucket)
+    audit_drift           ▮ ▮ ▮ . . .   3 of 6   (mm_pt CDF + ct×ct square)
+    audit_calibration     ▮ ▮ ▮ ▮ . .   4 of 6   (mul_pt scale + sign_poly_d3)
+    audit_disagreement    ▮ ▮ ▮ ▮ ▮ .   5 of 6   (deg-3 poly + pairwise sq + scale)
+    audit_concordance     ▮ ▮ ▮ ▮ ▮ ▮   6 of 6   (rotate via mm_pt + sign_poly_d3
+                                                  + ct×ct event mask)
 ```
 
 Each primitive's full specification, including its algorithm, depth
@@ -137,7 +141,12 @@ assert rf.verify_receipt(envelope) is True    # regulator-side check
 > execution path is plaintext; the server runs in-process. Encrypted
 > execution requires the `[fhe]` extra AND CKKS secret-key custody
 > held off-host. Issuer authenticity is whatever Ed25519 key you
-> supply; verifiers decide which `key_id` to trust. Read
+> supply; verifiers decide which `key_id` to trust. The default
+> `verify_receipt(env)` checks the SHA-256 receipt and the embedded
+> Ed25519 signature against the embedded public key; it does NOT
+> validate that the public key belongs to a trusted issuer. Pass
+> `verify_receipt(env, trusted_keys=...)` or `strict=True` for
+> regulator-side verification. Read
 > [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
 > [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing
 > publicly.
@@ -279,18 +288,20 @@ The `[fhe]` extra ships a real TenSEAL CKKS backend; its measurements
 are reproduced from `benchmarks/results/SUMMARY.md` (machine-readable
 JSON in `benchmarks/results/bench_fhe_<N>.json`).
 
-| Primitive    | N    | Slots  | Depth obs/decl | Rotations | ct×ct | ct×pt | Runtime | RAM    | Max abs err | Threshold flip |
-|--------------|-----:|-------:|----------------|----------:|------:|------:|--------:|-------:|-------------|----------------|
-| fairness     | 2^14 |  8 192 | 1/4            | 108       |   0   |   18  | 0.28 s  |  878 MB | 4.8 × 10⁻⁷ | 0.00% |
-| provenance   | 2^14 |  8 192 | 1/3            | 288       |   0   |   48  | 0.71 s  |  885 MB | 7.9 × 10⁻⁶ | 0.00% |
-| concordance  | 2^14 |  8 192 | 4/4            |   0       |   0   |    0  | 0.00 s  |  887 MB | 0          | 0.00% |
-| calibration  | 2^14 |  8 192 | 0/3            |   0       |   0   |    0  | 0.01 s  |  890 MB | 0          | 0.00% |
-| drift        | 2^14 |  8 192 | 2/2            |  36       |   3   |    6  | 0.18 s  |  968 MB | 2.3 × 10⁻⁶ | 0.00% |
-| disagreement | 2^14 |  8 192 | 3/5            |   0       |  36   |    0  | 0.16 s  |  977 MB | 1.1 × 10⁻⁸ | 0.00% |
-| fairness     | 2^15 | 16 384 | 1/4            | 108       |   0   |   18  | 0.58 s  | 2.7 GB  | 7.2 × 10⁻⁷ | 0.00% |
-| provenance   | 2^15 | 16 384 | 1/3            | 288       |   0   |   48  | 1.52 s  | 2.7 GB  | 1.9 × 10⁻⁵ | 0.00% |
-| drift        | 2^15 | 16 384 | 2/2            |  36       |   3   |    6  | 0.39 s  | 2.8 GB  | 1.1 × 10⁻⁵ | 0.00% |
-| disagreement | 2^15 | 16 384 | 3/5            |   0       |  36   |    0  | 0.35 s  | 2.7 GB  | 1.4 × 10⁻⁸ | 0.00% |
+| Primitive    | N    | Slots  | Depth obs/decl | Rotations | ct×ct | ct×pt | Runtime | RAM     | Max abs err | Threshold flip |
+|--------------|-----:|-------:|----------------|----------:|------:|------:|--------:|--------:|-------------|----------------|
+| fairness     | 2^14 |  8 192 | 1/4            |  36       |   0   |    6  | 0.33 s  |  887 MB | 4.8 × 10⁻⁷ | 0.00% |
+| provenance   | 2^14 |  8 192 | 1/3            |  96       |   0   |   16  | 0.90 s  |  896 MB | 1.1 × 10⁻⁵ | 0.00% |
+| concordance  | 2^14 |  8 192 | 5/5            |  36       |   8   |    3  | 5.26 s  | 2.3 GB  | 1.5 × 10⁻⁶ | 0.00% |
+| calibration  | 2^14 |  8 192 | 3/4            |   0       |   2   |    1  | 0.03 s  | 2.3 GB  | 0          | 0.00% |
+| drift        | 2^14 |  8 192 | 2/2            |  12       |   1   |    2  | 0.27 s  | 2.3 GB  | 2.2 × 10⁻⁶ | 0.00% |
+| disagreement | 2^14 |  8 192 | 3/5            |   0       |  12   |    0  | 0.31 s  | 2.3 GB  | 1.2 × 10⁻⁸ | 0.00% |
+| fairness     | 2^15 | 16 384 | 1/4            |  36       |   0   |    6  | 0.74 s  | 4.0 GB  | 9.6 × 10⁻⁷ | 0.00% |
+| provenance   | 2^15 | 16 384 | 1/3            |  96       |   0   |   16  | 2.04 s  | 4.1 GB  | 5.2 × 10⁻⁶ | 0.00% |
+| concordance  | 2^15 | 16 384 | 5/5            |  36       |   8   |    3  | 13.91 s | 6.9 GB  | 3.0 × 10⁻⁷ | 0.00% |
+| calibration  | 2^15 | 16 384 | 3/4            |   0       |   2   |    1  | 0.08 s  | 6.9 GB  | 0          | 0.00% |
+| drift        | 2^15 | 16 384 | 2/2            |  12       |   1   |    2  | 0.64 s  | 6.9 GB  | 7.1 × 10⁻⁶ | 0.00% |
+| disagreement | 2^15 | 16 384 | 3/5            |   0       |  12   |    0  | 0.64 s  | 6.6 GB  | 1.3 × 10⁻⁸ | 0.00% |
 
 Run yourself:
 

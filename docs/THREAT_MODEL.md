@@ -160,8 +160,9 @@ chooses to publish or not).
 | `time[i]`                     | yes        | no      | Observed time; PHI.                                                 |
 | `event[i]`                    | yes        | no      | Event indicator; PHI.                                               |
 | Cohort size `N`               | no         | yes     | Required for pair enumeration.                                      |
-| `concordant_pairs`, `comparable_pairs` | decrypted | yes | Encrypted-domain output; the ratio is computed plaintext-side after Auditor decryption to keep on-encrypted depth at 4. |
-| `c_index`                     | decrypted  | yes     | The audit output.                                                   |
+| Three signed sign-poly aggregates (`S1`, `S2`, `S3`) | decrypted | yes | Encrypted-domain output; recover the four concordance bins ``(A, B, C, D)`` plaintext-side via the linear system in ``docs/specs/03_esc_cia.md``. The aggregates are sums over all ordered ``i != j`` pairs and reveal only those three scalars per audit. |
+| `concordant_pairs`, `comparable_pairs` | derived | yes | Plaintext-side recovery from the three aggregates and the public event count. |
+| `c_index`                     | derived  | yes     | The audit output.                                                   |
 
 PHI never leaves the encrypted domain. The two encrypted aggregates
 are integer counts; they leak only the cohort-level pair statistics,
@@ -174,7 +175,8 @@ never per-patient data.
 | Per-class non-conformity scores | yes      | no      | Test-point internals.                                               |
 | Per-class quantile thresholds | no         | yes     | Calibration set output; published with the conformal procedure.     |
 | Number of classes `K`         | no         | yes     | Audit configuration.                                                |
-| `membership` bitmask          | decrypted  | yes     | The audit output.                                                   |
+| Optional ``score_range`` normaliser | no   | yes     | A scalar bound on ``\|quantile − score\|`` that the auditor publishes alongside the calibration set. The ciphertext is rescaled by this factor before ``sign_poly_d3`` so the polynomial fires inside its accuracy band. |
+| `membership` bitmask          | decrypted  | yes     | The audit output, computed under encryption via ``sign_poly_d3``.   |
 | `set_size`                    | decrypted  | yes     | Cardinality of the prediction set.                                  |
 
 The slot-permutation that routes encrypted scores into matched class
@@ -202,9 +204,9 @@ distance scalar is decrypted.
 | Per-model polynomial coefficients | no     | yes     | The model versions themselves; auditor-public per OCC SR 11-7 challenger-comparison conventions. |
 | Number of models `M`          | no         | yes     | Audit configuration.                                                |
 | `threshold`                   | no         | yes     | Regulatory rule.                                                    |
-| `pairwise_variance`           | decrypted  | yes     | The audit output.                                                   |
+| `pairwise_variance`           | decrypted  | yes     | The audit output. Per-pair squared differences are accumulated under encryption; the auditor decrypts the resulting variance vector and takes its mean. |
 | `breach`                      | decrypted  | yes     | Boolean breach decision.                                            |
-| `per_model_outputs`           | decrypted  | yes     | Mean-output-per-model summary (no per-row test-input information). |
+| `per_model_outputs`           | decrypted  | yes     | Mean-output-per-model summary. The function's RETURN VALUE is a single mean per model; per-row test-input data is discarded after the auditor's local mean. |
 
 Per-row test-input data never leaves the encrypted domain.
 

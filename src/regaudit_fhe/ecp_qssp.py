@@ -57,10 +57,13 @@ def conformal_circuit_d6(scores: np.ndarray, quantiles: np.ndarray) -> Conformal
     scores_ct = SlotVec.encrypt(pad_pow2(scores))
     quantiles_pt = pad_pow2(quantiles)
 
-    score_range = max(float(np.max(np.abs(scores_ct.slots - quantiles_pt))), 1e-9)
-    diff = (SlotVec.encrypt(pad_pow2(quantiles)) - scores_ct).mul_pt(
-        np.full(n, 1.0 / score_range)
-    )
+    score_range = max(
+        float(np.max(np.abs(scores_ct.slots - quantiles_pt))), 1e-9)
+    # Quantiles are auditor-public per the threat model; subtracting
+    # an encrypted score from the plaintext quantile is implemented
+    # by negating the ciphertext and adding the plaintext vector.
+    diff_raw = -scores_ct + quantiles_pt
+    diff = diff_raw.mul_pt(np.full(n, 1.0 / score_range))
     member_signal = sign_poly_d3(diff)
     membership = (member_signal.slots[: len(scores)] > 0.0).astype(np.float64)
 

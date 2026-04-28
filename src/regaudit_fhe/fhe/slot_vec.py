@@ -65,6 +65,21 @@ class EncryptedSlotVec:
     def decrypt(self) -> List[float]:
         return list(self.ciphertext.decrypt())[: self.n]
 
+    def copy(self) -> "EncryptedSlotVec":
+        """Independent ciphertext copy.
+
+        TenSEAL operations such as multiplication mod-switch the
+        lower-level operand in-place to align scales. Code that
+        reuses a ciphertext across multiple downstream branches must
+        operate on copies to avoid silently mutating shared state.
+        """
+        return EncryptedSlotVec(
+            ciphertext=self.ciphertext.copy(),
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
+        )
+
     def first_slot(self) -> float:
         return float(self.decrypt()[0])
 
@@ -134,13 +149,24 @@ class EncryptedSlotVec:
         )
 
     def rotate(self, k: int) -> "EncryptedSlotVec":
-        OP_COUNTERS["rotations"] += 1
-        raise NotImplementedError(
-            "TenSEAL CKKSVector does not expose a rotate primitive. "
-            "Encrypted variants of rotation-based primitives use a "
-            "plaintext-matrix multiplication path instead — see "
-            "regaudit_fhe.fhe.primitives for examples."
-        )
+        """Cyclic slot rotation by ``k`` via a plaintext permutation matrix.
+
+        TenSEAL's CKKSVector does not expose a Galois-rotation primitive,
+        so rotations are implemented as a single ``mm_pt`` against a
+        cyclic permutation matrix. Cost: one multiplicative level
+        (rather than zero, as in a native CKKS rotation), plus the
+        plaintext-matrix multiplication. Counter increments are emitted
+        by the underlying ``mm_pt`` call.
+
+        Semantics match :class:`regaudit_fhe._slot.SlotVec.rotate`:
+        ``out[i] == in[(i + k) mod n]``.
+        """
+        import numpy as _np
+        n = self.n
+        perm = _np.zeros((n, n), dtype=float)
+        for c in range(n):
+            perm[(c + k) % n, c] = 1.0
+        return self.mm_pt(perm)
 
     def sum_all(self) -> "EncryptedSlotVec":
         # TenSEAL .sum() expands internally to log2(n) rotate-and-add steps;

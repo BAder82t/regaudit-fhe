@@ -166,13 +166,20 @@ def reciprocal_poly_d3(x: SlotVec) -> SlotVec:
 
 
 def cdf_in_place(x: SlotVec) -> SlotVec:
-    """Slot-wise cumulative sum produced in-place via depth-0 prefix-sum tree.
+    """Slot-wise cumulative sum via Halevi-Shoup rotate-and-mask prefix sum.
 
-    Implements the classical Halevi-Shoup rotate-and-mask prefix sum.
-    Mathematically: out[k] = sum_{j<=k} x[j].
+    Mathematically: ``out[k] = sum_{j <= k} x[j]``.
 
-    Depth cost: 0 multiplications. Uses log2(n) rotate-add steps and a single
-    plaintext mask vector.
+    Depth cost in this plaintext SlotVec model: 0 multiplications,
+    because we simulate the wrap-around mask by writing zeros into
+    the rotated array directly (free in numpy).
+
+    Depth cost on a real CKKS backend: 1 plaintext multiplication
+    consolidating all ``log2(n)`` rotate-and-mask steps into a single
+    upper-triangular plaintext-matrix multiplication. The encrypted
+    drift primitive (``regaudit_fhe.fhe.primitives.w1_encrypted``)
+    pays this level explicitly via ``mm_pt`` and the equivalence
+    test asserts the output matches this model within tolerance.
     """
     n = x.n
     if n & (n - 1) != 0:
@@ -180,9 +187,6 @@ def cdf_in_place(x: SlotVec) -> SlotVec:
     out = x
     step = 1
     while step < n:
-        # mask zeros out wrap-around contributions; depth cost: 1 plaintext
-        # multiplication consolidating all log2(n) steps in CKKS impl, but here
-        # we model the running sum directly.
         rotated = out.rotate(-step)
         rotated.slots[:step] = 0.0
         out = out + rotated

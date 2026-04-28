@@ -179,8 +179,21 @@ class ParameterSet:
         return sha256_hex(canonical_json(self.to_dict()))
 
 
-def parameter_set_from_ckks_context(ctx: Any) -> ParameterSet:
-    """Best-effort introspection of a CKKSContext into a ParameterSet."""
+def parameter_set_from_ckks_context(ctx: Any,
+                                     *,
+                                     security_bits: int = 128,
+                                     multiplicative_depth: int = 6,
+                                     ) -> ParameterSet:
+    """Introspect a CKKSContext into a ParameterSet.
+
+    ``security_bits`` and ``multiplicative_depth`` are passed through
+    explicitly because they are not derivable from the underlying
+    SEAL context object — they reflect the validated CKKSParams or
+    deployment policy under which the context was built. Callers with
+    a :class:`regaudit_fhe.fhe.CKKSParams` should use
+    :meth:`CKKSParams.to_envelope_parameter_set` instead, which carries
+    the validated values directly.
+    """
     backend = "tenseal-ckks"
     backend_version = ""
     try:
@@ -193,10 +206,11 @@ def parameter_set_from_ckks_context(ctx: Any) -> ParameterSet:
     return ParameterSet(
         backend=backend,
         poly_modulus_degree=poly,
-        security_bits=128,
-        multiplicative_depth=6,
-        coeff_mod_bit_sizes=tuple(getattr(ctx, "coeff_mod_bit_sizes",
-                                          (60, 40, 40, 40, 40, 40, 40, 60))),
+        security_bits=int(security_bits),
+        multiplicative_depth=int(multiplicative_depth),
+        coeff_mod_bit_sizes=tuple(getattr(
+            ctx, "coeff_mod_bit_sizes",
+            (60, 40, 40, 40, 40, 40, 40, 40, 60))),
         scaling_factor_bits=int(np.log2(getattr(ctx, "scale", 1 << 40))),
         library_version=LIB_VERSION,
         backend_version=backend_version,
@@ -467,7 +481,23 @@ def verify_envelope(env: AuditEnvelope,
                     *,
                     trusted_keys: Mapping[str, str] | None = None,
                     require_signature: bool = True,
+                    tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
                     ) -> VerificationOutcome:
+    """Verify an audit envelope.
+
+    ``trusted_keys`` is a ``key_id`` → PEM mapping. If ``None``, the
+    issuer-trust check is skipped — the verifier reports
+    ``issuer_trusted = True`` and the caller is responsible for
+    deciding whether the embedded public key is acceptable. Production
+    verifiers SHOULD always pass an explicit trust store.
+
+    ``tsa_verifier`` is an optional callable that takes
+    ``(body_bytes, token_bytes)`` and returns whether the RFC 3161
+    timestamp token verifies against the deployer's TSA root. If
+    ``None``, the presence of the timestamp field is reported but the
+    token itself is not validated; ``timestamp_valid`` is then set
+    only when no timestamp is attached.
+    """
     body_bytes = canonical_json(env.signed_body())
     sha_ok = sha256_hex(body_bytes) == env.receipt.get("sha256")
 
@@ -496,9 +526,24 @@ def verify_envelope(env: AuditEnvelope,
                 == (pub_pem or "").strip().replace("\r\n", "\n")
             )
 
-    ts_ok = True
-    if env.timestamp is not None:
-        ts_ok = bool(env.timestamp.get("token_b64"))
+    if env.timestamp is None:
+        ts_ok = True
+    else:
+        token_b64 = env.timestamp.get("token_b64")
+        if not token_b64:
+            ts_ok = False
+        elif tsa_verifier is None:
+            # Presence-only check: a token is attached, but its
+            # cryptographic binding to the deployer's TSA root is
+            # not verified. Pass a ``tsa_verifier`` to validate the
+            # token against an RFC 3161 chain.
+            ts_ok = True
+        else:
+            try:
+                ts_ok = bool(tsa_verifier(body_bytes,
+                                           base64.b64decode(token_b64)))
+            except Exception:
+                ts_ok = False
 
     valid = sha_ok and sig_ok and issuer_ok and ts_ok
     return VerificationOutcome(
@@ -513,14 +558,28 @@ def verify_envelope(env: AuditEnvelope,
     )
 
 
-# Back-compat shim used by older callers.
-def verify_receipt(env: AuditEnvelope) -> bool:
-    """Return True iff the envelope's hash and Ed25519 signature both
-    verify against the embedded public key. Maintained for backwards
-    compatibility with v0.0.1 callers; new code should use
-    :func:`verify_envelope` to also check trusted keys and timestamp.
+def verify_receipt(env: AuditEnvelope,
+                   *,
+                   trusted_keys: Mapping[str, str] | None = None,
+                   strict: bool = False,
+                   ) -> bool:
+    """Return True iff the envelope verifies.
+
+    By default this checks the SHA-256 receipt and the embedded
+    Ed25519 signature against the embedded public key. **It does not
+    validate that the embedded public key belongs to a trusted
+    issuer** — that requires a ``trusted_keys`` map. The default
+    behaviour is preserved for backwards compatibility with v0.0.1
+    callers and the README quickstart.
+
+    Pass ``strict=True`` to require ``trusted_keys`` and reject any
+    envelope whose ``key_id`` is not in the trust store; this is the
+    recommended setting for regulator-side verifiers.
     """
-    return verify_envelope(env, require_signature=True).valid
+    if strict and not trusted_keys:
+        return False
+    return verify_envelope(env, trusted_keys=trusted_keys,
+                            require_signature=True).valid
 
 
 def issue_receipt(payload: Mapping[str, Any]) -> Dict[str, str]:

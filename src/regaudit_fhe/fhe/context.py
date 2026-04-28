@@ -55,26 +55,29 @@ def build_d6_context(*,
                      coeff_mod_bit_sizes: Sequence[int] | None = None,
                      rotation_steps: Sequence[int] | None = None,
                      ) -> CKKSContext:
-    """``poly_modulus_degree`` must be at least ``2**14`` to fit the
-    eight-prime modulus chain that admits six multiplications. Smaller
-    rings cannot hold a 360-bit coefficient modulus and will be
-    rejected by the underlying SEAL parameter validator.
-    """
-    """Construct a TenSEAL CKKS context that admits ``d = 6`` multiplications.
+    """Construct a TenSEAL CKKS context for the audit primitives.
 
-    The default ``coeff_mod_bit_sizes`` chain ``[60, 40, 40, 40, 40, 40, 40,
-    60]`` provides one initial level, six multiplicative levels, and a
-    final level for output decryption — exactly the depth budget the
-    audit primitives consume.
+    The default ``poly_modulus_degree = 2**14`` (ring 16384) admits a
+    coefficient modulus up to 438 bits at 128-bit IND-CPA security.
+    The default ``coeff_mod_bit_sizes`` chain
+    ``[60, 40, 40, 40, 40, 40, 40, 40, 60]`` totals 400 bits — one
+    initial level, seven multiplicative levels, and a final level for
+    output decryption. The audit primitives consume at most
+    :data:`regaudit_fhe._slot.MAX_DEPTH` (= 6) multiplicative levels;
+    the trailing prime keeps a margin of one rescale for noise
+    headroom and to absorb the ``mul_scalar`` levels that TenSEAL's
+    auto-rescale charges (and that the public ``SlotVec`` model does
+    not surface).
 
-    Rotation keys are pre-generated for the ``log2(n_slots)`` powers-of-
-    two used by the cross-slot Halevi-Shoup summation, plus a small set
-    of negative powers needed by the in-place CDF prefix-sum primitive.
+    Rotation keys are pre-generated for the ``log2(n_slots)`` powers-
+    of-two used by the cross-slot Halevi-Shoup summation, plus a small
+    set of negative powers needed by the in-place CDF prefix-sum
+    primitive.
     """
     import tenseal as ts
 
     if coeff_mod_bit_sizes is None:
-        coeff_mod_bit_sizes = [60, 40, 40, 40, 40, 40, 40, 60]
+        coeff_mod_bit_sizes = [60, 40, 40, 40, 40, 40, 40, 40, 60]
 
     n_slots = poly_modulus_degree // 2
     if rotation_steps is None:

@@ -77,45 +77,60 @@ def c_index_circuit_d6(risk: np.ndarray,
     time = assert_finite("time", assert_nonempty("time", time))
     event = assert_binary("event", event)
     assert_same_length(("risk", risk), ("time", time), ("event", event))
-    n_pad = pad_pow2(risk).shape[0]
-    risk_ct = SlotVec.encrypt(pad_pow2(risk))
-    time_ct = SlotVec.encrypt(pad_pow2(time))
-    event_ct = SlotVec.encrypt(pad_pow2(event))
+    n = len(risk)
+    risk_arr = np.asarray(risk, dtype=float)
+    time_arr = np.asarray(time, dtype=float)
+    event_arr = np.asarray(event, dtype=float)
 
-    concordant_total = 0.0
+    risk_span = max(float(np.max(risk_arr) - np.min(risk_arr)), 1e-9)
+    time_span = max(float(np.max(time_arr) - np.min(time_arr)), 1e-9)
+    risk_norm = (risk_arr - float(np.mean(risk_arr))) / risk_span
+    time_norm = (time_arr - float(np.mean(time_arr))) / time_span
+
+    risk_p = pad_pow2(risk_norm)
+    time_p = pad_pow2(time_norm)
+    event_p = pad_pow2(event_arr)
+    n_pad = risk_p.shape[0]
+
+    risk_ct = SlotVec.encrypt(risk_p)
+    time_ct = SlotVec.encrypt(time_p)
+    event_ct = SlotVec.encrypt(event_p)
+
+    A_total = 0.0
     comparable_total = 0.0
     max_depth = 0
 
     for shift in range(1, n_pad):
-        risk_shift = risk_ct.rotate(shift)
-        time_shift = time_ct.rotate(shift)
+        risk_rot = risk_ct.rotate(shift)
+        time_rot = time_ct.rotate(shift)
 
-        risk_diff_max = max(np.max(np.abs(risk_ct.slots - risk_shift.slots)), 1e-9)
-        time_diff_max = max(np.max(np.abs(time_ct.slots - time_shift.slots)), 1e-9)
-
-        risk_norm_inv = 1.0 / risk_diff_max
-        time_norm_inv = 1.0 / time_diff_max
-
-        risk_diff = (risk_ct - risk_shift).mul_pt(np.full(n_pad, risk_norm_inv))
-        time_diff = (time_shift - time_ct).mul_pt(np.full(n_pad, time_norm_inv))
+        risk_diff = risk_ct - risk_rot
+        time_diff = time_rot - time_ct
 
         sgn_risk = sign_poly_d3(risk_diff)
         sgn_time = sign_poly_d3(time_diff)
 
-        concordance_bit_raw = sgn_risk.mul_ct(sgn_time)
-        concordance_bit = concordance_bit_raw.mul_ct(event_ct)
-        comparable_bit = sgn_time.mul_ct(event_ct)
+        s1_ct = sgn_time.mul_ct(event_ct).sum_all()
+        s3_ct = sgn_risk.mul_ct(event_ct).sum_all()
+        sgn_prod = sgn_risk.mul_ct(sgn_time)
+        s2_ct = sgn_prod.mul_ct(event_ct).sum_all()
 
-        concordant_total += float(np.sum(np.maximum(concordance_bit.slots, 0.0)))
-        comparable_total += float(np.sum(np.maximum(comparable_bit.slots, 0.0)))
-        max_depth = max(max_depth, concordance_bit.depth, comparable_bit.depth)
+        S1 = float(s1_ct.first_slot())
+        S2 = float(s2_ct.first_slot())
+        S3 = float(s3_ct.first_slot())
 
-    n = len(risk)
-    concordant_total = max(0.0, min(concordant_total, n * (n - 1)))
-    comparable_total = max(0.0, min(comparable_total, n * (n - 1)))
+        pair_real = ((np.arange(n_pad) < n)
+                     & (((np.arange(n_pad) + shift) % n_pad) < n))
+        E = float(np.sum(event_p * pair_real))
 
-    oracle = c_index_oracle(risk, time, event)
-    ci = oracle.c_index
+        comparable_total += max(0.0, (E + S1) / 2.0)
+        A_total += max(0.0, (E + S1 + S2 + S3) / 4.0)
+        max_depth = max(max_depth, s2_ct.depth)
+
+    A_total = max(0.0, min(A_total, float(n * (n - 1))))
+    comparable_total = max(0.0, min(comparable_total, float(n * (n - 1))))
+    ci = (A_total / comparable_total
+          if comparable_total > 0 else 0.5)
 
     assert max_depth <= 6, f"depth budget violated: {max_depth}"
-    return CIndexReport(oracle.concordant_pairs, oracle.comparable_pairs, ci)
+    return CIndexReport(A_total, comparable_total, ci)
