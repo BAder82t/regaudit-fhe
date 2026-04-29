@@ -17,8 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
-from ._validation import (assert_binary, assert_finite, assert_nonempty,
-                          assert_same_length)
+from ._validation import assert_binary, assert_finite, assert_nonempty, assert_same_length
 
 
 @dataclass

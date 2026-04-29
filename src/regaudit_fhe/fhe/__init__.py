@@ -30,22 +30,28 @@ def _require_tenseal() -> None:
         )
 
 
-from .context import (CKKSContext, build_d6_context,
-                      build_d6_context_from_params)  # noqa: E402
-from .params import (CKKSParams, ParameterValidationError,
-                     SECURITY_LEVELS, SEAL_MAX_LOG_Q_128)  # noqa: E402
+from . import primitives  # noqa: E402
+from .context import (  # noqa: E402
+    CKKSContext,
+    build_d6_context,
+    build_d6_context_from_params,
+)
+from .params import (  # noqa: E402
+    SEAL_MAX_LOG_Q_128,
+    SECURITY_LEVELS,
+    CKKSParams,
+    ParameterValidationError,
+)
 from .slot_vec import EncryptedSlotVec  # noqa: E402
 
-from . import primitives  # noqa: E402
-
 __all__ = [
+    "SEAL_MAX_LOG_Q_128",
+    "SECURITY_LEVELS",
     "CKKSContext",
     "CKKSParams",
+    "EncryptedSlotVec",
     "ParameterValidationError",
-    "SECURITY_LEVELS",
-    "SEAL_MAX_LOG_Q_128",
     "build_d6_context",
     "build_d6_context_from_params",
-    "EncryptedSlotVec",
     "primitives",
 ]

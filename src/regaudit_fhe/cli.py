@@ -19,16 +19,20 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 
-from . import (audit_calibration, audit_concordance, audit_disagreement,
-               audit_drift, audit_fairness, audit_provenance)
+from . import (
+    audit_calibration,
+    audit_concordance,
+    audit_disagreement,
+    audit_drift,
+    audit_fairness,
+    audit_provenance,
+)
 from .reports import AuditEnvelope, envelope, verify_receipt
-from .schemas import (SchemaError, list_schemas, load_schema,
-                       validate_envelope, validate_input)
-
+from .schemas import SchemaError, list_schemas, load_schema, validate_input
 
 PRIMITIVES = {
     "fairness", "provenance", "concordance",
@@ -36,7 +40,7 @@ PRIMITIVES = {
 }
 
 
-SCHEMAS: Dict[str, Dict[str, Any]] = {
+SCHEMAS: dict[str, dict[str, Any]] = {
     "fairness": {
         "y_true": "[float]  binary outcome labels",
         "y_pred": "[float]  binary model predictions",
@@ -72,7 +76,7 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _audit_dispatch(primitive: str, payload: Dict[str, Any]) -> AuditEnvelope:
+def _audit_dispatch(primitive: str, payload: dict[str, Any]) -> AuditEnvelope:
     validate_input(primitive, payload)
     if primitive == "fairness":
         report = audit_fairness(
@@ -165,18 +169,35 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             "  pip install regaudit-fhe[server]\n"
         )
         return 2
-    from .server import build_app
-    uvicorn.run(build_app(), host=args.host, port=args.port, log_level="info")
+    from .server import assert_safe_bind, build_app, load_config_from_env
+    config = load_config_from_env()
+    try:
+        assert_safe_bind(args.host, dev_mode=config.dev_mode)
+    except RuntimeError as exc:
+        sys.stderr.write(f"refusing to start: {exc}\n")
+        return 2
+    uvicorn.run(build_app(config=config), host=args.host, port=args.port,
+                log_level="info")
     return 0
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     body = json.loads(Path(args.input).read_text())
     env = AuditEnvelope.from_dict(body)
-    ok = verify_receipt(env)
+    trusted_keys: dict[str, str] | None = None
+    if args.trusted_keys:
+        trusted_keys = json.loads(Path(args.trusted_keys).read_text())
+        if not isinstance(trusted_keys, dict):
+            sys.stderr.write(
+                "--trusted-keys must point to a JSON object mapping "
+                "key_id -> PEM-encoded public key.\n"
+            )
+            return 2
+    ok = verify_receipt(env, trusted_keys=trusted_keys, strict=args.strict)
     print(json.dumps({"valid": ok, "primitive": env.primitive,
                       "issued_at": env.issued_at,
-                      "regulations": env.regulations}, indent=2))
+                      "regulations": env.regulations,
+                      "trusted_issuer": bool(trusted_keys)}, indent=2))
     return 0 if ok else 1
 
 
@@ -199,6 +220,13 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Verify the receipt of an audit envelope.")
     verify.add_argument("--input", "-i", required=True,
                         help="Audit envelope JSON to verify")
+    verify.add_argument("--trusted-keys",
+                        help="Path to JSON object mapping key_id -> PEM "
+                             "public key. Required for issuer authentication.")
+    verify.add_argument("--strict", action="store_true",
+                        help="Reject envelopes whose key_id is not in "
+                             "--trusted-keys. Recommended for regulator-side "
+                             "verifiers.")
     verify.set_defaults(func=_cmd_verify)
 
     serve = sub.add_parser("serve",

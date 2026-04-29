@@ -21,20 +21,19 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
 from .._slot import pad_pow2
-from ..egf_imss import FairnessReport
 from ..ecmd_jps import DisagreementReport
 from ..ecp_qssp import ConformalReport
-from ..esc_cia import CIndexReport, c_index_oracle
-from ..etk_fpa_hbc import (ProvenanceReport, bucket_masks, hash_to_buckets)
+from ..egf_imss import FairnessReport
+from ..esc_cia import CIndexReport
+from ..etk_fpa_hbc import ProvenanceReport, bucket_masks, hash_to_buckets
 from ..ew1_cdsf import DriftReport, w1_oracle
 from .context import CKKSContext
 from .slot_vec import EncryptedSlotVec, sign_poly_d3
-
 
 LAST_DEPTH: dict[str, int] = {}
 
@@ -78,7 +77,6 @@ def fairness_encrypted(ctx: CKKSContext,
     y_pred_p = pad_pow2(y_pred)
     g_a = pad_pow2(group_a)
     g_b = pad_pow2(group_b)
-    n = y_pred_p.shape[0]
 
     n_a = max(float(np.sum(g_a)), 1.0)
     n_b = max(float(np.sum(g_b)), 1.0)
@@ -224,7 +222,7 @@ def c_index_encrypted(ctx: CKKSContext,
 
     n_pairs = n * (n - 1)
     P = 1
-    while P < n_pairs:
+    while n_pairs > P:
         P *= 2
 
     M_risk, M_time, M_event = _build_pair_matrices(n, P)
@@ -385,8 +383,8 @@ def disagreement_encrypted(ctx: CKKSContext,
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
 
-    P: List[EncryptedSlotVec] = []
-    per_model_means: List[float] = []
+    P: list[EncryptedSlotVec] = []
+    per_model_means: list[float] = []
     for coeffs in model_polynomials:
         a0, a1, a2, a3 = coeffs
         # mul_scalar does not mod-switch its operand (it is a

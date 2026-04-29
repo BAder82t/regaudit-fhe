@@ -8,16 +8,12 @@ write down.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
-
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 import regaudit_fhe as rf
-
 
 # Hypothesis can produce slow inputs that exercise CKKS contexts; keep
 # the deadline generous and disable the function-scoped fixture
@@ -140,7 +136,7 @@ def test_drift_distance_is_nonnegative(args):
 @PROFILE
 @given(args=histogram_pair())
 def test_drift_zero_iff_distributions_match(args):
-    p, q = args
+    p, _q = args
     same = rf.audit_drift(p, p)
     assert same.distance < 1e-9
 

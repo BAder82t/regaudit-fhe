@@ -17,14 +17,12 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import json
-from functools import lru_cache
-from importlib import resources
+from collections.abc import Mapping
+from functools import cache
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
-
 
 PRIMITIVES = ("fairness", "provenance", "concordance",
               "calibration", "drift", "disagreement")
@@ -51,7 +49,7 @@ def _candidate_schema_dirs() -> list[Path]:
     return out
 
 
-@lru_cache(maxsize=None)
+@cache
 def _schemas_dir() -> Path:
     for cand in _candidate_schema_dirs():
         if cand.is_dir():
@@ -61,8 +59,8 @@ def _schemas_dir() -> Path:
     )
 
 
-@lru_cache(maxsize=None)
-def load_schema(name: str) -> Dict[str, Any]:
+@cache
+def load_schema(name: str) -> dict[str, Any]:
     """Load a schema by name. Names follow the convention
     ``<primitive>.<direction>`` for primitives and ``envelope`` for
     the audit envelope.

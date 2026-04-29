@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, cdf_in_place, pad_pow2
-from ._validation import assert_finite, assert_nonempty, assert_same_length
+from ._validation import assert_finite, assert_nonempty
 
 
 @dataclass

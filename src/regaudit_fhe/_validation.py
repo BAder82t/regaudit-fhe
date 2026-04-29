@@ -11,7 +11,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -57,7 +57,7 @@ def assert_same_length(*pairs: tuple) -> None:
     """Each pair is ``(name, array)``. Raises if their lengths differ."""
     lengths = {name: len(np.asarray(arr)) for name, arr in pairs}
     if len(set(lengths.values())) > 1:
-        items = ", ".join(f"{n}={l}" for n, l in lengths.items())
+        items = ", ".join(f"{n}={length}" for n, length in lengths.items())
         raise ValueError(f"input length mismatch: {items}")
 
 

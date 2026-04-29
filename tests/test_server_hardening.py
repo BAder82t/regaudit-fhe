@@ -8,21 +8,22 @@ privacy-boundary warning, and the no-payload-in-logs guarantee.
 from __future__ import annotations
 
 import io
-import json
 import logging
-import time
 
 import pytest
-
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from regaudit_fhe.server import (PRIVACY_WARNING, ServerConfig,
-                                  TokenBucketRateLimiter, build_app)
-
+from regaudit_fhe.server import (
+    PRIVACY_WARNING,
+    ServerConfig,
+    TokenBucketRateLimiter,
+    assert_safe_bind,
+    build_app,
+)
 
 VALID_FAIRNESS = {
     "y_true": [1, 0, 1, 0],
@@ -257,3 +258,54 @@ def test_audit_endpoint_returns_422_on_schema_violation():
     r = TestClient(app).post("/v1/audit/fairness",
                               json={"y_true": [1, 2, 3]})
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Constant-time bearer compare + key_id non-leak
+# ---------------------------------------------------------------------------
+
+
+def test_caller_key_id_is_hashed_not_raw_token():
+    logger, buffer = _capture_logger()
+    cfg = _config(api_keys={"super-secret-token": frozenset({"audit:run"})})
+    app = build_app(config=cfg, logger=logger)
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS,
+        headers={"Authorization": "Bearer super-secret-token"})
+    assert r.status_code == 200
+    body = buffer.getvalue()
+    assert "super-secret-token" not in body
+    # The logged key_id field exists but holds an opaque hash prefix.
+    assert "key_id" in body
+
+
+def test_unknown_token_still_returns_401_under_constant_time_path():
+    cfg = _config(api_keys={"k1": frozenset({"audit:run"})})
+    app = build_app(config=cfg)
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS,
+        headers={"Authorization": "Bearer k2"})
+    assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DEV_MODE bind guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
+def test_assert_safe_bind_allows_loopback_in_dev_mode(host):
+    assert_safe_bind(host, dev_mode=True)  # must not raise
+
+
+@pytest.mark.parametrize("host",
+                         ["0.0.0.0", "10.0.0.1", "192.168.1.1",
+                          "::", "2001:db8::1", "example.com"])
+def test_assert_safe_bind_refuses_non_loopback_in_dev_mode(host):
+    with pytest.raises(RuntimeError, match="non-loopback"):
+        assert_safe_bind(host, dev_mode=True)
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "example.com", "10.0.0.1"])
+def test_assert_safe_bind_allows_any_host_when_auth_enabled(host):
+    assert_safe_bind(host, dev_mode=False)  # must not raise

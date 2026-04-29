@@ -17,8 +17,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._slot import SlotVec, pad_pow2, sign_poly_d3
-from ._validation import (assert_at_least_one_member, assert_binary,
-                          assert_in_range, assert_nonempty, assert_same_length)
+from ._validation import (
+    assert_at_least_one_member,
+    assert_binary,
+    assert_in_range,
+    assert_nonempty,
+    assert_same_length,
+)
 
 
 @dataclass
@@ -55,8 +60,8 @@ def fairness_oracle(y_true: np.ndarray,
     assert_in_range("threshold", threshold, low=0.0, high=1.0)
     n_a = max(float(np.sum(group_a)), 1.0)
     n_b = max(float(np.sum(group_b)), 1.0)
-    tp_a, fp_a, fn_a, _ = _confusion_oracle(y_true, y_pred, group_a)
-    tp_b, fp_b, fn_b, _ = _confusion_oracle(y_true, y_pred, group_b)
+    tp_a, fp_a, _fn_a, _tn_a = _confusion_oracle(y_true, y_pred, group_a)
+    tp_b, fp_b, _fn_b, _tn_b = _confusion_oracle(y_true, y_pred, group_b)
     pos_a = max(float(np.sum(y_true * group_a)), 1.0)
     pos_b = max(float(np.sum(y_true * group_b)), 1.0)
     pred_pos_a = max(tp_a + fp_a, 1.0)

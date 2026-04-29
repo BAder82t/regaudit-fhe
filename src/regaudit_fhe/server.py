@@ -49,6 +49,9 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import ipaddress
 import logging
 import os
 import platform
@@ -56,12 +59,12 @@ import sys
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional, Sequence
+from typing import Any
 
 try:
-    from fastapi import (Body, Depends, FastAPI, HTTPException, Request,
-                         Response, status)
+    from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
@@ -75,7 +78,6 @@ from . import __version__ as LIB_VERSION
 from .cli import SCHEMAS, _audit_dispatch
 from .reports import AuditEnvelope, verify_receipt
 from .schemas import SchemaError, list_schemas, load_schema
-
 
 PRIVACY_WARNING = (
     "regaudit-fhe HTTP server: NOT A PRIVACY BOUNDARY by itself. The "
@@ -98,7 +100,7 @@ SCOPE_ADMIN = "admin"
 
 @dataclass(frozen=True)
 class ServerConfig:
-    api_keys: Dict[str, frozenset]
+    api_keys: dict[str, frozenset]
     dev_mode: bool
     max_body_bytes: int
     rate_limit_per_min: int
@@ -106,8 +108,8 @@ class ServerConfig:
     cors_origins: Sequence[str]
 
 
-def _parse_api_keys(raw: str) -> Dict[str, frozenset]:
-    out: Dict[str, frozenset] = {}
+def _parse_api_keys(raw: str) -> dict[str, frozenset]:
+    out: dict[str, frozenset] = {}
     for entry in raw.split(";"):
         entry = entry.strip()
         if not entry:
@@ -120,6 +122,33 @@ def _parse_api_keys(raw: str) -> Dict[str, frozenset]:
         if key:
             out[key] = scopes_set
     return out
+
+
+def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
+    """Refuse to start with ``dev_mode`` enabled on a non-loopback bind.
+
+    ``dev_mode`` disables bearer-token auth, so any non-loopback bind
+    is treated as a misconfiguration. Raises :class:`RuntimeError`
+    when the combination is unsafe so callers cannot accidentally
+    expose an unauthenticated audit endpoint to a network.
+    """
+    if not dev_mode:
+        return
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        # Hostnames (e.g. "localhost") are accepted only when they
+        # resolve unambiguously to loopback. Treat anything else as
+        # unsafe rather than performing DNS at startup.
+        if host.lower() not in ("localhost",):
+            raise RuntimeError(
+                f"REGAUDIT_FHE_DEV_MODE=1 refuses non-loopback bind: "
+                f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost.") from None
+        return
+    if not addr.is_loopback:
+        raise RuntimeError(
+            f"REGAUDIT_FHE_DEV_MODE=1 refuses non-loopback bind: "
+            f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost.")
 
 
 def load_config_from_env() -> ServerConfig:
@@ -154,7 +183,7 @@ _RESERVED_LOG_FIELDS = frozenset({
 class _JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         import json
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                 time.gmtime(record.created)),
             "level": record.levelname,
@@ -195,7 +224,7 @@ class TokenBucketRateLimiter:
     def __init__(self, capacity_per_min: int) -> None:
         self.capacity = max(int(capacity_per_min), 1)
         self.refill_rate = self.capacity / 60.0
-        self._buckets: Dict[str, list[float]] = defaultdict(
+        self._buckets: dict[str, list[float]] = defaultdict(
             lambda: [float(self.capacity), time.monotonic()]
         )
 
@@ -313,15 +342,40 @@ class Caller:
     scopes: frozenset
 
 
-def _extract_bearer(request: Request) -> Optional[str]:
+def _extract_bearer(request: Request) -> str | None:
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
     return None
 
 
-def make_auth_dependency(config: ServerConfig
+def _hash_token(token: str, salt: bytes) -> bytes:
+    return hashlib.sha256(salt + token.encode("utf-8")).digest()
+
+
+def _freeze_api_keys(api_keys: dict[str, frozenset], salt: bytes
+                     ) -> tuple[tuple[bytes, frozenset], ...]:
+    return tuple((_hash_token(tok, salt), scopes)
+                 for tok, scopes in api_keys.items())
+
+
+def make_auth_dependency(config: ServerConfig,
+                          *,
+                          salt: bytes,
                           ) -> Callable[..., Caller]:
+    """Build an auth dependency that compares bearer tokens in
+    constant time.
+
+    Tokens are hashed with a per-process random ``salt`` at server
+    boot; the request's bearer is hashed under the same salt and
+    compared against every stored hash with :func:`hmac.compare_digest`,
+    OR-ing results so the time taken does not depend on which entry
+    matched (or whether any matched). The resolved ``Caller.key_id``
+    is the hex prefix of the hashed token, never the raw bearer — so
+    log lines and rate-limit buckets do not leak credentials.
+    """
+    frozen = _freeze_api_keys(config.api_keys, salt)
+
     def dependency(request: Request) -> Caller:
         if config.dev_mode:
             return Caller(key_id="dev", scopes=frozenset({SCOPE_ADMIN}))
@@ -331,13 +385,17 @@ def make_auth_dependency(config: ServerConfig
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="bearer token required",
                 headers={"WWW-Authenticate": "Bearer"})
-        scopes = config.api_keys.get(token)
-        if scopes is None:
+        candidate = _hash_token(token, salt)
+        matched_scopes: frozenset | None = None
+        for stored_hash, scopes in frozen:
+            if hmac.compare_digest(stored_hash, candidate):
+                matched_scopes = scopes
+        if matched_scopes is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="unknown bearer token",
                 headers={"WWW-Authenticate": "Bearer"})
-        return Caller(key_id=token, scopes=scopes)
+        return Caller(key_id=candidate.hex()[:12], scopes=matched_scopes)
 
     return dependency
 
@@ -357,7 +415,7 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
 if HAVE_FASTAPI:
 
     class VerifyRequest(BaseModel):
-        envelope: Dict[str, Any]
+        envelope: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -365,8 +423,9 @@ if HAVE_FASTAPI:
 # ---------------------------------------------------------------------------
 
 
-def build_app(*, config: Optional[ServerConfig] = None,
-              logger: Optional[logging.Logger] = None
+def build_app(*, config: ServerConfig | None = None,
+              logger: logging.Logger | None = None,
+              salt: bytes | None = None,
               ) -> Any:
     if not HAVE_FASTAPI:
         raise RuntimeError(
@@ -375,6 +434,7 @@ def build_app(*, config: Optional[ServerConfig] = None,
     config = config or load_config_from_env()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
+    auth_salt = salt if salt is not None else os.urandom(32)
 
     if config.dev_mode:
         logger.warning("dev_mode_enabled",
@@ -403,7 +463,7 @@ def build_app(*, config: Optional[ServerConfig] = None,
             allow_headers=["authorization", "content-type", "x-request-id"],
         )
 
-    auth_dep = make_auth_dependency(config)
+    auth_dep = make_auth_dependency(config, salt=auth_salt)
 
     def authed_with(*scopes: str
                     ) -> Callable[[Request], Caller]:
@@ -422,11 +482,11 @@ def build_app(*, config: Optional[ServerConfig] = None,
     # ----- Probes (no auth) ------------------------------------------------
 
     @app.get("/healthz")
-    def healthz() -> Dict[str, str]:
+    def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> Dict[str, Any]:
+    def readyz() -> dict[str, Any]:
         try:
             load_schema("envelope")
             ready = True
@@ -441,7 +501,7 @@ def build_app(*, config: Optional[ServerConfig] = None,
         }
 
     @app.get("/version")
-    def version() -> Dict[str, str]:
+    def version() -> dict[str, str]:
         try:
             import tenseal
             backend_version = tenseal.__version__
@@ -457,32 +517,32 @@ def build_app(*, config: Optional[ServerConfig] = None,
 
     @app.get("/v1/schemas")
     def schemas_index(caller: Caller = Depends(authed_with(SCOPE_READ))
-                       ) -> Dict[str, Any]:
+                       ) -> dict[str, Any]:
         return {"schemas": list(list_schemas())}
 
     @app.get("/v1/schemas/{name}")
     def schema_by_name(name: str,
                        caller: Caller = Depends(authed_with(SCOPE_READ))
-                       ) -> Dict[str, Any]:
+                       ) -> dict[str, Any]:
         try:
             return load_schema(name)
-        except KeyError:
-            raise HTTPException(404, f"unknown schema {name!r}")
+        except KeyError as exc:
+            raise HTTPException(404, f"unknown schema {name!r}") from exc
 
     # ----- Audit (run scope) ----------------------------------------------
 
     @app.post("/v1/audit/{primitive}")
     def audit(primitive: str,
-              payload: Dict[str, Any] = Body(...),
+              payload: dict[str, Any] = Body(...),
               caller: Caller = Depends(authed_with(SCOPE_RUN))
-              ) -> Dict[str, Any]:
+              ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
             raise HTTPException(404, f"unknown primitive {primitive!r}")
         try:
             env = _audit_dispatch(primitive, payload)
         except SchemaError as exc:
-            raise HTTPException(422, str(exc))
+            raise HTTPException(422, str(exc)) from exc
         # Never log payload — it may contain PHI / PII.
         logger.info("audit_evaluated",
                     extra={"key_id": caller.key_id, "primitive": primitive,
@@ -495,7 +555,7 @@ def build_app(*, config: Optional[ServerConfig] = None,
     @app.post("/v1/verify")
     def verify(req: VerifyRequest = Body(...),
                caller: Caller = Depends(authed_with(SCOPE_VERIFY))
-               ) -> Dict[str, Any]:
+               ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         env = AuditEnvelope.from_dict(req.envelope)
         valid = verify_receipt(env)

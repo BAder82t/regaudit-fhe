@@ -29,8 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Tuple
-
+from typing import Any
 
 SECURITY_LEVELS = {
     "HEStd_128_classic": 128,
@@ -42,7 +41,7 @@ SECURITY_LEVELS = {
 # SEAL-validated upper bounds on `log Q` (sum of coeff_mod_bit_sizes)
 # for each ring dimension at 128-bit IND-CPA security. Below these
 # bounds the parameter set is accepted; at or above, SEAL refuses.
-SEAL_MAX_LOG_Q_128: Dict[int, int] = {
+SEAL_MAX_LOG_Q_128: dict[int, int] = {
     1024:    27,
     2048:    54,
     4096:   109,
@@ -64,9 +63,9 @@ class CKKSParams:
     scaling_mod_size: int = 40
     first_mod_size: int = 60
     security_level: str = "HEStd_128_classic"
-    coeff_mod_bit_sizes: Tuple[int, ...] = field(default_factory=tuple)
-    rotation_steps: Tuple[int, ...] = field(default_factory=tuple)
-    extra_rotation_steps: Tuple[int, ...] = field(default_factory=tuple)
+    coeff_mod_bit_sizes: tuple[int, ...] = field(default_factory=tuple)
+    rotation_steps: tuple[int, ...] = field(default_factory=tuple)
+    extra_rotation_steps: tuple[int, ...] = field(default_factory=tuple)
     precision_loss_bound: float = 1e-2
 
     def __post_init__(self) -> None:
@@ -84,13 +83,13 @@ class CKKSParams:
     # Defaults
     # ------------------------------------------------------------------
 
-    def _default_coeff_chain(self) -> Tuple[int, ...]:
+    def _default_coeff_chain(self) -> tuple[int, ...]:
         first = self.first_mod_size
         scaling = self.scaling_mod_size
         depth = self.multiplicative_depth
-        return (first,) + tuple([scaling] * depth) + (first,)
+        return (first, *([scaling] * depth), first)
 
-    def _default_rotation_steps(self) -> Tuple[int, ...]:
+    def _default_rotation_steps(self) -> tuple[int, ...]:
         n_slots = self.ring_dim // 2
         out: list[int] = []
         step = 1
@@ -258,7 +257,7 @@ class CKKSParams:
     # Serialisation
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ring_dim": int(self.ring_dim),
             "multiplicative_depth": int(self.multiplicative_depth),
@@ -280,13 +279,13 @@ class CKKSParams:
     def to_envelope_parameter_set(self):
         """Convert to the :class:`regaudit_fhe.ParameterSet` shape used
         by the audit envelope."""
+        import contextlib
+
         from ..reports import ParameterSet
         backend_version = ""
-        try:
+        with contextlib.suppress(Exception):
             import tenseal as _ts
             backend_version = getattr(_ts, "__version__", "")
-        except Exception:
-            pass
         return ParameterSet(
             backend="tenseal-ckks",
             poly_modulus_degree=self.ring_dim,

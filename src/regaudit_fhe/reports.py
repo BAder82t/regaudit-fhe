@@ -47,13 +47,16 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import datetime as _dt
 import hashlib
 import json
 import os
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+import warnings
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from cryptography.exceptions import InvalidSignature
@@ -63,13 +66,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
 LIB_VERSION: str = "0.0.7"
 SIGNATURE_ALG: str = "Ed25519"
 
 
-REGULATION_MAP: Dict[str, List[str]] = {
+REGULATION_MAP: dict[str, list[str]] = {
     "fairness": ["NYC_LL144", "EU_AI_ACT_ART10", "EU_AI_ACT_ART15",
                  "COLORADO_AI_ACT", "CFPB_ALG_DISCRIM"],
     "provenance": ["EU_AI_ACT_ART10", "21_CFR_PART_11", "GDPR_ART22", "HIPAA"],
@@ -100,7 +102,7 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
-def report_to_dict(report: Any) -> Dict[str, Any]:
+def report_to_dict(report: Any) -> dict[str, Any]:
     if dataclasses.is_dataclass(report):
         raw = dataclasses.asdict(report)
     else:
@@ -129,7 +131,7 @@ def sha256_hex(data: bytes) -> str:
 # ---------------------------------------------------------------------------
 
 
-def commit_input(name: str, value: Any) -> Dict[str, str]:
+def commit_input(name: str, value: Any) -> dict[str, str]:
     """Hash a single named input into a commitment record.
 
     The commitment binds the input name and its canonicalised value to
@@ -141,7 +143,7 @@ def commit_input(name: str, value: Any) -> Dict[str, str]:
     return {"name": name, "sha256": sha256_hex(body)}
 
 
-def commitments_for(inputs: Mapping[str, Any]) -> List[Dict[str, str]]:
+def commitments_for(inputs: Mapping[str, Any]) -> list[dict[str, str]]:
     return [commit_input(k, v) for k, v in sorted(inputs.items())]
 
 
@@ -163,7 +165,7 @@ class ParameterSet:
     library_version: str = LIB_VERSION
     backend_version: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "backend": self.backend,
             "poly_modulus_degree": int(self.poly_modulus_degree),
@@ -196,11 +198,9 @@ def parameter_set_from_ckks_context(ctx: Any,
     """
     backend = "tenseal-ckks"
     backend_version = ""
-    try:
+    with contextlib.suppress(Exception):
         import tenseal as _ts
         backend_version = getattr(_ts, "__version__", "")
-    except Exception:
-        pass
 
     poly = int(getattr(ctx, "poly_modulus_degree", 0))
     return ParameterSet(
@@ -234,7 +234,7 @@ class TimestampAuthority:
     issuer: str
     sign_callable: Callable[[bytes], bytes]
 
-    def stamp(self, body: bytes) -> Dict[str, str]:
+    def stamp(self, body: bytes) -> dict[str, str]:
         token = self.sign_callable(body)
         return {"issuer": self.issuer,
                 "token_b64": base64.b64encode(token).decode("ascii"),
@@ -254,7 +254,7 @@ class Signer:
     public_key: Ed25519PublicKey
 
     @classmethod
-    def generate(cls, *, issuer: str, key_id: str | None = None) -> "Signer":
+    def generate(cls, *, issuer: str, key_id: str | None = None) -> Signer:
         priv = Ed25519PrivateKey.generate()
         return cls(
             issuer=issuer,
@@ -265,7 +265,7 @@ class Signer:
 
     @classmethod
     def from_pem(cls, *, issuer: str, key_id: str, private_pem: bytes,
-                 password: bytes | None = None) -> "Signer":
+                 password: bytes | None = None) -> Signer:
         priv = serialization.load_pem_private_key(private_pem, password=password)
         if not isinstance(priv, Ed25519PrivateKey):
             raise TypeError("regaudit-fhe envelope signing requires Ed25519")
@@ -306,18 +306,18 @@ class AuditEnvelope:
     algorithm_version: str
     primitive: str
     backend: str
-    parameter_set: Dict[str, Any]
+    parameter_set: dict[str, Any]
     parameter_set_hash: str
-    regulations: List[str]
-    result: Dict[str, Any]
-    input_commitments: List[Dict[str, str]]
-    depth_budget: Dict[str, int]
+    regulations: list[str]
+    result: dict[str, Any]
+    input_commitments: list[dict[str, str]]
+    depth_budget: dict[str, int]
     issued_at: str
     issuer: str
-    receipt: Dict[str, Any]
-    timestamp: Optional[Dict[str, str]] = None
+    receipt: dict[str, Any]
+    timestamp: dict[str, str] | None = None
 
-    def signed_body(self) -> Dict[str, Any]:
+    def signed_body(self) -> dict[str, Any]:
         """Return the envelope payload that the receipt is computed
         over — every field except the receipt and the optional
         timestamp."""
@@ -326,8 +326,8 @@ class AuditEnvelope:
         body.pop("timestamp", None)
         return body
 
-    def to_dict(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
             "schema": self.schema,
             "schema_version": self.schema_version,
             "algorithm_version": self.algorithm_version,
@@ -351,7 +351,7 @@ class AuditEnvelope:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "AuditEnvelope":
+    def from_dict(cls, data: Mapping[str, Any]) -> AuditEnvelope:
         return cls(
             schema=data["schema"],
             schema_version=data.get("schema_version", SCHEMA_VERSION),
@@ -464,7 +464,7 @@ class VerificationOutcome:
     key_id: str
     parameter_set_hash: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "valid": bool(self.valid),
             "sha256_valid": bool(self.sha256_valid),
@@ -558,6 +558,9 @@ def verify_envelope(env: AuditEnvelope,
     )
 
 
+_VERIFY_RECEIPT_WEAK_WARNED = False
+
+
 def verify_receipt(env: AuditEnvelope,
                    *,
                    trusted_keys: Mapping[str, str] | None = None,
@@ -574,15 +577,29 @@ def verify_receipt(env: AuditEnvelope,
 
     Pass ``strict=True`` to require ``trusted_keys`` and reject any
     envelope whose ``key_id`` is not in the trust store; this is the
-    recommended setting for regulator-side verifiers.
+    recommended setting for regulator-side verifiers. Calling without
+    ``trusted_keys`` emits a one-time ``UserWarning`` so integrators
+    do not silently rely on hash-and-self-signature verification.
     """
+    global _VERIFY_RECEIPT_WEAK_WARNED
     if strict and not trusted_keys:
         return False
+    if not trusted_keys and not _VERIFY_RECEIPT_WEAK_WARNED:
+        _VERIFY_RECEIPT_WEAK_WARNED = True
+        warnings.warn(
+            "verify_receipt() called without trusted_keys: this verifies "
+            "the embedded signature against the embedded public key only "
+            "and does NOT authenticate the issuer. Pass trusted_keys={key_id: "
+            "pem} (and strict=True for regulator-side verifiers) to bind the "
+            "envelope to an approved issuer.",
+            UserWarning,
+            stacklevel=2,
+        )
     return verify_envelope(env, trusted_keys=trusted_keys,
                             require_signature=True).valid
 
 
-def issue_receipt(payload: Mapping[str, Any]) -> Dict[str, str]:
+def issue_receipt(payload: Mapping[str, Any]) -> dict[str, str]:
     """Compatibility helper retained from v0.0.1.
 
     Returns a SHA-256-only receipt; new code should use ``envelope`` to

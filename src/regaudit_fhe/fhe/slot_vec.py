@@ -10,13 +10,12 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence, Union
 
 import numpy as np
 
 from .._slot import MAX_DEPTH, DepthBudgetExceeded
-
 
 OP_COUNTERS: dict[str, int] = {
     "ct_ct_muls": 0,
@@ -40,7 +39,7 @@ def snapshot_op_counters() -> dict[str, int]:
 
 @dataclass
 class EncryptedSlotVec:
-    ciphertext: "object"          # tenseal.CKKSVector
+    ciphertext: object          # tenseal.CKKSVector
     n: int
     depth: int = 0
     max_depth: int = MAX_DEPTH
@@ -53,7 +52,7 @@ class EncryptedSlotVec:
 
     @classmethod
     def encrypt(cls, ctx, values: Sequence[float],
-                max_depth: int = MAX_DEPTH) -> "EncryptedSlotVec":
+                max_depth: int = MAX_DEPTH) -> EncryptedSlotVec:
         from .context import CKKSContext
         if not isinstance(ctx, CKKSContext):
             raise TypeError("encrypt(ctx, values) requires a CKKSContext")
@@ -62,10 +61,10 @@ class EncryptedSlotVec:
         return cls(ciphertext=ct, n=len(vals),
                    depth=0, max_depth=max_depth)
 
-    def decrypt(self) -> List[float]:
+    def decrypt(self) -> list[float]:
         return list(self.ciphertext.decrypt())[: self.n]
 
-    def copy(self) -> "EncryptedSlotVec":
+    def copy(self) -> EncryptedSlotVec:
         """Independent ciphertext copy.
 
         TenSEAL operations such as multiplication mod-switch the
@@ -83,8 +82,8 @@ class EncryptedSlotVec:
     def first_slot(self) -> float:
         return float(self.decrypt()[0])
 
-    def __add__(self, other: Union["EncryptedSlotVec", np.ndarray, float, list]
-                ) -> "EncryptedSlotVec":
+    def __add__(self, other: EncryptedSlotVec | np.ndarray | float | list
+                ) -> EncryptedSlotVec:
         OP_COUNTERS["additions"] += 1
         if isinstance(other, EncryptedSlotVec):
             return EncryptedSlotVec(
@@ -99,11 +98,11 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def __radd__(self, other) -> "EncryptedSlotVec":
+    def __radd__(self, other) -> EncryptedSlotVec:
         return self.__add__(other)
 
-    def __sub__(self, other: Union["EncryptedSlotVec", np.ndarray, float, list]
-                ) -> "EncryptedSlotVec":
+    def __sub__(self, other: EncryptedSlotVec | np.ndarray | float | list
+                ) -> EncryptedSlotVec:
         OP_COUNTERS["subtractions"] += 1
         if isinstance(other, EncryptedSlotVec):
             return EncryptedSlotVec(
@@ -118,13 +117,13 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def __neg__(self) -> "EncryptedSlotVec":
+    def __neg__(self) -> EncryptedSlotVec:
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * -1.0,
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def mul_pt(self, plaintext) -> "EncryptedSlotVec":
+    def mul_pt(self, plaintext) -> EncryptedSlotVec:
         OP_COUNTERS["ct_pt_muls"] += 1
         pt = _as_list(plaintext, self.n)
         return EncryptedSlotVec(
@@ -132,14 +131,14 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth + 1, max_depth=self.max_depth,
         )
 
-    def mul_scalar(self, scalar: float) -> "EncryptedSlotVec":
+    def mul_scalar(self, scalar: float) -> EncryptedSlotVec:
         OP_COUNTERS["ct_scalar_muls"] += 1
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * float(scalar),
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def mul_ct(self, other: "EncryptedSlotVec") -> "EncryptedSlotVec":
+    def mul_ct(self, other: EncryptedSlotVec) -> EncryptedSlotVec:
         OP_COUNTERS["ct_ct_muls"] += 1
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * other.ciphertext,
@@ -148,7 +147,7 @@ class EncryptedSlotVec:
             max_depth=self.max_depth,
         )
 
-    def rotate(self, k: int) -> "EncryptedSlotVec":
+    def rotate(self, k: int) -> EncryptedSlotVec:
         """Cyclic slot rotation by ``k`` via a plaintext permutation matrix.
 
         TenSEAL's CKKSVector does not expose a Galois-rotation primitive,
@@ -168,7 +167,7 @@ class EncryptedSlotVec:
             perm[(c + k) % n, c] = 1.0
         return self.mm_pt(perm)
 
-    def sum_all(self) -> "EncryptedSlotVec":
+    def sum_all(self) -> EncryptedSlotVec:
         # TenSEAL .sum() expands internally to log2(n) rotate-and-add steps;
         # count those for benchmark reporting parity with rotation-based
         # backends.
@@ -179,7 +178,7 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def mm_pt(self, matrix: "object") -> "EncryptedSlotVec":
+    def mm_pt(self, matrix: object) -> EncryptedSlotVec:
         """Encrypted-vector × plaintext-matrix multiplication.
 
         Used by the CDF primitive to materialise prefix sums in a
@@ -202,7 +201,7 @@ class EncryptedSlotVec:
         )
 
 
-def _as_list(value, target_len: int) -> List[float]:
+def _as_list(value, target_len: int) -> list[float]:
     if isinstance(value, np.ndarray):
         return [float(v) for v in value.tolist()]
     if isinstance(value, list):

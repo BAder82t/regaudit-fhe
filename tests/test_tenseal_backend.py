@@ -23,7 +23,6 @@ tenseal = pytest.importorskip("tenseal")
 from regaudit_fhe.fhe import build_d6_context  # noqa: E402
 from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
 
-
 RNG = np.random.default_rng(20260426)
 TOL = 1e-2          # CKKS noise tolerance after up to six multiplications
 TOL_LOOSE = 5e-2    # tolerance for sums-of-many-mults primitives
@@ -158,7 +157,8 @@ def test_concordance_within_ckks_tolerance(ctx) -> None:
 
 
 def test_sign_polynomial_encrypted_matches_plaintext(ctx) -> None:
-    from regaudit_fhe._slot import SlotVec, sign_poly_d3 as plain_sign
+    from regaudit_fhe._slot import SlotVec
+    from regaudit_fhe._slot import sign_poly_d3 as plain_sign
     from regaudit_fhe.fhe.slot_vec import sign_poly_d3 as enc_sign
 
     values = np.linspace(-0.9, 0.9, 16)

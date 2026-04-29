@@ -19,8 +19,9 @@ Skipped automatically if the [fhe] extra is not installed.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict
+from typing import Any
 
 import numpy as np
 import pytest
@@ -30,7 +31,6 @@ import regaudit_fhe as rf
 tenseal = pytest.importorskip("tenseal")
 from regaudit_fhe.fhe import build_d6_context  # noqa: E402
 from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
-
 
 RNG = np.random.default_rng(20260426)
 EQUIVALENCE_TOL = 5e-2     # CKKS noise after up to six multiplications
@@ -52,12 +52,12 @@ class Case:
     plaintext: Callable[..., Any]
     encrypted: Callable[..., Any]
     extract: Callable[[Any], float]
-    inputs: Callable[[], Dict[str, Any]]
+    inputs: Callable[[], dict[str, Any]]
     breach_field: str
-    breach_inputs: Callable[[], Dict[str, Any]]
+    breach_inputs: Callable[[], dict[str, Any]]
 
 
-def _fairness_inputs() -> Dict[str, Any]:
+def _fairness_inputs() -> dict[str, Any]:
     n = 32
     y_true = (RNG.uniform(size=n) < 0.4).astype(float)
     y_pred = ((RNG.uniform(size=n) < 0.4) | y_true.astype(bool)).astype(float)
@@ -66,7 +66,7 @@ def _fairness_inputs() -> Dict[str, Any]:
             "group_a": g_a, "group_b": 1.0 - g_a, "threshold": 0.1}
 
 
-def _fairness_breach_inputs() -> Dict[str, Any]:
+def _fairness_breach_inputs() -> dict[str, Any]:
     """Construct y_pred with disparity exactly at the threshold."""
     y_true = np.array([1, 1, 1, 1, 0, 0, 0, 0], dtype=float)
     y_pred = np.array([1, 1, 1, 0, 1, 0, 0, 0], dtype=float)
@@ -75,12 +75,12 @@ def _fairness_breach_inputs() -> Dict[str, Any]:
             "group_a": g_a, "group_b": 1.0 - g_a, "threshold": 0.25}
 
 
-def _provenance_inputs() -> Dict[str, Any]:
+def _provenance_inputs() -> dict[str, Any]:
     return {"attributions": np.abs(RNG.standard_normal(64)),
             "row_ids": np.arange(64), "n_buckets": 8, "k": 3}
 
 
-def _concordance_inputs() -> Dict[str, Any]:
+def _concordance_inputs() -> dict[str, Any]:
     # Smaller cohort than the other primitives because the encrypted
     # all-pairs Harrell C-index materialises an N(N-1)-length pair
     # vector under encryption; runtime grows quadratically in N.
@@ -90,26 +90,28 @@ def _concordance_inputs() -> Dict[str, Any]:
             "event": (RNG.uniform(size=n) < 0.7).astype(float)}
 
 
-def _calibration_inputs() -> Dict[str, Any]:
+def _calibration_inputs() -> dict[str, Any]:
     K = 16
     return {"scores": RNG.uniform(size=K),
             "quantiles": np.full(K, 0.5)}
 
 
-def _drift_inputs() -> Dict[str, Any]:
+def _drift_inputs() -> dict[str, Any]:
     p = RNG.uniform(size=16)
     q = p + RNG.normal(scale=0.05, size=16)
     return {"p": p, "q": np.maximum(q, 0)}
 
 
-def _drift_breach_inputs() -> Dict[str, Any]:
+def _drift_breach_inputs() -> dict[str, Any]:
     """Two well-separated histograms that should fire the drift bit."""
-    p = np.zeros(16); p[2] = 1.0
-    q = np.zeros(16); q[12] = 1.0
+    p = np.zeros(16)
+    p[2] = 1.0
+    q = np.zeros(16)
+    q[12] = 1.0
     return {"p": p, "q": q, "drift_threshold": 0.005}
 
 
-def _disagreement_inputs() -> Dict[str, Any]:
+def _disagreement_inputs() -> dict[str, Any]:
     coeffs = [(0.0, 1.00, 0.05, 0.0),
               (0.0, 0.95, 0.06, 0.0),
               (0.0, 1.05, 0.04, 0.0)]
@@ -117,7 +119,7 @@ def _disagreement_inputs() -> Dict[str, Any]:
             "test_input": np.linspace(-0.4, 0.4, 32)}
 
 
-def _disagreement_breach_inputs() -> Dict[str, Any]:
+def _disagreement_breach_inputs() -> dict[str, Any]:
     coeffs = [(0.0, 1.0, 0.0, 0.0),
               (0.0, 1.5, 0.0, 0.0),
               (0.0, 0.5, 0.0, 0.0)]
@@ -126,7 +128,7 @@ def _disagreement_breach_inputs() -> Dict[str, Any]:
             "threshold": 0.001}
 
 
-def _calibration_breach_inputs() -> Dict[str, Any]:
+def _calibration_breach_inputs() -> dict[str, Any]:
     """Half the scores below their quantile (in set), half above."""
     K = 8
     scores = np.array([0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9])
@@ -302,7 +304,7 @@ def test_full_matrix_summary(ctx) -> None:
     """One report-style assertion that every primitive cleared the
     matrix on a single random seed. This is the test a reviewer reads
     first to verify coverage."""
-    rows: list[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for case in CASES:
         fhe_p.reset_last_depth()
         args = case.inputs()

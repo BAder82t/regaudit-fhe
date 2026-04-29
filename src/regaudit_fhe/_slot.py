@@ -22,8 +22,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Union
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -48,37 +47,37 @@ class SlotVec:
             )
 
     @classmethod
-    def encrypt(cls, values, max_depth: int = MAX_DEPTH) -> "SlotVec":
+    def encrypt(cls, values, max_depth: int = MAX_DEPTH) -> SlotVec:
         return cls(slots=np.asarray(values, dtype=np.float64), depth=0, max_depth=max_depth)
 
     @property
     def n(self) -> int:
         return self.slots.shape[0]
 
-    def __add__(self, other: Union["SlotVec", np.ndarray, float]) -> "SlotVec":
+    def __add__(self, other: SlotVec | np.ndarray | float) -> SlotVec:
         if isinstance(other, SlotVec):
             return SlotVec(self.slots + other.slots,
                            max(self.depth, other.depth), self.max_depth)
         return SlotVec(self.slots + np.asarray(other), self.depth, self.max_depth)
 
-    def __radd__(self, other) -> "SlotVec":
+    def __radd__(self, other) -> SlotVec:
         return self.__add__(other)
 
-    def __sub__(self, other: Union["SlotVec", np.ndarray, float]) -> "SlotVec":
+    def __sub__(self, other: SlotVec | np.ndarray | float) -> SlotVec:
         if isinstance(other, SlotVec):
             return SlotVec(self.slots - other.slots,
                            max(self.depth, other.depth), self.max_depth)
         return SlotVec(self.slots - np.asarray(other), self.depth, self.max_depth)
 
-    def __neg__(self) -> "SlotVec":
+    def __neg__(self) -> SlotVec:
         return SlotVec(-self.slots, self.depth, self.max_depth)
 
-    def mul_pt(self, plaintext: Union[np.ndarray, float]) -> "SlotVec":
+    def mul_pt(self, plaintext: np.ndarray | float) -> SlotVec:
         """Plaintext-vector × ciphertext. One level consumed."""
         return SlotVec(self.slots * np.asarray(plaintext),
                        self.depth + 1, self.max_depth)
 
-    def mul_scalar(self, scalar: float) -> "SlotVec":
+    def mul_scalar(self, scalar: float) -> SlotVec:
         """Multiply every slot by a constant scalar.
 
         Free in depth. In a real CKKS deployment this corresponds to
@@ -87,16 +86,16 @@ class SlotVec:
         """
         return SlotVec(self.slots * float(scalar), self.depth, self.max_depth)
 
-    def mul_ct(self, other: "SlotVec") -> "SlotVec":
+    def mul_ct(self, other: SlotVec) -> SlotVec:
         """Ciphertext × ciphertext. One level consumed after relin + rescale."""
         return SlotVec(self.slots * other.slots,
                        max(self.depth, other.depth) + 1, self.max_depth)
 
-    def rotate(self, k: int) -> "SlotVec":
+    def rotate(self, k: int) -> SlotVec:
         """Cyclic slot rotation by k positions. No depth consumed."""
         return SlotVec(np.roll(self.slots, -k), self.depth, self.max_depth)
 
-    def sum_all(self) -> "SlotVec":
+    def sum_all(self) -> SlotVec:
         """Sum of all slots, broadcast to every slot. Halevi-Shoup rotate-add tree.
 
         Requires n to be a power of two for clean halving.

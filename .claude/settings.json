@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_smoke.py tests/test_envelope_signatures.py -q)",
+      "Bash(python -m ruff check src tests --fix)",
+      "Bash(python -m ruff check src tests --statistics)",
+      "Bash(python -m ruff check src tests --select S101,S104,S110,F821,F841)",
+      "Bash(python -m ruff check src tests --select F821,F841,E702,E402,E741,B904)",
+      "Bash(python -m ruff check src tests --select F821,F841,E741,RUF043)",
+      "Bash(python -m ruff check src tests --select S110)",
+      "Bash(python -m ruff check src tests --select RUF059)",
+      "Bash(python -m ruff check src tests)",
+      "Bash(python -m mypy)",
+      "Bash(python -m bandit -r src -c pyproject.toml -q)",
+      "Bash(pip install *)",
+      "Bash(python -m bandit -r src -c pyproject.toml --severity-level medium)",
+      "Bash(python -m bandit -r src -c pyproject.toml --severity-level medium -q)"
+    ]
+  }
+}

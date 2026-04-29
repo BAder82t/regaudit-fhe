@@ -13,14 +13,11 @@ Verifies that:
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
 import regaudit_fhe as rf
 from regaudit_fhe.fhe import CKKSParams, ParameterValidationError
-
 
 # ---------------------------------------------------------------------------
 # CKKSParams precision-bound enforcement

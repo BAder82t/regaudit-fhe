@@ -13,7 +13,6 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
 
@@ -24,7 +23,7 @@ from ._validation import assert_finite, assert_nonempty, assert_same_length
 @dataclass
 class ProvenanceReport:
     bucket_aggregates: np.ndarray
-    topk_indices: List[int]
+    topk_indices: list[int]
     topk_indicator: np.ndarray
 
 

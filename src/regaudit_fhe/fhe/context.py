@@ -11,35 +11,39 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .params import CKKSParams
 
 
 @dataclass
 class CKKSContext:
-    context: "object"             # tenseal.Context
+    context: object             # tenseal.Context
     scale: float
     poly_modulus_degree: int
     n_slots: int
     rotation_steps: tuple[int, ...]
 
-    def encrypt_vector(self, values: Sequence[float]) -> "object":
+    def encrypt_vector(self, values: Sequence[float]) -> object:
         import tenseal as ts
         return ts.ckks_vector(self.context, list(values))
 
-    def decrypt_vector(self, ct: "object") -> List[float]:
+    def decrypt_vector(self, ct: object) -> list[float]:
         return list(ct.decrypt())
 
 
-def build_d6_context_from_params(params: "CKKSParams") -> CKKSContext:
+def build_d6_context_from_params(params: CKKSParams) -> CKKSContext:
     """Build a CKKS context from a validated :class:`CKKSParams`.
 
     The CKKSParams constructor has already run every validation rule
     the library promises to enforce; this function only translates the
     validated record into an active TenSEAL context.
     """
-    from .params import CKKSParams
-    if not isinstance(params, CKKSParams):
+    from .params import CKKSParams as _CKKSParams
+    if not isinstance(params, _CKKSParams):
         raise TypeError("build_d6_context_from_params requires CKKSParams")
     return build_d6_context(
         poly_modulus_degree=params.ring_dim,

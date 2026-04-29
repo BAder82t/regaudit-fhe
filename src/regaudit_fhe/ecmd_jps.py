@@ -12,12 +12,12 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
 
 import numpy as np
 
-from ._slot import SlotVec, sign_poly_d3
+from ._slot import SlotVec
 from ._validation import assert_finite, assert_nonempty
 
 
@@ -25,7 +25,7 @@ from ._validation import assert_finite, assert_nonempty
 class DisagreementReport:
     pairwise_variance: float
     breach: bool
-    per_model_outputs: List[float]
+    per_model_outputs: list[float]
 
 
 def disagreement_oracle(per_model_predictions: np.ndarray, threshold: float = 0.05) -> DisagreementReport:
@@ -95,8 +95,8 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
 
-    P: List[SlotVec] = []
-    per_model_outputs: List[float] = []
+    P: list[SlotVec] = []
+    per_model_outputs: list[float] = []
     for coeffs in model_polynomials:
         a0, a1, a2, a3 = coeffs
         p_i = (x.mul_scalar(a1)

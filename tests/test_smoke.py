@@ -14,7 +14,6 @@ import pytest
 
 import regaudit_fhe as rf
 
-
 RNG = np.random.default_rng(20260426)
 
 
@@ -109,8 +108,10 @@ def test_ew1_cdsf_zero_when_distributions_match():
 
 def test_ew1_cdsf_detects_drift():
     bins = 16
-    p = np.zeros(bins); p[2] = 1.0
-    q = np.zeros(bins); q[12] = 1.0
+    p = np.zeros(bins)
+    p[2] = 1.0
+    q = np.zeros(bins)
+    q[12] = 1.0
     cvm_ref = rf.ew1_cdsf.cvm_oracle(p, q)
     report = rf.audit_drift(p, q, drift_threshold=0.005)
     assert report.distance > 0.0
@@ -155,7 +156,7 @@ def test_envelope_roundtrip_passes_receipt_check():
     assert rf.verify_receipt(env) is True
     parsed = rf.AuditEnvelope.from_dict(env.to_dict())
     assert rf.verify_receipt(parsed) is True
-    parsed.regulations = parsed.regulations + ["TAMPER"]
+    parsed.regulations = [*parsed.regulations, "TAMPER"]
     assert rf.verify_receipt(parsed) is False
 
 

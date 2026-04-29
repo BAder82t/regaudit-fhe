@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 import regaudit_fhe as rf
-
 
 # --------------------------------------------------------------------------
 # 1. Bundled schemas load + enumerate
