@@ -42,10 +42,10 @@ included in this repository.
 
 Two audiences are served by the same surface area:
 
-| Audience       | Role                                | What they run                                        |
-| -------------- | ----------------------------------- | ---------------------------------------------------- |
-| **Client**     | Audited entity (vendor / operator). | `audit_*` primitives, `regaudit-fhe audit ...`.      |
-| **Regulator**  | External or in-house auditor.       | `verify_receipt(...)`, `regaudit-fhe verify ...`.    |
+| Audience       | Role                                | What they run                                                     |
+| -------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| **Client**     | Audited entity (vendor / operator). | `audit_*` primitives, `regaudit-fhe audit ...`.                   |
+| **Regulator**  | External or in-house auditor.       | `verify_envelope_or_raise(env, trust_store=...)` against a `TrustStore`; `regaudit-fhe verify --trusted-keys ...`. |
 
 A run produces an audit envelope (JSON) with a SHA-256 receipt. The
 client archives it, ships it to the regulator, or both. The regulator
@@ -78,8 +78,10 @@ consumes inside the d=6 CKKS circuit — is shown above. All six fit
 under six on the TenSEAL backend, leaving headroom for downstream
 commit-and-verify chaining. The values below are observed at runtime
 on the real CKKS execution path; the source of truth is
-`benchmarks/results/SUMMARY.md` and the `LAST_DEPTH` recorder in
-`regaudit_fhe.fhe.primitives`.
+`benchmarks/results/SUMMARY.md` and the `last_depth(name)` /
+`last_depths()` accessors in `regaudit_fhe.fhe.primitives` (the
+underlying state is held in a `ContextVar` so concurrent encrypted
+calls do not race on the depth record).
 
 ```
 Depth budget visualisation (each ▮ = 1 consumed level; observed on TenSEAL)
@@ -119,6 +121,8 @@ pip install regaudit-fhe[fhe]    # adds the TenSEAL CKKS backend
 
 ## Quick start
 
+### Client side — produce an audit envelope
+
 ```python
 import numpy as np
 import regaudit_fhe as rf
@@ -131,38 +135,80 @@ group_b = 1.0 - group_a
 report = rf.audit_fairness(y_true, y_pred, group_a, group_b, threshold=0.1)
 print(report.demographic_parity_diff, report.threshold_breached)
 
-envelope = rf.envelope("fairness", report)
+# Long-lived issuer key in production; ephemeral for demos.
+signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")
+envelope = rf.envelope("fairness", report, signer=signer)
 print(envelope.to_json())                     # ship this to the regulator
-
-assert rf.verify_receipt(envelope) is True    # regulator-side check
 ```
 
-> **The HTTP server is NOT a privacy boundary by itself.** The default
-> execution path is plaintext; the server runs in-process. Encrypted
-> execution requires the `[fhe]` extra AND CKKS secret-key custody
-> held off-host. Issuer authenticity is whatever Ed25519 key you
-> supply; verifiers decide which `key_id` to trust. The default
-> `verify_receipt(env)` checks the SHA-256 receipt and the embedded
-> Ed25519 signature against the embedded public key; it does NOT
-> validate that the public key belongs to a trusted issuer. Pass
-> `verify_receipt(env, trusted_keys=...)` or `strict=True` for
-> regulator-side verification. Read
-> [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
-> [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing
-> publicly.
+### Regulator side — verify against a trust store (recommended)
+
+```python
+import regaudit_fhe as rf
+
+# trust_store.json maps key_id -> PEM-encoded Ed25519 public key.
+# Optional fields: "revoked": [...], "parameter_set_pins": {key_id: hex}.
+trust_store = rf.TrustStore.from_json("trust_store.json")
+
+env = rf.AuditEnvelope.from_dict(received_payload)
+try:
+    outcome = rf.verify_envelope_or_raise(env, trust_store=trust_store)
+except rf.UntrustedIssuer:        # key_id unknown OR embedded PEM mismatch
+    ...
+except rf.RevokedIssuer:          # key_id is in trust_store.revoked
+    ...
+except rf.WrongParameterSet:      # parameter_set_hash != pinned value
+    ...
+except rf.HashMismatch:           # body changed since signing
+    ...
+except rf.InvalidSignature:       # Ed25519 verify failed
+    ...
+# All five subclass rf.EnvelopeVerificationError.
+```
+
+`verify_envelope_or_raise` returns the underlying `VerificationOutcome`
+on success. Use it instead of the legacy bool-return path whenever you
+need to react differently to each failure reason.
+
+> **Why a trust store is required.** `verify_receipt(env)` (no
+> arguments) only checks that the embedded SHA-256 receipt matches the
+> canonical body and that the Ed25519 signature verifies against the
+> embedded public key. That proves the bytes have not changed in
+> transit — it does **not** prove the envelope was produced by an
+> auditor the regulator approved. Calling without `trusted_keys` emits
+> a one-time `UserWarning` so integrators do not silently rely on the
+> weak path.
 
 ### Same flow, command line
 
 ```bash
+# Client
 echo '{"y_true":[1,0,1,1],"y_pred":[1,0,0,0],"group_a":[1,1,0,0],"group_b":[0,0,1,1]}' \
   > input.json
-
 regaudit-fhe audit fairness -i input.json -o envelope.json
-regaudit-fhe verify -i envelope.json
+
+# Regulator
+regaudit-fhe verify -i envelope.json --trusted-keys trust_store.json --strict
 ```
+
+The regulator command exits 0 on success, 1 on a typed verification
+failure (with a JSON body naming the `reason`), and 2 on bad CLI input.
+`--strict` without `--trusted-keys` is a hard error: the strict path
+demands an explicit trust store.
 
 `regaudit-fhe audit <primitive> --schema` prints the JSON shape that
 each primitive expects.
+
+> **The HTTP server is NOT a privacy boundary by itself.** The default
+> execution path is plaintext; the server runs in-process. Encrypted
+> execution requires the `[fhe]` extra AND CKKS secret-key custody
+> held off-host. Bearer-token authentication uses constant-time
+> hashed comparison (no token timing leak) and `REGAUDIT_FHE_DEV_MODE=1`
+> refuses to start on a non-loopback bind, but issuer authenticity
+> still relies on the verifier's trust store. Read
+> [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
+> [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing
+> publicly.
 
 ---
 
@@ -207,12 +253,12 @@ provide issuer authenticity when the verifier trusts the signing key.
 
 The [`examples/`](examples/) folder ships four end-to-end flows:
 
-| File                                    | Flow                                                              |
-| --------------------------------------- | ----------------------------------------------------------------- |
-| `01_client_local_audit.py`              | Internal audit on synthetic data; archive JSON locally.           |
-| `02_client_to_regulator.py`             | Build a regulator submission bundle.                              |
-| `03_regulator_verify.py`                | Verify every envelope inside a submission bundle.                 |
-| `04_cli_roundtrip.sh`                   | Pure CLI: input → audit → verify, no Python knowledge required.   |
+| File                                    | Flow                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `01_client_local_audit.py`              | Internal audit on synthetic data; archive JSON locally.                                           |
+| `02_client_to_regulator.py`             | Build a regulator submission bundle.                                                              |
+| `03_regulator_verify.py`                | Verify every envelope inside a bundle against a `TrustStore`; surfaces typed failure reasons.     |
+| `04_cli_roundtrip.sh`                   | Pure CLI: input → audit → verify, no Python knowledge required.                                   |
 
 Run any of them after `pip install -e .[dev]`.
 
@@ -226,8 +272,12 @@ src/regaudit_fhe/
   _validation.py       finite/binary/length input guards
   cli.py               regaudit-fhe CLI entrypoint
   reports.py           audit envelope: canonical JSON, parameter-set hash,
-                       input commitments, Ed25519 signing
+                       input commitments, Ed25519 signing,
+                       verify_envelope_or_raise()
   schemas.py           JSON Schema loader + validator
+  trust.py             TrustStore + typed verification exceptions
+                       (UntrustedIssuer, RevokedIssuer, WrongParameterSet,
+                       HashMismatch, InvalidSignature, TimestampInvalid)
   schemas/             bundled Draft-2020-12 schemas (one per input/output + envelope)
   server.py            hardened FastAPI HTTP audit server
   egf_imss.py          fairness primitive
@@ -350,15 +400,24 @@ the top of this README reflects the latest result.
 > is **not** the same as being validated for regulated production use.
 > The matrix below is the honest current state.
 
-| Property                                | Status                                               |
-| --------------------------------------- | ---------------------------------------------------- |
-| Python syntax + imports                 | Verified by CI on every push.                        |
-| 233-test pytest suite                   | Verified by CI on every push.                        |
-| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.           |
-| Signed audit envelope (Ed25519)         | Shipped; canonical-JSON + tamper tests.              |
-| JSON Schemas                            | Shipped; validated on every CLI / API request.       |
-| Hardened HTTP server                    | Shipped; auth, scopes, rate limit, CORS, audit log.  |
-| Real benchmarks at N=2^14, N=2^15       | Shipped; reproducible from `benchmarks/bench_fhe.py`.|
+| Property                                | Status                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| Python syntax + imports                 | Verified by CI on every push.                                                       |
+| 275-test pytest suite                   | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
+| Coverage gate                           | `--cov-fail-under=80` enforced in CI; baseline 84%.                                 |
+| Type checking                           | `mypy` gates CI: zero errors across 19 source files.                                |
+| Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
+| Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
+| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
+| Signed audit envelope (Ed25519)         | Shipped; canonical-JSON + tamper tests.                                             |
+| Trust store + typed verifier failures   | `TrustStore` + six `EnvelopeVerificationError` subclasses; CLI `--trusted-keys`.    |
+| JSON Schemas                            | Shipped; validated on every CLI / API request.                                      |
+| Hardened HTTP server                    | Constant-time bearer compare, opaque key_id in logs, `DEV_MODE` non-loopback bind   |
+|                                         | refusal, scopes, rate limit, CORS, audit log.                                       |
+| Concurrency-safe depth state            | `ContextVar`-backed `last_depth` / `last_depths`; cross-thread / asyncio isolated.  |
+| Reproducible wheel                      | CI builds twice with pinned `SOURCE_DATE_EPOCH`, asserts SHA-256 stable.            |
+| Sigstore-signed wheel + sdist           | Keyless OIDC bundles attached to every GitHub Release.                              |
+| Real benchmarks at N=2^14, N=2^15       | Shipped; reproducible from `benchmarks/bench_fhe.py`.                               |
 
 `regaudit-fhe` is a dependency you can bring into a compliance
 workflow today; it is not, by itself, a finished compliance product.
@@ -384,10 +443,21 @@ The current release ships:
   end-to-end ciphertext / plaintext equivalence tests,
 - the Ed25519-signed audit envelope with canonical-JSON rules,
   parameter-set hashing, and input commitments,
+- a typed verifier surface — `TrustStore` (key_id → PEM, optional
+  revocation, optional parameter-set pinning) plus
+  `verify_envelope_or_raise` raising `UntrustedIssuer` /
+  `RevokedIssuer` / `WrongParameterSet` / `HashMismatch` /
+  `InvalidSignature` / `TimestampInvalid` for regulator-side use,
 - JSON Schemas for every input, output, and the envelope itself,
-- the hardened HTTP audit server with bearer-token auth, scopes, body-
-  size limit, rate limiting, structured logs, and CORS controls,
+- the hardened HTTP audit server with constant-time bearer-token
+  compare, opaque hashed key_id in logs, scopes, body-size limit,
+  rate limiting, structured logs, CORS controls, and a `DEV_MODE`
+  non-loopback bind guard,
+- concurrency-safe depth recording via `ContextVar` so concurrent
+  encrypted requests cannot race on the depth state,
 - supply-chain controls: Trusted-Publisher PyPI release, Sigstore
-  attestation, CycloneDX SBOM, `pip-audit`, weekly Dependabot.
+  keyless signing of the wheel + sdist, reproducible-build CI gate
+  (pinned `SOURCE_DATE_EPOCH`, two builds, identical SHA),
+  CycloneDX SBOM, `pip-audit`, CodeQL, weekly Dependabot.
 
 Contributions are not accepted — see [CONTRIBUTING.md](CONTRIBUTING.md).
