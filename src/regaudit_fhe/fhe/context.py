@@ -13,25 +13,29 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .params import CKKSParams
 
+# TenSEAL CKKSVector is unstubbed; treat as opaque at the type-check
+# layer. Runtime behaviour is unchanged.
+Ciphertext = Any
+
 
 @dataclass
 class CKKSContext:
-    context: object             # tenseal.Context
+    context: Any                # tenseal.Context
     scale: float
     poly_modulus_degree: int
     n_slots: int
     rotation_steps: tuple[int, ...]
 
-    def encrypt_vector(self, values: Sequence[float]) -> object:
+    def encrypt_vector(self, values: Sequence[float]) -> Ciphertext:
         import tenseal as ts
         return ts.ckks_vector(self.context, list(values))
 
-    def decrypt_vector(self, ct: object) -> list[float]:
+    def decrypt_vector(self, ct: Ciphertext) -> list[float]:
         return list(ct.decrypt())
 
 

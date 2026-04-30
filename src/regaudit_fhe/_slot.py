@@ -52,7 +52,7 @@ class SlotVec:
 
     @property
     def n(self) -> int:
-        return self.slots.shape[0]
+        return int(self.slots.shape[0])
 
     def __add__(self, other: SlotVec | np.ndarray | float) -> SlotVec:
         if isinstance(other, SlotVec):

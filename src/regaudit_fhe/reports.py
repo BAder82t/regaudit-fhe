@@ -56,15 +56,18 @@ import os
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature as _CryptoInvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+
+if TYPE_CHECKING:
+    from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
 LIB_VERSION: str = "0.0.7"
@@ -103,7 +106,7 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def report_to_dict(report: Any) -> dict[str, Any]:
-    if dataclasses.is_dataclass(report):
+    if dataclasses.is_dataclass(report) and not isinstance(report, type):
         raw = dataclasses.asdict(report)
     else:
         raw = dict(report)
@@ -290,7 +293,7 @@ def verify_signature(public_key_pem: str, body: bytes,
     try:
         pub.verify(base64.b64decode(signature_b64), body)
         return True
-    except InvalidSignature:
+    except _CryptoInvalidSignature:
         return False
 
 
@@ -405,7 +408,14 @@ def envelope(primitive: str,
         signer = Signer.generate(issuer=issuer)
 
     issued = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    body = {
+    result_dict: dict[str, Any] = report_to_dict(report)
+    commitments_list: list[dict[str, str]] = [
+        dict(c) for c in (input_commitments or [])
+    ]
+    depth_budget_dict: dict[str, int] = {
+        "declared": 6, "consumed": int(depth_consumed),
+    }
+    body: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
         "algorithm_version": LIB_VERSION,
@@ -414,9 +424,9 @@ def envelope(primitive: str,
         "parameter_set": params.to_dict(),
         "parameter_set_hash": params.hash(),
         "regulations": regs,
-        "result": report_to_dict(report),
-        "input_commitments": [dict(c) for c in (input_commitments or [])],
-        "depth_budget": {"declared": 6, "consumed": int(depth_consumed)},
+        "result": result_dict,
+        "input_commitments": commitments_list,
+        "depth_budget": depth_budget_dict,
         "issued_at": issued,
         "issuer": issuer,
     }
@@ -443,9 +453,9 @@ def envelope(primitive: str,
         parameter_set=params.to_dict(),
         parameter_set_hash=params.hash(),
         regulations=regs,
-        result=body["result"],
-        input_commitments=body["input_commitments"],
-        depth_budget=body["depth_budget"],
+        result=result_dict,
+        input_commitments=commitments_list,
+        depth_budget=depth_budget_dict,
         issued_at=issued,
         issuer=issuer,
         receipt=receipt,
@@ -556,6 +566,90 @@ def verify_envelope(env: AuditEnvelope,
         key_id=key_id,
         parameter_set_hash=env.parameter_set_hash,
     )
+
+
+def verify_envelope_or_raise(env: AuditEnvelope,
+                              *,
+                              trust_store: TrustStore | None = None,
+                              tsa_verifier: Callable[[bytes, bytes],
+                                                      bool] | None = None,
+                              ) -> VerificationOutcome:
+    """Verify an envelope and raise a typed exception on the first
+    failure reason, ordered most-specific first.
+
+    Use this in regulator-side code that wants to react differently to
+    each failure mode (untrusted issuer, revoked issuer, parameter-set
+    mismatch, hash mismatch, bad signature) instead of a flat boolean.
+    Returns the underlying :class:`VerificationOutcome` on success.
+
+    A ``TrustStore`` is required: this function never silently accepts
+    self-asserted issuers. Callers that genuinely want the legacy weak
+    path should call :func:`verify_envelope` or :func:`verify_receipt`
+    directly.
+    """
+    from .trust import (
+        HashMismatch,
+        InvalidSignature,
+        RevokedIssuer,
+        TimestampInvalid,
+        TrustStore,
+        UntrustedIssuer,
+        WrongParameterSet,
+    )
+    if trust_store is None or not isinstance(trust_store, TrustStore):
+        raise TypeError(
+            "verify_envelope_or_raise requires a TrustStore; pass one "
+            "loaded with TrustStore.from_json(...). The legacy untrusted "
+            "path is available via verify_envelope() / verify_receipt()."
+        )
+
+    key_id = env.receipt.get("key_id", "")
+
+    if not trust_store.is_known(key_id):
+        raise UntrustedIssuer(
+            f"key_id {key_id!r} is not in the trust store"
+        )
+    if trust_store.is_revoked(key_id):
+        raise RevokedIssuer(
+            f"key_id {key_id!r} is in the trust store's revocation set"
+        )
+    pinned_hash = trust_store.expected_parameter_set_hash(key_id)
+    if pinned_hash is not None and pinned_hash != env.parameter_set_hash:
+        raise WrongParameterSet(
+            f"key_id {key_id!r}: envelope parameter_set_hash="
+            f"{env.parameter_set_hash!r} does not match pinned value "
+            f"{pinned_hash!r}"
+        )
+
+    outcome = verify_envelope(
+        env,
+        trusted_keys=trust_store.as_legacy_dict(),
+        require_signature=True,
+        tsa_verifier=tsa_verifier,
+    )
+
+    if not outcome.sha256_valid:
+        raise HashMismatch(
+            "SHA-256 receipt does not match canonical body"
+        )
+    if not outcome.signature_valid:
+        raise InvalidSignature(
+            "Ed25519 signature does not verify against the embedded "
+            "public key"
+        )
+    if not outcome.issuer_trusted:
+        # Reaching this branch means the trust store had the key_id but
+        # the embedded PEM disagreed with the registered PEM.
+        raise UntrustedIssuer(
+            f"key_id {key_id!r}: embedded public key does not match "
+            f"the public key registered in the trust store"
+        )
+    if not outcome.timestamp_valid:
+        raise TimestampInvalid(
+            "RFC 3161 timestamp token did not verify against the "
+            "deployer's TSA root"
+        )
+    return outcome
 
 
 _VERIFY_RECEIPT_WEAK_WARNED = False

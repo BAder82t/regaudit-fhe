@@ -43,6 +43,7 @@ from .reports import (
                 commitments_for,
                 envelope,
                 verify_envelope,
+                verify_envelope_or_raise,
                 verify_receipt,
 )
 from .schemas import (
@@ -53,6 +54,17 @@ from .schemas import (
                 validate_envelope,
                 validate_input,
                 validate_output,
+)
+from .trust import (
+                EnvelopeVerificationError,
+                HashMismatch,
+                InvalidSignature,
+                RevokedIssuer,
+                TimestampInvalid,
+                TrustStore,
+                TrustStoreError,
+                UntrustedIssuer,
+                WrongParameterSet,
 )
 
 __version__ = "0.0.7"
@@ -75,14 +87,23 @@ __all__ = [
                 "DepthBudgetExceeded",
                 "DisagreementReport",
                 "DriftReport",
+                "EnvelopeVerificationError",
                 "FairnessReport",
+                "HashMismatch",
+                "InvalidSignature",
                 "ParameterSet",
                 "ProvenanceReport",
+                "RevokedIssuer",
                 "SchemaError",
                 "Signer",
                 "SlotVec",
                 "TimestampAuthority",
+                "TimestampInvalid",
+                "TrustStore",
+                "TrustStoreError",
+                "UntrustedIssuer",
                 "VerificationOutcome",
+                "WrongParameterSet",
                 "__version__",
                 "audit_calibration",
                 "audit_concordance",
@@ -120,6 +141,7 @@ __all__ = [
                 "validate_input",
                 "validate_output",
                 "verify_envelope",
+                "verify_envelope_or_raise",
                 "verify_receipt",
                 "w1_circuit_d6",
                 "w1_oracle",

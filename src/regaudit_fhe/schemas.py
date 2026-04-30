@@ -20,7 +20,7 @@ import json
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator
 
@@ -78,7 +78,7 @@ def load_schema(name: str) -> dict[str, Any]:
             f"got {name!r}"
         )
     with path.open("r") as fh:
-        return json.load(fh)
+        return cast(dict[str, Any], json.load(fh))
 
 
 def list_schemas() -> tuple[str, ...]:

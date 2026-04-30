@@ -14,7 +14,14 @@
       "Bash(python -m bandit -r src -c pyproject.toml -q)",
       "Bash(pip install *)",
       "Bash(python -m bandit -r src -c pyproject.toml --severity-level medium)",
-      "Bash(python -m bandit -r src -c pyproject.toml --severity-level medium -q)"
+      "Bash(python -m bandit -r src -c pyproject.toml --severity-level medium -q)",
+      "Bash(awk -F: '{print $1}')",
+      "Bash(python -m pytest)",
+      "Bash(python -m pytest tests/test_fhe_equivalence_matrix.py::test_runtime_within_documented_bound -v)",
+      "Bash(python -m pytest tests/test_trust_store.py -v)",
+      "Bash(grep -v \"^$\")",
+      "Bash(python -m pytest tests/test_primitives_concurrency.py -v)",
+      "Bash(git add *)"
     ]
   }
 }

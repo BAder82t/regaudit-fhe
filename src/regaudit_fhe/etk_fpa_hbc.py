@@ -35,7 +35,8 @@ def hash_to_buckets(row_ids: np.ndarray, n_buckets: int, seed: int = 0xA5A5) -> 
     rng = np.random.default_rng(seed)
     a = rng.integers(1, 2**31 - 1)
     b = rng.integers(0, 2**31 - 1)
-    return ((a * row_ids.astype(np.int64) + b) % (2**31 - 1)) % n_buckets
+    out: np.ndarray = ((a * row_ids.astype(np.int64) + b) % (2**31 - 1)) % n_buckets
+    return out
 
 
 def bucket_masks(bucket_ids: np.ndarray, n_buckets: int, n_slots: int) -> np.ndarray:

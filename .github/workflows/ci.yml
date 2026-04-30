@@ -30,9 +30,8 @@ jobs:
       - run: ruff format --check src tests
 
   typecheck:
-    name: typecheck (mypy, informational)
+    name: typecheck (mypy)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

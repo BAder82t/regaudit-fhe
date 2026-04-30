@@ -31,8 +31,9 @@ from . import (
     audit_fairness,
     audit_provenance,
 )
-from .reports import AuditEnvelope, envelope, verify_receipt
+from .reports import AuditEnvelope, envelope, verify_envelope_or_raise, verify_receipt
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
+from .trust import EnvelopeVerificationError, TrustStore, TrustStoreError
 
 PRIMITIVES = {
     "fairness", "provenance", "concordance",
@@ -78,6 +79,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
 
 def _audit_dispatch(primitive: str, payload: dict[str, Any]) -> AuditEnvelope:
     validate_input(primitive, payload)
+    report: Any
     if primitive == "fairness":
         report = audit_fairness(
             np.asarray(payload["y_true"], dtype=float),
@@ -162,7 +164,7 @@ def _cmd_schema(args: argparse.Namespace) -> int:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     try:
-        import uvicorn  # type: ignore
+        import uvicorn
     except Exception as exc:
         sys.stderr.write(
             f"regaudit-fhe serve requires the [server] extra: {exc}\n"
@@ -184,20 +186,49 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 def _cmd_verify(args: argparse.Namespace) -> int:
     body = json.loads(Path(args.input).read_text())
     env = AuditEnvelope.from_dict(body)
-    trusted_keys: dict[str, str] | None = None
+
+    trust_store: TrustStore | None = None
     if args.trusted_keys:
-        trusted_keys = json.loads(Path(args.trusted_keys).read_text())
-        if not isinstance(trusted_keys, dict):
-            sys.stderr.write(
-                "--trusted-keys must point to a JSON object mapping "
-                "key_id -> PEM-encoded public key.\n"
-            )
+        try:
+            trust_store = TrustStore.from_json(args.trusted_keys)
+        except TrustStoreError as exc:
+            sys.stderr.write(f"--trusted-keys: {exc}\n")
             return 2
-    ok = verify_receipt(env, trusted_keys=trusted_keys, strict=args.strict)
+
+    if trust_store is not None:
+        try:
+            verify_envelope_or_raise(env, trust_store=trust_store)
+        except EnvelopeVerificationError as exc:
+            print(json.dumps({
+                "valid": False,
+                "reason": type(exc).__name__,
+                "detail": str(exc),
+                "primitive": env.primitive,
+                "issued_at": env.issued_at,
+                "regulations": env.regulations,
+                "trusted_issuer": True,
+            }, indent=2))
+            return 1
+        print(json.dumps({
+            "valid": True,
+            "primitive": env.primitive,
+            "issued_at": env.issued_at,
+            "regulations": env.regulations,
+            "trusted_issuer": True,
+        }, indent=2))
+        return 0
+
+    if args.strict:
+        sys.stderr.write(
+            "--strict requires --trusted-keys to authenticate the issuer.\n"
+        )
+        return 2
+
+    ok = verify_receipt(env)
     print(json.dumps({"valid": ok, "primitive": env.primitive,
                       "issued_at": env.issued_at,
                       "regulations": env.regulations,
-                      "trusted_issuer": bool(trusted_keys)}, indent=2))
+                      "trusted_issuer": False}, indent=2))
     return 0 if ok else 1
 
 
@@ -248,7 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    return int(args.func(args))
 
 
 if __name__ == "__main__":

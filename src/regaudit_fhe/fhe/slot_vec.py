@@ -10,12 +10,18 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .._slot import MAX_DEPTH, DepthBudgetExceeded
+
+# TenSEAL's CKKSVector has no public type stubs. Treat the ciphertext
+# handle as opaque at the type-checker level; runtime behaviour is
+# unchanged.
+Ciphertext = Any
 
 OP_COUNTERS: dict[str, int] = {
     "ct_ct_muls": 0,
@@ -39,7 +45,7 @@ def snapshot_op_counters() -> dict[str, int]:
 
 @dataclass
 class EncryptedSlotVec:
-    ciphertext: object          # tenseal.CKKSVector
+    ciphertext: Ciphertext      # tenseal.CKKSVector
     n: int
     depth: int = 0
     max_depth: int = MAX_DEPTH
@@ -51,12 +57,12 @@ class EncryptedSlotVec:
             )
 
     @classmethod
-    def encrypt(cls, ctx, values: Sequence[float],
+    def encrypt(cls, ctx: Any, values: ArrayLike,
                 max_depth: int = MAX_DEPTH) -> EncryptedSlotVec:
         from .context import CKKSContext
         if not isinstance(ctx, CKKSContext):
             raise TypeError("encrypt(ctx, values) requires a CKKSContext")
-        vals = list(values)
+        vals = [float(v) for v in np.asarray(values, dtype=float).ravel()]
         ct = ctx.encrypt_vector(vals)
         return cls(ciphertext=ct, n=len(vals),
                    depth=0, max_depth=max_depth)
@@ -98,7 +104,7 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def __radd__(self, other) -> EncryptedSlotVec:
+    def __radd__(self, other: Any) -> EncryptedSlotVec:
         return self.__add__(other)
 
     def __sub__(self, other: EncryptedSlotVec | np.ndarray | float | list
@@ -123,7 +129,7 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def mul_pt(self, plaintext) -> EncryptedSlotVec:
+    def mul_pt(self, plaintext: Any) -> EncryptedSlotVec:
         OP_COUNTERS["ct_pt_muls"] += 1
         pt = _as_list(plaintext, self.n)
         return EncryptedSlotVec(
@@ -178,7 +184,7 @@ class EncryptedSlotVec:
             n=self.n, depth=self.depth, max_depth=self.max_depth,
         )
 
-    def mm_pt(self, matrix: object) -> EncryptedSlotVec:
+    def mm_pt(self, matrix: Any) -> EncryptedSlotVec:
         """Encrypted-vector × plaintext-matrix multiplication.
 
         Used by the CDF primitive to materialise prefix sums in a
@@ -201,7 +207,7 @@ class EncryptedSlotVec:
         )
 
 
-def _as_list(value, target_len: int) -> list[float]:
+def _as_list(value: Any, target_len: int) -> list[float]:
     if isinstance(value, np.ndarray):
         return [float(v) for v in value.tolist()]
     if isinstance(value, list):

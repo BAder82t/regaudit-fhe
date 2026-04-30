@@ -6,10 +6,17 @@ ciphertexts via :class:`EncryptedSlotVec`. The decrypted output is
 numerically equivalent to the plaintext circuit's output within CKKS
 noise tolerance.
 
-Each call records its observed multiplicative depth in :data:`LAST_DEPTH`
-so equivalence tests can assert that the on-encrypted depth never
-exceeds the depth declared in ``docs/specs/<primitive>.md`` and that
-no bootstrapping is required to complete the circuit.
+Each call records its observed multiplicative depth in a per-context
+dictionary, accessible via :func:`last_depth` (single primitive) or
+:func:`last_depths` (snapshot of the whole context). The state is
+backed by a :class:`contextvars.ContextVar` so concurrent requests
+(e.g. async FastAPI handlers, threaded benchmark drivers) cannot
+clobber each other's depth records.
+
+Equivalence tests use :func:`last_depth` to assert that the encrypted
+depth never exceeds the depth declared in
+``docs/specs/<primitive>.md`` and that no bootstrapping is required
+to complete the circuit.
 
 Inputs that the plaintext spec marks as auditor-public (group counts,
 quantile thresholds, polynomial coefficients) remain plaintext; only
@@ -22,6 +29,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextvars import ContextVar
 
 import numpy as np
 
@@ -35,7 +43,25 @@ from ..ew1_cdsf import DriftReport, w1_oracle
 from .context import CKKSContext
 from .slot_vec import EncryptedSlotVec, sign_poly_d3
 
-LAST_DEPTH: dict[str, int] = {}
+# Per-context observed depth. Each ContextVar context (a thread, an
+# asyncio task, an explicit ``contextvars.copy_context()`` scope) sees
+# its own dict; without this isolation, concurrent encrypted-endpoint
+# requests would race on the depth record.
+_LAST_DEPTH: ContextVar[dict[str, int]] = ContextVar(
+    "regaudit_fhe.fhe.primitives._LAST_DEPTH"
+)
+
+
+def _ld() -> dict[str, int]:
+    """Return the current context's depth dict, creating one on
+    first access. The returned dict is mutable; mutations stay in the
+    current context."""
+    try:
+        return _LAST_DEPTH.get()
+    except LookupError:
+        fresh: dict[str, int] = {}
+        _LAST_DEPTH.set(fresh)
+        return fresh
 
 
 DECLARED_DEPTH: dict[str, int] = {
@@ -58,7 +84,7 @@ DECLARED_DEPTH: dict[str, int] = {
 
 def _record_depth(primitive: str, *vectors: EncryptedSlotVec) -> int:
     d = max(v.depth for v in vectors) if vectors else 0
-    LAST_DEPTH[primitive] = d
+    _ld()[primitive] = d
     declared = DECLARED_DEPTH.get(primitive, 6)
     if d > declared:
         raise AssertionError(
@@ -268,14 +294,28 @@ def declared_depth(primitive: str) -> int:
 
 
 def last_depth(primitive: str) -> int:
-    """Return the depth observed during the most recent call."""
-    if primitive not in LAST_DEPTH:
+    """Return the depth observed during the most recent call in the
+    current context.
+    """
+    state = _ld()
+    if primitive not in state:
         raise KeyError(f"no recorded depth for {primitive!r}")
-    return LAST_DEPTH[primitive]
+    return state[primitive]
+
+
+def last_depths() -> dict[str, int]:
+    """Snapshot of the current context's depth records.
+
+    Returns a copy so callers can inspect / serialise the state
+    without seeing subsequent mutations.
+    """
+    return dict(_ld())
 
 
 def reset_last_depth() -> None:
-    LAST_DEPTH.clear()
+    """Clear the current context's depth records. Other contexts
+    (other threads, other asyncio tasks) are unaffected."""
+    _LAST_DEPTH.set({})
 
 
 def conformal_encrypted(ctx: CKKSContext,
