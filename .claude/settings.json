@@ -21,7 +21,12 @@
       "Bash(python -m pytest tests/test_trust_store.py -v)",
       "Bash(grep -v \"^$\")",
       "Bash(python -m pytest tests/test_primitives_concurrency.py -v)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(python -m pytest --cov=regaudit_fhe --cov-report=term)",
+      "Bash(python -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); yaml.safe_load\\(open\\('.github/workflows/publish.yml'\\)\\); yaml.safe_load\\(open\\('.github/workflows/codeql.yml'\\)\\); print\\('ci.yml + publish.yml + codeql.yml: YAML valid'\\)\")",
+      "Bash(SOURCE_DATE_EPOCH=$\\(git log -1 --pretty=%ct\\) python -m build --outdir /tmp/repro1)",
+      "Bash(SOURCE_DATE_EPOCH=$\\(git log -1 --pretty=%ct\\) python -m build --outdir /tmp/repro2)",
+      "Bash(python -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); yaml.safe_load\\(open\\('.github/workflows/publish.yml'\\)\\); print\\('OK'\\)\")"
     ]
   }
 }
