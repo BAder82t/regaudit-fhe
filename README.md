@@ -15,8 +15,11 @@ included in this repository.
 [![Python](https://img.shields.io/pypi/pyversions/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-> Maintained by **VaultBytes Innovations Ltd**. Licensed under
-> **AGPL-3.0-or-later** — see [LICENSE](LICENSE).
+> Maintained by **VaultBytes Innovations Ltd**. **Dual-licensed**:
+> AGPL-3.0-or-later (default — see [LICENSE](LICENSE)) or
+> **VaultBytes Commercial License** for deployments where AGPL is not
+> workable (see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md);
+> contact **b@vaultbytes.com**).
 
 ---
 
