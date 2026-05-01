@@ -42,19 +42,22 @@ def _confusion_oracle(y_true: np.ndarray, y_pred: np.ndarray, mask: np.ndarray):
     return tp, fp, fn, tn
 
 
-def fairness_oracle(y_true: np.ndarray,
-                    y_pred: np.ndarray,
-                    group_a: np.ndarray,
-                    group_b: np.ndarray,
-                    threshold: float = 0.1) -> FairnessReport:
+def fairness_oracle(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    group_a: np.ndarray,
+    group_b: np.ndarray,
+    threshold: float = 0.1,
+) -> FairnessReport:
     """Plaintext reference. Computes three disparity metrics between two groups."""
     assert_nonempty("y_true", y_true)
     y_true = assert_binary("y_true", y_true)
     y_pred = assert_binary("y_pred", y_pred)
     group_a = assert_binary("group_a", group_a)
     group_b = assert_binary("group_b", group_b)
-    assert_same_length(("y_true", y_true), ("y_pred", y_pred),
-                       ("group_a", group_a), ("group_b", group_b))
+    assert_same_length(
+        ("y_true", y_true), ("y_pred", y_pred), ("group_a", group_a), ("group_b", group_b)
+    )
     assert_at_least_one_member("group_a", group_a)
     assert_at_least_one_member("group_b", group_b)
     assert_in_range("threshold", threshold, low=0.0, high=1.0)
@@ -73,11 +76,13 @@ def fairness_oracle(y_true: np.ndarray,
     return FairnessReport(dp, eo, pp, breached)
 
 
-def fairness_circuit_d6(y_true: np.ndarray,
-                        y_pred: np.ndarray,
-                        group_a: np.ndarray,
-                        group_b: np.ndarray,
-                        threshold: float = 0.1) -> FairnessReport:
+def fairness_circuit_d6(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    group_a: np.ndarray,
+    group_b: np.ndarray,
+    threshold: float = 0.1,
+) -> FairnessReport:
     """Depth-budgeted slot-vector circuit producing the same disparity report.
 
     Group cardinalities ``n_a``, ``n_b`` and label-positive counts ``pos_a``,
@@ -98,8 +103,9 @@ def fairness_circuit_d6(y_true: np.ndarray,
     y_pred = assert_binary("y_pred", y_pred)
     group_a = assert_binary("group_a", group_a)
     group_b = assert_binary("group_b", group_b)
-    assert_same_length(("y_true", y_true), ("y_pred", y_pred),
-                       ("group_a", group_a), ("group_b", group_b))
+    assert_same_length(
+        ("y_true", y_true), ("y_pred", y_pred), ("group_a", group_a), ("group_b", group_b)
+    )
     assert_at_least_one_member("group_a", group_a)
     assert_at_least_one_member("group_b", group_b)
     assert_in_range("threshold", threshold, low=0.0, high=1.0)
@@ -145,8 +151,7 @@ def fairness_circuit_d6(y_true: np.ndarray,
     breached = breach_sign.first_slot() > 0.0
 
     assert dp.depth <= 6 and eo.depth <= 6 and pp.depth <= 6 and breach_sign.depth <= 6, (
-        f"depth budget violated: dp={dp.depth} eo={eo.depth} pp={pp.depth} "
-        f"sign={breach_sign.depth}"
+        f"depth budget violated: dp={dp.depth} eo={eo.depth} pp={pp.depth} sign={breach_sign.depth}"
     )
 
     return FairnessReport(dp_val, eo_val, pp_val, breached)

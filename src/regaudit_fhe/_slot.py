@@ -42,9 +42,7 @@ class SlotVec:
     def __post_init__(self) -> None:
         self.slots = np.asarray(self.slots, dtype=np.float64)
         if self.depth > self.max_depth:
-            raise DepthBudgetExceeded(
-                f"depth {self.depth} exceeds budget {self.max_depth}"
-            )
+            raise DepthBudgetExceeded(f"depth {self.depth} exceeds budget {self.max_depth}")
 
     @classmethod
     def encrypt(cls, values, max_depth: int = MAX_DEPTH) -> SlotVec:
@@ -56,8 +54,7 @@ class SlotVec:
 
     def __add__(self, other: SlotVec | np.ndarray | float) -> SlotVec:
         if isinstance(other, SlotVec):
-            return SlotVec(self.slots + other.slots,
-                           max(self.depth, other.depth), self.max_depth)
+            return SlotVec(self.slots + other.slots, max(self.depth, other.depth), self.max_depth)
         return SlotVec(self.slots + np.asarray(other), self.depth, self.max_depth)
 
     def __radd__(self, other) -> SlotVec:
@@ -65,8 +62,7 @@ class SlotVec:
 
     def __sub__(self, other: SlotVec | np.ndarray | float) -> SlotVec:
         if isinstance(other, SlotVec):
-            return SlotVec(self.slots - other.slots,
-                           max(self.depth, other.depth), self.max_depth)
+            return SlotVec(self.slots - other.slots, max(self.depth, other.depth), self.max_depth)
         return SlotVec(self.slots - np.asarray(other), self.depth, self.max_depth)
 
     def __neg__(self) -> SlotVec:
@@ -74,8 +70,7 @@ class SlotVec:
 
     def mul_pt(self, plaintext: np.ndarray | float) -> SlotVec:
         """Plaintext-vector × ciphertext. One level consumed."""
-        return SlotVec(self.slots * np.asarray(plaintext),
-                       self.depth + 1, self.max_depth)
+        return SlotVec(self.slots * np.asarray(plaintext), self.depth + 1, self.max_depth)
 
     def mul_scalar(self, scalar: float) -> SlotVec:
         """Multiply every slot by a constant scalar.
@@ -88,8 +83,7 @@ class SlotVec:
 
     def mul_ct(self, other: SlotVec) -> SlotVec:
         """Ciphertext × ciphertext. One level consumed after relin + rescale."""
-        return SlotVec(self.slots * other.slots,
-                       max(self.depth, other.depth) + 1, self.max_depth)
+        return SlotVec(self.slots * other.slots, max(self.depth, other.depth) + 1, self.max_depth)
 
     def rotate(self, k: int) -> SlotVec:
         """Cyclic slot rotation by k positions. No depth consumed."""
@@ -122,8 +116,8 @@ def sign_poly_d3(x: SlotVec) -> SlotVec:
     Depth cost: 2 (one ct×ct for x^2, one ct×ct for x^3 = x^2 · x; the linear
     combination is free).
     """
-    x_sq = x.mul_ct(x)            # depth + 1
-    x_cube = x_sq.mul_ct(x)       # depth + 2
+    x_sq = x.mul_ct(x)  # depth + 1
+    x_cube = x_sq.mul_ct(x)  # depth + 2
     return x.mul_scalar(1.5) + x_cube.mul_scalar(-0.5)
 
 
@@ -158,10 +152,12 @@ def reciprocal_poly_d3(x: SlotVec) -> SlotVec:
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
     n = x.n
-    return (x.mul_pt(np.full(n, -6.0))
-            + x_sq.mul_pt(np.full(n, 4.0))
-            + x_cube.mul_pt(np.full(n, -1.0))
-            + np.full(n, 4.0))
+    return (
+        x.mul_pt(np.full(n, -6.0))
+        + x_sq.mul_pt(np.full(n, 4.0))
+        + x_cube.mul_pt(np.full(n, -1.0))
+        + np.full(n, 4.0)
+    )
 
 
 def cdf_in_place(x: SlotVec) -> SlotVec:

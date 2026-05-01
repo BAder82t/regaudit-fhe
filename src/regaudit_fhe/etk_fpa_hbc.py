@@ -49,20 +49,17 @@ def bucket_masks(bucket_ids: np.ndarray, n_buckets: int, n_slots: int) -> np.nda
     return masks
 
 
-def topk_provenance_oracle(attributions: np.ndarray,
-                           row_ids: np.ndarray,
-                           n_buckets: int,
-                           k: int) -> ProvenanceReport:
+def topk_provenance_oracle(
+    attributions: np.ndarray, row_ids: np.ndarray, n_buckets: int, k: int
+) -> ProvenanceReport:
     """Plaintext reference."""
-    attributions = assert_finite("attributions",
-                                 assert_nonempty("attributions", attributions))
+    attributions = assert_finite("attributions", assert_nonempty("attributions", attributions))
     row_ids = np.asarray(assert_nonempty("row_ids", row_ids))
     assert_same_length(("attributions", attributions), ("row_ids", row_ids))
     if n_buckets < 1:
         raise ValueError(f"n_buckets must be ≥ 1; got {n_buckets}")
     if k < 1 or k > n_buckets:
-        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, "
-                         f"n_buckets={n_buckets}")
+        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, n_buckets={n_buckets}")
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     aggregates = np.zeros(n_buckets, dtype=np.float64)
     for b in range(n_buckets):
@@ -74,10 +71,9 @@ def topk_provenance_oracle(attributions: np.ndarray,
     return ProvenanceReport(aggregates, topk, indicator)
 
 
-def topk_provenance_circuit_d6(attributions: np.ndarray,
-                               row_ids: np.ndarray,
-                               n_buckets: int,
-                               k: int) -> ProvenanceReport:
+def topk_provenance_circuit_d6(
+    attributions: np.ndarray, row_ids: np.ndarray, n_buckets: int, k: int
+) -> ProvenanceReport:
     """Depth-budgeted circuit producing the same provenance report.
 
     Depth:
@@ -87,15 +83,13 @@ def topk_provenance_circuit_d6(attributions: np.ndarray,
           plaintext threshold: 2 levels.
       Total: 3 levels.
     """
-    attributions = assert_finite("attributions",
-                                 assert_nonempty("attributions", attributions))
+    attributions = assert_finite("attributions", assert_nonempty("attributions", attributions))
     row_ids = np.asarray(assert_nonempty("row_ids", row_ids))
     assert_same_length(("attributions", attributions), ("row_ids", row_ids))
     if n_buckets < 1:
         raise ValueError(f"n_buckets must be ≥ 1; got {n_buckets}")
     if k < 1 or k > n_buckets:
-        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, "
-                         f"n_buckets={n_buckets}")
+        raise ValueError(f"k must be in [1, n_buckets]; got k={k}, n_buckets={n_buckets}")
     n_slots = max(pad_pow2(attributions).shape[0], n_buckets)
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     masks = bucket_masks(bucket_ids, n_buckets, n_slots)

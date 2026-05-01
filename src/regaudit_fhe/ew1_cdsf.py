@@ -26,8 +26,8 @@ from ._validation import assert_finite, assert_nonempty
 
 @dataclass
 class DriftReport:
-    distance: float           # Cramer-von-Mises CDF L2 squared distance
-    w1_distance: float        # plaintext-side Wasserstein-1 (reference only)
+    distance: float  # Cramer-von-Mises CDF L2 squared distance
+    w1_distance: float  # plaintext-side Wasserstein-1 (reference only)
     drift_bit: bool
 
 

@@ -27,9 +27,7 @@ class CIndexReport:
     c_index: float
 
 
-def c_index_oracle(risk: np.ndarray,
-                   time: np.ndarray,
-                   event: np.ndarray) -> CIndexReport:
+def c_index_oracle(risk: np.ndarray, time: np.ndarray, event: np.ndarray) -> CIndexReport:
     """Plaintext Harrell C-index."""
     risk = assert_finite("risk", assert_nonempty("risk", risk))
     time = assert_finite("time", assert_nonempty("time", time))
@@ -53,9 +51,7 @@ def c_index_oracle(risk: np.ndarray,
     return CIndexReport(concordant, comparable, ci)
 
 
-def c_index_circuit_d6(risk: np.ndarray,
-                       time: np.ndarray,
-                       event: np.ndarray) -> CIndexReport:
+def c_index_circuit_d6(risk: np.ndarray, time: np.ndarray, event: np.ndarray) -> CIndexReport:
     """Depth-budgeted circuit. Returns concordant + comparable counts plus
     their plaintext-side ratio.
 
@@ -118,8 +114,7 @@ def c_index_circuit_d6(risk: np.ndarray,
         S2 = float(s2_ct.first_slot())
         S3 = float(s3_ct.first_slot())
 
-        pair_real = ((np.arange(n_pad) < n)
-                     & (((np.arange(n_pad) + shift) % n_pad) < n))
+        pair_real = (np.arange(n_pad) < n) & (((np.arange(n_pad) + shift) % n_pad) < n)
         E = float(np.sum(event_p * pair_real))
 
         comparable_total += max(0.0, (E + S1) / 2.0)
@@ -128,8 +123,7 @@ def c_index_circuit_d6(risk: np.ndarray,
 
     A_total = max(0.0, min(A_total, float(n * (n - 1))))
     comparable_total = max(0.0, min(comparable_total, float(n * (n - 1))))
-    ci = (A_total / comparable_total
-          if comparable_total > 0 else 0.5)
+    ci = A_total / comparable_total if comparable_total > 0 else 0.5
 
     assert max_depth <= 6, f"depth budget violated: {max_depth}"
     return CIndexReport(A_total, comparable_total, ci)

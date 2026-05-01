@@ -107,48 +107,34 @@ class TrustStore:
             raw_keys = payload["keys"]
             raw_revoked = payload.get("revoked", [])
             raw_pins = payload.get("parameter_set_pins", {})
-            if not isinstance(raw_revoked, Iterable) or isinstance(
-                raw_revoked, (str, bytes)
-            ):
-                raise TrustStoreError(
-                    "trust-store 'revoked' must be a list of key_ids"
-                )
+            if not isinstance(raw_revoked, Iterable) or isinstance(raw_revoked, (str, bytes)):
+                raise TrustStoreError("trust-store 'revoked' must be a list of key_ids")
             if not isinstance(raw_pins, Mapping):
-                raise TrustStoreError(
-                    "trust-store 'parameter_set_pins' must be a mapping"
-                )
+                raise TrustStoreError("trust-store 'parameter_set_pins' must be a mapping")
             revoked = {str(r) for r in raw_revoked}
             pins = {str(k): str(v) for k, v in raw_pins.items()}
         else:
             raw_keys = payload
 
         if not isinstance(raw_keys, Mapping) or not raw_keys:
-            raise TrustStoreError(
-                "trust-store must declare at least one key_id -> PEM entry"
-            )
+            raise TrustStoreError("trust-store must declare at least one key_id -> PEM entry")
         keys = {}
         for key_id, pem in raw_keys.items():
             if not isinstance(key_id, str) or not isinstance(pem, str):
-                raise TrustStoreError(
-                    "trust-store keys must map str key_id to str PEM"
-                )
+                raise TrustStoreError("trust-store keys must map str key_id to str PEM")
             if "BEGIN PUBLIC KEY" not in pem:
-                raise TrustStoreError(
-                    f"trust-store entry {key_id!r} is not a PEM public key"
-                )
+                raise TrustStoreError(f"trust-store entry {key_id!r} is not a PEM public key")
             keys[key_id] = _normalise_pem(pem)
 
         if revoked - set(keys):
             unknown = sorted(revoked - set(keys))
             raise TrustStoreError(
-                f"trust-store 'revoked' references unknown key_id(s): "
-                f"{unknown!r}"
+                f"trust-store 'revoked' references unknown key_id(s): {unknown!r}"
             )
         if set(pins) - set(keys):
             unknown = sorted(set(pins) - set(keys))
             raise TrustStoreError(
-                f"trust-store 'parameter_set_pins' references unknown "
-                f"key_id(s): {unknown!r}"
+                f"trust-store 'parameter_set_pins' references unknown key_id(s): {unknown!r}"
             )
 
         return cls(
@@ -164,9 +150,7 @@ class TrustStore:
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise TrustStoreError(
-                f"trust-store {str(path)!r} is not valid JSON: {exc}"
-            ) from exc
+            raise TrustStoreError(f"trust-store {str(path)!r} is not valid JSON: {exc}") from exc
         return cls.from_dict(payload)
 
     # ----- Queries --------------------------------------------------------

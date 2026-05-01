@@ -24,8 +24,8 @@ from regaudit_fhe.fhe import build_d6_context  # noqa: E402
 from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
 
 RNG = np.random.default_rng(20260426)
-TOL = 1e-2          # CKKS noise tolerance after up to six multiplications
-TOL_LOOSE = 5e-2    # tolerance for sums-of-many-mults primitives
+TOL = 1e-2  # CKKS noise tolerance after up to six multiplications
+TOL_LOOSE = 5e-2  # tolerance for sums-of-many-mults primitives
 
 
 @pytest.fixture(scope="module")
@@ -44,14 +44,10 @@ def test_fairness_equivalence(ctx) -> None:
     plain = rf.audit_fairness(y_true, y_pred, g_a, g_b)
     enc = fhe_p.fairness_encrypted(ctx, y_true, y_pred, g_a, g_b)
 
-    assert abs(oracle.demographic_parity_diff
-               - plain.demographic_parity_diff) < 1e-9
-    assert abs(plain.demographic_parity_diff
-               - enc.demographic_parity_diff) < TOL
-    assert abs(plain.equal_opportunity_diff
-               - enc.equal_opportunity_diff) < TOL
-    assert abs(plain.predictive_parity_diff
-               - enc.predictive_parity_diff) < TOL
+    assert abs(oracle.demographic_parity_diff - plain.demographic_parity_diff) < 1e-9
+    assert abs(plain.demographic_parity_diff - enc.demographic_parity_diff) < TOL
+    assert abs(plain.equal_opportunity_diff - enc.equal_opportunity_diff) < TOL
+    assert abs(plain.predictive_parity_diff - enc.predictive_parity_diff) < TOL
 
 
 def test_provenance_equivalence(ctx) -> None:
@@ -62,13 +58,11 @@ def test_provenance_equivalence(ctx) -> None:
 
     oracle = rf.topk_provenance_oracle(attributions, row_ids, n_buckets, k)
     plain = rf.audit_provenance(attributions, row_ids, n_buckets, k)
-    enc = fhe_p.topk_provenance_encrypted(ctx, attributions, row_ids,
-                                          n_buckets, k)
+    enc = fhe_p.topk_provenance_encrypted(ctx, attributions, row_ids, n_buckets, k)
 
     assert sorted(plain.topk_indices) == sorted(oracle.topk_indices)
     assert sorted(enc.topk_indices) == sorted(oracle.topk_indices)
-    assert np.max(np.abs(enc.bucket_aggregates
-                         - plain.bucket_aggregates)) < TOL
+    assert np.max(np.abs(enc.bucket_aggregates - plain.bucket_aggregates)) < TOL
 
 
 def test_calibration_equivalence(ctx) -> None:
@@ -90,8 +84,7 @@ def test_calibration_equivalence(ctx) -> None:
     # and uniform scores around 0.5).
     membership_drift = int(np.sum(oracle.membership != enc.membership))
     assert membership_drift <= 2, (
-        f"sign-poly-d3 flipped {membership_drift} membership bits "
-        f"vs the integer oracle"
+        f"sign-poly-d3 flipped {membership_drift} membership bits vs the integer oracle"
     )
 
 
@@ -108,16 +101,13 @@ def test_drift_equivalence(ctx) -> None:
 
 
 def test_disagreement_equivalence(ctx) -> None:
-    coeffs = [(0.0, 1.00, 0.05, 0.0),
-              (0.0, 0.95, 0.06, 0.0),
-              (0.0, 1.05, 0.04, 0.0)]
+    coeffs = [(0.0, 1.00, 0.05, 0.0), (0.0, 0.95, 0.06, 0.0), (0.0, 1.05, 0.04, 0.0)]
     x = np.linspace(-0.4, 0.4, 32)
 
     plain = rf.audit_disagreement(coeffs, x)
     enc = fhe_p.disagreement_encrypted(ctx, coeffs, x)
 
-    rel = abs(plain.pairwise_variance - enc.pairwise_variance) / max(
-        plain.pairwise_variance, 1e-9)
+    rel = abs(plain.pairwise_variance - enc.pairwise_variance) / max(plain.pairwise_variance, 1e-9)
     assert rel < TOL_LOOSE, (
         f"disagreement variance diverges: plain={plain.pairwise_variance} "
         f"enc={enc.pairwise_variance} rel_err={rel}"
@@ -163,8 +153,7 @@ def test_sign_polynomial_encrypted_matches_plaintext(ctx) -> None:
 
     values = np.linspace(-0.9, 0.9, 16)
     plain_out = plain_sign(SlotVec.encrypt(values)).slots
-    enc_out = np.array(enc_sign(rf.fhe.EncryptedSlotVec.encrypt(ctx, values))
-                       .decrypt())[:16]
+    enc_out = np.array(enc_sign(rf.fhe.EncryptedSlotVec.encrypt(ctx, values)).decrypt())[:16]
     assert np.max(np.abs(plain_out - enc_out)) < TOL
 
 

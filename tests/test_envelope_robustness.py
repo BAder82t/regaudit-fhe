@@ -113,8 +113,7 @@ def test_input_commitments_tamper_breaks_sha256():
 
 def test_random_signature_bytes_fail_verification():
     env = _sample_envelope()
-    env.receipt["signature_b64"] = base64.b64encode(b"not-a-real-signature"
-                                                     ).decode("ascii")
+    env.receipt["signature_b64"] = base64.b64encode(b"not-a-real-signature").decode("ascii")
     out = rf.verify_envelope(env)
     assert out.signature_valid is False
     assert out.valid is False
@@ -157,11 +156,13 @@ def test_backend_mismatch_fails_sha256_check():
 
 def test_parameter_set_field_change_breaks_sha256():
     signer = rf.Signer.generate(issuer="acme", key_id="k1")
-    params = rf.ParameterSet(backend="tenseal-ckks",
-                             poly_modulus_degree=32768,
-                             multiplicative_depth=6,
-                             coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                             scaling_factor_bits=40)
+    params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=32768,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+    )
     y = np.array([1.0, 0.0, 1.0, 0.0])
     report = rf.audit_fairness(y, y, y, 1.0 - y)
     env = rf.envelope("fairness", report, signer=signer, parameter_set=params)
@@ -173,20 +174,25 @@ def test_parameter_set_field_change_breaks_sha256():
 
 def test_parameter_set_hash_mismatch_against_pinned_value():
     signer = rf.Signer.generate(issuer="acme", key_id="k1")
-    params = rf.ParameterSet(backend="tenseal-ckks",
-                             poly_modulus_degree=32768,
-                             multiplicative_depth=6,
-                             coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                             scaling_factor_bits=40)
+    params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=32768,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+    )
     y = np.array([1.0, 0.0, 1.0, 0.0])
-    env = rf.envelope("fairness", rf.audit_fairness(y, y, y, 1.0 - y),
-                      signer=signer, parameter_set=params)
+    env = rf.envelope(
+        "fairness", rf.audit_fairness(y, y, y, 1.0 - y), signer=signer, parameter_set=params
+    )
     expected_hash = params.hash()
-    different_params = rf.ParameterSet(backend="tenseal-ckks",
-                                       poly_modulus_degree=16384,
-                                       multiplicative_depth=6,
-                                       coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                                       scaling_factor_bits=40)
+    different_params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=16384,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+    )
     assert env.parameter_set_hash == expected_hash
     assert env.parameter_set_hash != different_params.hash()
 
@@ -206,10 +212,8 @@ def test_unknown_issuer_rejected_when_trusted_keys_supplied():
 def test_known_issuer_accepted_when_trusted_keys_supplied():
     signer = rf.Signer.generate(issuer="acme", key_id="acme-2026-01")
     y = np.array([1.0, 0.0, 1.0, 0.0])
-    env = rf.envelope("fairness", rf.audit_fairness(y, y, y, 1.0 - y),
-                      signer=signer)
-    out = rf.verify_envelope(
-        env, trusted_keys={"acme-2026-01": signer.public_key_pem()})
+    env = rf.envelope("fairness", rf.audit_fairness(y, y, y, 1.0 - y), signer=signer)
+    out = rf.verify_envelope(env, trusted_keys={"acme-2026-01": signer.public_key_pem()})
     assert out.issuer_trusted is True
     assert out.valid is True
 

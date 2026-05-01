@@ -14,8 +14,14 @@ import regaudit_fhe as rf
 def test_bundle_includes_thirteen_schemas():
     names = rf.list_schemas()
     assert "envelope" in names
-    for primitive in ("fairness", "provenance", "concordance",
-                      "calibration", "drift", "disagreement"):
+    for primitive in (
+        "fairness",
+        "provenance",
+        "concordance",
+        "calibration",
+        "drift",
+        "disagreement",
+    ):
         assert f"{primitive}.input" in names
         assert f"{primitive}.output" in names
 
@@ -25,8 +31,7 @@ def test_each_schema_has_id_and_title():
         schema = rf.load_schema(name)
         assert "$id" in schema, f"{name} missing $id"
         assert "$schema" in schema, f"{name} missing $schema"
-        assert schema["$schema"].startswith(
-            "https://json-schema.org/draft/2020-12/schema")
+        assert schema["$schema"].startswith("https://json-schema.org/draft/2020-12/schema")
         assert "title" in schema, f"{name} missing title"
 
 
@@ -51,11 +56,12 @@ VALID_INPUTS = {
     "provenance": {
         "attributions": [0.5, 0.7, 0.2, 0.9],
         "row_ids": [0, 1, 2, 3],
-        "n_buckets": 4, "k": 2,
+        "n_buckets": 4,
+        "k": 2,
     },
     "concordance": {
-        "risk":  [0.1, 0.5, 0.9],
-        "time":  [10.0, 20.0, 30.0],
+        "risk": [0.1, 0.5, 0.9],
+        "time": [10.0, 20.0, 30.0],
         "event": [1, 1, 0],
     },
     "calibration": {
@@ -75,8 +81,7 @@ VALID_INPUTS = {
 }
 
 
-@pytest.mark.parametrize("primitive,payload",
-                         list(VALID_INPUTS.items()))
+@pytest.mark.parametrize("primitive,payload", list(VALID_INPUTS.items()))
 def test_valid_input_passes_validation(primitive, payload):
     rf.validate_input(primitive, payload)
 
@@ -149,19 +154,25 @@ def test_calibration_score_array_must_be_nonempty():
 
 def _real_envelope_dict():
     import numpy as np
+
     y = np.array([1.0, 0.0, 1.0, 0.0])
     report = rf.audit_fairness(y, y, y, 1.0 - y)
     signer = rf.Signer.generate(issuer="acme", key_id="k1")
-    params = rf.ParameterSet(backend="tenseal-ckks",
-                             poly_modulus_degree=32768,
-                             multiplicative_depth=6,
-                             coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                             scaling_factor_bits=40,
-                             backend_version="0.3.16")
-    env = rf.envelope("fairness", report, signer=signer,
-                       parameter_set=params,
-                       input_commitments=rf.commitments_for(
-                           {"y_true": y}))
+    params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=32768,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+        backend_version="0.3.16",
+    )
+    env = rf.envelope(
+        "fairness",
+        report,
+        signer=signer,
+        parameter_set=params,
+        input_commitments=rf.commitments_for({"y_true": y}),
+    )
     return env.to_dict()
 
 
@@ -218,6 +229,7 @@ def test_envelope_with_depth_above_six_rejected():
 
 def test_cli_dispatch_rejects_invalid_input():
     from regaudit_fhe.cli import _audit_dispatch
+
     with pytest.raises(rf.SchemaError):
         _audit_dispatch("fairness", {"y_true": [1, 2, 3]})
 
@@ -229,6 +241,7 @@ def test_cli_dispatch_rejects_invalid_input():
 
 def test_fairness_output_passes_output_schema():
     import numpy as np
+
     y = np.array([1.0, 0.0, 1.0, 0.0])
     report = rf.audit_fairness(y, y, y, 1.0 - y)
     rf.validate_output("fairness", rf.reports.report_to_dict(report))
@@ -236,6 +249,7 @@ def test_fairness_output_passes_output_schema():
 
 def test_drift_output_passes_output_schema():
     import numpy as np
+
     p = np.array([1.0, 2.0, 3.0, 4.0])
     q = np.array([2.0, 2.0, 3.0, 3.0])
     report = rf.audit_drift(p, q)

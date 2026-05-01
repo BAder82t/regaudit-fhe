@@ -24,8 +24,7 @@ from typing import Any, cast
 
 from jsonschema import Draft202012Validator
 
-PRIMITIVES = ("fairness", "provenance", "concordance",
-              "calibration", "drift", "disagreement")
+PRIMITIVES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
 DIRECTIONS = ("input", "output")
 
 
@@ -54,9 +53,7 @@ def _schemas_dir() -> Path:
     for cand in _candidate_schema_dirs():
         if cand.is_dir():
             return cand
-    raise FileNotFoundError(
-        "Could not locate the regaudit-fhe schemas/ directory."
-    )
+    raise FileNotFoundError("Could not locate the regaudit-fhe schemas/ directory.")
 
 
 @cache
@@ -73,10 +70,7 @@ def load_schema(name: str) -> dict[str, Any]:
             raise KeyError(f"unknown schema {name!r}")
         path = _schemas_dir() / f"{primitive}.{direction}.schema.json"
     else:
-        raise KeyError(
-            f"schema name must be 'envelope' or '<primitive>.<direction>'; "
-            f"got {name!r}"
-        )
+        raise KeyError(f"schema name must be 'envelope' or '<primitive>.<direction>'; got {name!r}")
     with path.open("r") as fh:
         return cast(dict[str, Any], json.load(fh))
 
@@ -101,9 +95,7 @@ def validate(name: str, payload: Mapping[str, Any]) -> None:
     for err in errors:
         loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
         msgs.append(f"{loc}: {err.message}")
-    raise SchemaError(
-        f"payload does not conform to schema {name!r}: " + "; ".join(msgs)
-    )
+    raise SchemaError(f"payload does not conform to schema {name!r}: " + "; ".join(msgs))
 
 
 def validate_input(primitive: str, payload: Mapping[str, Any]) -> None:

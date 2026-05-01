@@ -82,19 +82,23 @@ def test_trust_store_rejects_non_pem_value():
 def test_trust_store_rejects_revocation_for_unknown_key():
     _, pem = _make_envelope()
     with pytest.raises(TrustStoreError, match="revoked"):
-        TrustStore.from_dict({
-            "keys": {"k1": pem},
-            "revoked": ["ghost"],
-        })
+        TrustStore.from_dict(
+            {
+                "keys": {"k1": pem},
+                "revoked": ["ghost"],
+            }
+        )
 
 
 def test_trust_store_rejects_pin_for_unknown_key():
     _, pem = _make_envelope()
     with pytest.raises(TrustStoreError, match="parameter_set_pins"):
-        TrustStore.from_dict({
-            "keys": {"k1": pem},
-            "parameter_set_pins": {"ghost": "deadbeef"},
-        })
+        TrustStore.from_dict(
+            {
+                "keys": {"k1": pem},
+                "parameter_set_pins": {"ghost": "deadbeef"},
+            }
+        )
 
 
 def test_trust_store_rejects_empty_payload():
@@ -143,8 +147,7 @@ def test_unknown_key_id_raises_untrusted_issuer():
 
 def test_revoked_key_id_raises_revoked_issuer():
     env, pem = _make_envelope()
-    store = _trust_store_for(env, pem,
-                              revoked=[env.receipt["key_id"]])
+    store = _trust_store_for(env, pem, revoked=[env.receipt["key_id"]])
     with pytest.raises(RevokedIssuer, match="revocation"):
         rf.verify_envelope_or_raise(env, trust_store=store)
 
@@ -152,7 +155,8 @@ def test_revoked_key_id_raises_revoked_issuer():
 def test_pinned_param_hash_mismatch_raises_wrong_parameter_set():
     env, pem = _make_envelope()
     store = _trust_store_for(
-        env, pem,
+        env,
+        pem,
         parameter_set_pins={env.receipt["key_id"]: "0" * 64},
     )
     with pytest.raises(WrongParameterSet, match="parameter_set_hash"):
@@ -169,11 +173,12 @@ def test_tampered_body_raises_hash_mismatch():
 
 def test_substituted_pem_raises_untrusted_issuer():
     env, _ = _make_envelope()
-    other_signer = rf.Signer.generate(issuer="acme",
-                                       key_id=env.receipt["key_id"])
-    store = TrustStore.from_dict({
-        env.receipt["key_id"]: other_signer.public_key_pem(),
-    })
+    other_signer = rf.Signer.generate(issuer="acme", key_id=env.receipt["key_id"])
+    store = TrustStore.from_dict(
+        {
+            env.receipt["key_id"]: other_signer.public_key_pem(),
+        }
+    )
     with pytest.raises((UntrustedIssuer, InvalidSignature)):
         rf.verify_envelope_or_raise(env, trust_store=store)
 
@@ -185,8 +190,7 @@ def test_substituted_pem_raises_untrusted_issuer():
 
 @pytest.mark.parametrize(
     "exc_type",
-    [HashMismatch, InvalidSignature, UntrustedIssuer, RevokedIssuer,
-     WrongParameterSet],
+    [HashMismatch, InvalidSignature, UntrustedIssuer, RevokedIssuer, WrongParameterSet],
 )
 def test_all_failures_subclass_envelope_verification_error(exc_type):
     assert issubclass(exc_type, EnvelopeVerificationError)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 try:
     import tenseal as _tenseal  # noqa: F401
+
     _HAVE_TENSEAL = True
 except Exception:
     _HAVE_TENSEAL = False
@@ -25,9 +26,7 @@ except Exception:
 
 def _require_tenseal() -> None:
     if not _HAVE_TENSEAL:
-        raise RuntimeError(
-            "TenSEAL is not installed. Run `pip install regaudit-fhe[fhe]`."
-        )
+        raise RuntimeError("TenSEAL is not installed. Run `pip install regaudit-fhe[fhe]`.")
 
 
 from . import primitives  # noqa: E402

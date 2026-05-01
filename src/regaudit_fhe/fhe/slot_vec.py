@@ -45,27 +45,24 @@ def snapshot_op_counters() -> dict[str, int]:
 
 @dataclass
 class EncryptedSlotVec:
-    ciphertext: Ciphertext      # tenseal.CKKSVector
+    ciphertext: Ciphertext  # tenseal.CKKSVector
     n: int
     depth: int = 0
     max_depth: int = MAX_DEPTH
 
     def __post_init__(self) -> None:
         if self.depth > self.max_depth:
-            raise DepthBudgetExceeded(
-                f"depth {self.depth} exceeds budget {self.max_depth}"
-            )
+            raise DepthBudgetExceeded(f"depth {self.depth} exceeds budget {self.max_depth}")
 
     @classmethod
-    def encrypt(cls, ctx: Any, values: ArrayLike,
-                max_depth: int = MAX_DEPTH) -> EncryptedSlotVec:
+    def encrypt(cls, ctx: Any, values: ArrayLike, max_depth: int = MAX_DEPTH) -> EncryptedSlotVec:
         from .context import CKKSContext
+
         if not isinstance(ctx, CKKSContext):
             raise TypeError("encrypt(ctx, values) requires a CKKSContext")
         vals = [float(v) for v in np.asarray(values, dtype=float).ravel()]
         ct = ctx.encrypt_vector(vals)
-        return cls(ciphertext=ct, n=len(vals),
-                   depth=0, max_depth=max_depth)
+        return cls(ciphertext=ct, n=len(vals), depth=0, max_depth=max_depth)
 
     def decrypt(self) -> list[float]:
         return list(self.ciphertext.decrypt())[: self.n]
@@ -88,8 +85,7 @@ class EncryptedSlotVec:
     def first_slot(self) -> float:
         return float(self.decrypt()[0])
 
-    def __add__(self, other: EncryptedSlotVec | np.ndarray | float | list
-                ) -> EncryptedSlotVec:
+    def __add__(self, other: EncryptedSlotVec | np.ndarray | float | list) -> EncryptedSlotVec:
         OP_COUNTERS["additions"] += 1
         if isinstance(other, EncryptedSlotVec):
             return EncryptedSlotVec(
@@ -101,14 +97,15 @@ class EncryptedSlotVec:
         addend = _as_list(other, self.n)
         return EncryptedSlotVec(
             ciphertext=self.ciphertext + addend,
-            n=self.n, depth=self.depth, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
         )
 
     def __radd__(self, other: Any) -> EncryptedSlotVec:
         return self.__add__(other)
 
-    def __sub__(self, other: EncryptedSlotVec | np.ndarray | float | list
-                ) -> EncryptedSlotVec:
+    def __sub__(self, other: EncryptedSlotVec | np.ndarray | float | list) -> EncryptedSlotVec:
         OP_COUNTERS["subtractions"] += 1
         if isinstance(other, EncryptedSlotVec):
             return EncryptedSlotVec(
@@ -120,13 +117,17 @@ class EncryptedSlotVec:
         sub = _as_list(other, self.n)
         return EncryptedSlotVec(
             ciphertext=self.ciphertext - sub,
-            n=self.n, depth=self.depth, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
         )
 
     def __neg__(self) -> EncryptedSlotVec:
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * -1.0,
-            n=self.n, depth=self.depth, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
         )
 
     def mul_pt(self, plaintext: Any) -> EncryptedSlotVec:
@@ -134,14 +135,18 @@ class EncryptedSlotVec:
         pt = _as_list(plaintext, self.n)
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * pt,
-            n=self.n, depth=self.depth + 1, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth + 1,
+            max_depth=self.max_depth,
         )
 
     def mul_scalar(self, scalar: float) -> EncryptedSlotVec:
         OP_COUNTERS["ct_scalar_muls"] += 1
         return EncryptedSlotVec(
             ciphertext=self.ciphertext * float(scalar),
-            n=self.n, depth=self.depth, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
         )
 
     def mul_ct(self, other: EncryptedSlotVec) -> EncryptedSlotVec:
@@ -167,6 +172,7 @@ class EncryptedSlotVec:
         ``out[i] == in[(i + k) mod n]``.
         """
         import numpy as _np
+
         n = self.n
         perm = _np.zeros((n, n), dtype=float)
         for c in range(n):
@@ -181,7 +187,9 @@ class EncryptedSlotVec:
             OP_COUNTERS["rotations"] += int(np.log2(self.n))
         return EncryptedSlotVec(
             ciphertext=self.ciphertext.sum(),
-            n=self.n, depth=self.depth, max_depth=self.max_depth,
+            n=self.n,
+            depth=self.depth,
+            max_depth=self.max_depth,
         )
 
     def mm_pt(self, matrix: Any) -> EncryptedSlotVec:
@@ -191,6 +199,7 @@ class EncryptedSlotVec:
         rotation-free manner. Consumes one multiplicative level.
         """
         import numpy as _np
+
         m = _np.asarray(matrix, dtype=float)
         OP_COUNTERS["matmul_pt"] += 1
         OP_COUNTERS["ct_pt_muls"] += 1

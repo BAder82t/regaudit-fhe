@@ -61,15 +61,17 @@ def test_missing_bearer_token_returns_401():
 
 def test_unknown_bearer_token_returns_401():
     app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})}))
-    r = TestClient(app).post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                              headers={"Authorization": "Bearer wrong"})
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS, headers={"Authorization": "Bearer wrong"}
+    )
     assert r.status_code == 401
 
 
 def test_valid_bearer_token_passes_auth():
     app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})}))
-    r = TestClient(app).post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                              headers={"Authorization": "Bearer k1"})
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS, headers={"Authorization": "Bearer k1"}
+    )
     assert r.status_code == 200, r.text
 
 
@@ -86,8 +88,9 @@ def test_dev_mode_disables_auth():
 
 def test_missing_scope_returns_403():
     app = build_app(config=_config(api_keys={"k1": frozenset({"audit:read"})}))
-    r = TestClient(app).post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                              headers={"Authorization": "Bearer k1"})
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS, headers={"Authorization": "Bearer k1"}
+    )
     assert r.status_code == 403
     assert "audit:run" in r.json()["detail"]
 
@@ -96,8 +99,7 @@ def test_admin_scope_grants_every_action():
     app = build_app(config=_config(api_keys={"root": frozenset({"admin"})}))
     headers = {"Authorization": "Bearer root"}
     c = TestClient(app)
-    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                   headers=headers).status_code == 200
+    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS, headers=headers).status_code == 200
     assert c.get("/v1/schemas", headers=headers).status_code == 200
 
 
@@ -107,12 +109,14 @@ def test_admin_scope_grants_every_action():
 
 
 def test_request_body_above_limit_returns_413():
-    app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})},
-                                    max_body_bytes=128))
-    big = {"y_true": [1, 0] * 1000, "y_pred": [1, 0] * 1000,
-           "group_a": [1] * 2000, "group_b": [0] * 2000}
-    r = TestClient(app).post("/v1/audit/fairness", json=big,
-                              headers={"Authorization": "Bearer k1"})
+    app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})}, max_body_bytes=128))
+    big = {
+        "y_true": [1, 0] * 1000,
+        "y_pred": [1, 0] * 1000,
+        "group_a": [1] * 2000,
+        "group_b": [0] * 2000,
+    }
+    r = TestClient(app).post("/v1/audit/fairness", json=big, headers={"Authorization": "Bearer k1"})
     assert r.status_code == 413
 
 
@@ -122,14 +126,11 @@ def test_request_body_above_limit_returns_413():
 
 
 def test_rate_limit_returns_429_when_exhausted():
-    app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})},
-                                    rate_limit_per_min=2))
+    app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})}, rate_limit_per_min=2))
     headers = {"Authorization": "Bearer k1"}
     c = TestClient(app)
-    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                   headers=headers).status_code == 200
-    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                   headers=headers).status_code == 200
+    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS, headers=headers).status_code == 200
+    assert c.post("/v1/audit/fairness", json=VALID_FAIRNESS, headers=headers).status_code == 200
     r = c.post("/v1/audit/fairness", json=VALID_FAIRNESS, headers=headers)
     assert r.status_code == 429
     assert r.headers.get("Retry-After") == "60"
@@ -155,6 +156,7 @@ def _capture_logger() -> tuple[logging.Logger, io.StringIO]:
     logger.handlers = []
     handler = logging.StreamHandler(buffer)
     from regaudit_fhe.server import _JSONFormatter
+
     handler.setFormatter(_JSONFormatter())
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
@@ -176,8 +178,9 @@ def test_access_log_does_not_contain_request_payload():
 
 def test_request_id_is_propagated():
     app = build_app(config=_config(dev_mode=True))
-    r = TestClient(app).post("/v1/audit/fairness", json=VALID_FAIRNESS,
-                              headers={"x-request-id": "test-rid-42"})
+    r = TestClient(app).post(
+        "/v1/audit/fairness", json=VALID_FAIRNESS, headers={"x-request-id": "test-rid-42"}
+    )
     assert r.status_code == 200
     assert r.headers.get("x-request-id") == "test-rid-42"
 
@@ -199,20 +202,21 @@ def test_cors_default_does_not_allow_arbitrary_origins():
     app = build_app(config=_config(dev_mode=True))
     r = TestClient(app).options(
         "/v1/audit/fairness",
-        headers={"Origin": "https://evil.example",
-                 "Access-Control-Request-Method": "POST"})
-    assert "access-control-allow-origin" not in {k.lower()
-                                                  for k in r.headers}
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-origin" not in {k.lower() for k in r.headers}
 
 
 def test_cors_allowlist_grants_named_origin():
-    app = build_app(config=_config(dev_mode=True,
-                                    cors_origins=("https://app.example",)))
+    app = build_app(config=_config(dev_mode=True, cors_origins=("https://app.example",)))
     r = TestClient(app).options(
         "/v1/audit/fairness",
-        headers={"Origin": "https://app.example",
-                 "Access-Control-Request-Method": "POST",
-                 "Access-Control-Request-Headers": "authorization"})
+        headers={
+            "Origin": "https://app.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
     assert r.headers.get("access-control-allow-origin") == "https://app.example"
 
 
@@ -240,11 +244,11 @@ def test_privacy_warning_text_is_loud():
 
 def test_schema_endpoint_requires_read_scope():
     app = build_app(config=_config(api_keys={"k1": frozenset({"audit:run"})}))
-    r = TestClient(app).get("/v1/schemas",
-                             headers={"Authorization": "Bearer k1"})
+    r = TestClient(app).get("/v1/schemas", headers={"Authorization": "Bearer k1"})
     assert r.status_code == 403
-    r = TestClient(build_app(config=_config(api_keys={"k1": frozenset({"audit:read"})}))
-                    ).get("/v1/schemas", headers={"Authorization": "Bearer k1"})
+    r = TestClient(build_app(config=_config(api_keys={"k1": frozenset({"audit:read"})}))).get(
+        "/v1/schemas", headers={"Authorization": "Bearer k1"}
+    )
     assert r.status_code == 200
 
 
@@ -255,8 +259,7 @@ def test_schema_endpoint_requires_read_scope():
 
 def test_audit_endpoint_returns_422_on_schema_violation():
     app = build_app(config=_config(dev_mode=True))
-    r = TestClient(app).post("/v1/audit/fairness",
-                              json={"y_true": [1, 2, 3]})
+    r = TestClient(app).post("/v1/audit/fairness", json={"y_true": [1, 2, 3]})
     assert r.status_code == 422
 
 
@@ -270,8 +273,10 @@ def test_caller_key_id_is_hashed_not_raw_token():
     cfg = _config(api_keys={"super-secret-token": frozenset({"audit:run"})})
     app = build_app(config=cfg, logger=logger)
     r = TestClient(app).post(
-        "/v1/audit/fairness", json=VALID_FAIRNESS,
-        headers={"Authorization": "Bearer super-secret-token"})
+        "/v1/audit/fairness",
+        json=VALID_FAIRNESS,
+        headers={"Authorization": "Bearer super-secret-token"},
+    )
     assert r.status_code == 200
     body = buffer.getvalue()
     assert "super-secret-token" not in body
@@ -283,8 +288,8 @@ def test_unknown_token_still_returns_401_under_constant_time_path():
     cfg = _config(api_keys={"k1": frozenset({"audit:run"})})
     app = build_app(config=cfg)
     r = TestClient(app).post(
-        "/v1/audit/fairness", json=VALID_FAIRNESS,
-        headers={"Authorization": "Bearer k2"})
+        "/v1/audit/fairness", json=VALID_FAIRNESS, headers={"Authorization": "Bearer k2"}
+    )
     assert r.status_code == 401
 
 
@@ -298,9 +303,9 @@ def test_assert_safe_bind_allows_loopback_in_dev_mode(host):
     assert_safe_bind(host, dev_mode=True)  # must not raise
 
 
-@pytest.mark.parametrize("host",
-                         ["0.0.0.0", "10.0.0.1", "192.168.1.1",
-                          "::", "2001:db8::1", "example.com"])
+@pytest.mark.parametrize(
+    "host", ["0.0.0.0", "10.0.0.1", "192.168.1.1", "::", "2001:db8::1", "example.com"]
+)
 def test_assert_safe_bind_refuses_non_loopback_in_dev_mode(host):
     with pytest.raises(RuntimeError, match="non-loopback"):
         assert_safe_bind(host, dev_mode=True)

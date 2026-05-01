@@ -28,14 +28,15 @@ class DisagreementReport:
     per_model_outputs: list[float]
 
 
-def disagreement_oracle(per_model_predictions: np.ndarray, threshold: float = 0.05) -> DisagreementReport:
+def disagreement_oracle(
+    per_model_predictions: np.ndarray, threshold: float = 0.05
+) -> DisagreementReport:
     """Plaintext oracle. Input shape: (M,) for a single test point or (M, N).
 
     Returns the average pairwise squared difference across the M models.
     """
     p = np.asarray(per_model_predictions, dtype=np.float64)
-    p = assert_finite("per_model_predictions",
-                      assert_nonempty("per_model_predictions", p))
+    p = assert_finite("per_model_predictions", assert_nonempty("per_model_predictions", p))
     if p.ndim == 1:
         p = p[:, None]
     M = p.shape[0]
@@ -53,9 +54,9 @@ def disagreement_oracle(per_model_predictions: np.ndarray, threshold: float = 0.
     )
 
 
-def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
-                            test_input: np.ndarray,
-                            threshold: float = 0.05) -> DisagreementReport:
+def disagreement_circuit_d6(
+    model_polynomials: Sequence[np.ndarray], test_input: np.ndarray, threshold: float = 0.05
+) -> DisagreementReport:
     """Depth-budgeted joint-polynomial circuit.
 
     Each model is represented as a degree-3 polynomial surrogate over the
@@ -77,16 +78,14 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
       auditor decryption to keep the on-encrypted depth strictly below six and
       to leave headroom for downstream commit-and-verify chaining.
     """
-    test_input = assert_finite("test_input",
-                               assert_nonempty("test_input", test_input))
+    test_input = assert_finite("test_input", assert_nonempty("test_input", test_input))
     if not model_polynomials:
         raise ValueError("model_polynomials must be non-empty")
     M = len(model_polynomials)
     for i, c in enumerate(model_polynomials):
         if len(c) != 4:
             raise ValueError(
-                f"each surrogate must be a deg-3 poly (4 coefficients); "
-                f"model {i} has {len(c)}"
+                f"each surrogate must be a deg-3 poly (4 coefficients); model {i} has {len(c)}"
             )
     if M < 3:
         raise ValueError("requires M >= 3 model versions")
@@ -99,10 +98,7 @@ def disagreement_circuit_d6(model_polynomials: Sequence[np.ndarray],
     per_model_outputs: list[float] = []
     for coeffs in model_polynomials:
         a0, a1, a2, a3 = coeffs
-        p_i = (x.mul_scalar(a1)
-               + x_sq.mul_scalar(a2)
-               + x_cube.mul_scalar(a3)
-               + np.full(n, a0))
+        p_i = x.mul_scalar(a1) + x_sq.mul_scalar(a2) + x_cube.mul_scalar(a3) + np.full(n, a0)
         P.append(p_i)
         per_model_outputs.append(float(np.mean(p_i.slots)))
 

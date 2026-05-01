@@ -47,9 +47,7 @@ from .slot_vec import EncryptedSlotVec, sign_poly_d3
 # asyncio task, an explicit ``contextvars.copy_context()`` scope) sees
 # its own dict; without this isolation, concurrent encrypted-endpoint
 # requests would race on the depth record.
-_LAST_DEPTH: ContextVar[dict[str, int]] = ContextVar(
-    "regaudit_fhe.fhe.primitives._LAST_DEPTH"
-)
+_LAST_DEPTH: ContextVar[dict[str, int]] = ContextVar("regaudit_fhe.fhe.primitives._LAST_DEPTH")
 
 
 def _ld() -> dict[str, int]:
@@ -65,19 +63,19 @@ def _ld() -> dict[str, int]:
 
 
 DECLARED_DEPTH: dict[str, int] = {
-    "fairness":     4,
-    "provenance":   3,
-    "concordance":  5,   # TenSEAL backend: rotation costs +1 level vs. the
-                          # native-rotation plaintext model (depth 4) because
-                          # CKKSVector exposes no Galois rotation. The mm_pt
-                          # permutation path consumes one extra multiplicative
-                          # level per shift.
-    "calibration":  4,   # TenSEAL backend: mul_pt rescale (1) + sign_poly_d3
-                          # at real CKKS depth (3, due to the mul_scalar
-                          # summands in 1.5x − 0.5x³).
-    "drift":        2,   # TenSEAL backend: prefix sum costs +1 level vs. the
-                          # rotation-based plaintext model (depth 1). See
-                          # docs/specs/05_ew1_cdsf.md and slot_vec.mm_pt.
+    "fairness": 4,
+    "provenance": 3,
+    "concordance": 5,  # TenSEAL backend: rotation costs +1 level vs. the
+    # native-rotation plaintext model (depth 4) because
+    # CKKSVector exposes no Galois rotation. The mm_pt
+    # permutation path consumes one extra multiplicative
+    # level per shift.
+    "calibration": 4,  # TenSEAL backend: mul_pt rescale (1) + sign_poly_d3
+    # at real CKKS depth (3, due to the mul_scalar
+    # summands in 1.5x − 0.5x³).
+    "drift": 2,  # TenSEAL backend: prefix sum costs +1 level vs. the
+    # rotation-based plaintext model (depth 1). See
+    # docs/specs/05_ew1_cdsf.md and slot_vec.mm_pt.
     "disagreement": 5,
 }
 
@@ -87,18 +85,18 @@ def _record_depth(primitive: str, *vectors: EncryptedSlotVec) -> int:
     _ld()[primitive] = d
     declared = DECLARED_DEPTH.get(primitive, 6)
     if d > declared:
-        raise AssertionError(
-            f"{primitive}: depth {d} exceeded declared budget {declared}"
-        )
+        raise AssertionError(f"{primitive}: depth {d} exceeded declared budget {declared}")
     return d
 
 
-def fairness_encrypted(ctx: CKKSContext,
-                       y_true: np.ndarray,
-                       y_pred: np.ndarray,
-                       group_a: np.ndarray,
-                       group_b: np.ndarray,
-                       threshold: float = 0.1) -> FairnessReport:
+def fairness_encrypted(
+    ctx: CKKSContext,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    group_a: np.ndarray,
+    group_b: np.ndarray,
+    threshold: float = 0.1,
+) -> FairnessReport:
     y_true_p = pad_pow2(y_true)
     y_pred_p = pad_pow2(y_pred)
     g_a = pad_pow2(group_a)
@@ -134,11 +132,9 @@ def fairness_encrypted(ctx: CKKSContext,
     return FairnessReport(dp_val, eo_val, pp_val, breached)
 
 
-def topk_provenance_encrypted(ctx: CKKSContext,
-                              attributions: np.ndarray,
-                              row_ids: np.ndarray,
-                              n_buckets: int,
-                              k: int) -> ProvenanceReport:
+def topk_provenance_encrypted(
+    ctx: CKKSContext, attributions: np.ndarray, row_ids: np.ndarray, n_buckets: int, k: int
+) -> ProvenanceReport:
     n_slots = max(pad_pow2(attributions).shape[0], n_buckets)
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     masks = bucket_masks(bucket_ids, n_buckets, n_slots)
@@ -154,8 +150,7 @@ def topk_provenance_encrypted(ctx: CKKSContext,
         last_summed = masked.sum_all()
         aggregates[b] = last_summed.first_slot()
 
-    topk = sorted(range(n_buckets),
-                  key=lambda i: (-aggregates[i], i))[:k]
+    topk = sorted(range(n_buckets), key=lambda i: (-aggregates[i], i))[:k]
     indicator = np.zeros(n_buckets, dtype=np.float64)
     indicator[topk] = 1.0
     if last_summed is not None:
@@ -163,8 +158,7 @@ def topk_provenance_encrypted(ctx: CKKSContext,
     return ProvenanceReport(aggregates, topk, indicator)
 
 
-def _build_pair_matrices(n: int, P: int) -> tuple[np.ndarray, np.ndarray,
-                                                   np.ndarray]:
+def _build_pair_matrices(n: int, P: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build the (N, P)-shape plaintext matrices for the all-pairs
     encrypted concordance circuit. ``P`` is ``next_pow2(N * (N - 1))``;
     pair index ``k`` enumerates ordered pairs ``(i, j)`` with
@@ -191,10 +185,9 @@ def _build_pair_matrices(n: int, P: int) -> tuple[np.ndarray, np.ndarray,
     return M_risk, M_time, M_event
 
 
-def c_index_encrypted(ctx: CKKSContext,
-                      risk: np.ndarray,
-                      time: np.ndarray,
-                      event: np.ndarray) -> CIndexReport:
+def c_index_encrypted(
+    ctx: CKKSContext, risk: np.ndarray, time: np.ndarray, event: np.ndarray
+) -> CIndexReport:
     """Encrypted Harrell C-index over CKKS ciphertexts.
 
     Risk, time, and event vectors are encrypted under the auditor's
@@ -283,8 +276,7 @@ def c_index_encrypted(ctx: CKKSContext,
 
     A_total = min(A_total, float(n_pairs))
     comparable_total = min(comparable_total, float(n_pairs))
-    ci = (A_total / comparable_total
-          if comparable_total > 0 else 0.5)
+    ci = A_total / comparable_total if comparable_total > 0 else 0.5
     return CIndexReport(A_total, comparable_total, ci)
 
 
@@ -318,10 +310,9 @@ def reset_last_depth() -> None:
     _LAST_DEPTH.set({})
 
 
-def conformal_encrypted(ctx: CKKSContext,
-                        scores: np.ndarray,
-                        quantiles: np.ndarray,
-                        score_range: float | None = None) -> ConformalReport:
+def conformal_encrypted(
+    ctx: CKKSContext, scores: np.ndarray, quantiles: np.ndarray, score_range: float | None = None
+) -> ConformalReport:
     """Encrypted conformal-prediction membership bitmask.
 
     Scores are encrypted; per-class quantile thresholds are
@@ -369,10 +360,9 @@ def conformal_encrypted(ctx: CKKSContext,
     return ConformalReport(membership, int(np.sum(membership)))
 
 
-def w1_encrypted(ctx: CKKSContext,
-                 p: np.ndarray,
-                 q: np.ndarray,
-                 drift_threshold: float = 0.005) -> DriftReport:
+def w1_encrypted(
+    ctx: CKKSContext, p: np.ndarray, q: np.ndarray, drift_threshold: float = 0.005
+) -> DriftReport:
     p_padded = pad_pow2(p / max(float(np.sum(p)), 1e-12))
     q_padded = pad_pow2(q / max(float(np.sum(q)), 1e-12))
     n = p_padded.shape[0]
@@ -397,10 +387,9 @@ def w1_encrypted(ctx: CKKSContext,
     )
 
 
-def disagreement_encrypted(ctx: CKKSContext,
-                           model_polynomials: Sequence,
-                           test_input: np.ndarray,
-                           threshold: float = 0.05) -> DisagreementReport:
+def disagreement_encrypted(
+    ctx: CKKSContext, model_polynomials: Sequence, test_input: np.ndarray, threshold: float = 0.05
+) -> DisagreementReport:
     """Encrypted cross-model disagreement variance.
 
     Test inputs are encrypted. Each of the ``M`` model surrogates is a
@@ -430,10 +419,7 @@ def disagreement_encrypted(ctx: CKKSContext,
         # mul_scalar does not mod-switch its operand (it is a
         # rescale-only operation), so x / x_sq / x_cube can be reused
         # across model iterations without copying.
-        p_i = (x.mul_scalar(a1)
-               + x_sq.mul_scalar(a2)
-               + x_cube.mul_scalar(a3)
-               + np.full(n, a0))
+        p_i = x.mul_scalar(a1) + x_sq.mul_scalar(a2) + x_cube.mul_scalar(a3) + np.full(n, a0)
         P.append(p_i)
         # Per-model mean: the function's return value is a single
         # scalar mean per model; the per-row decrypted vector is

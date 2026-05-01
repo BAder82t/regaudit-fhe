@@ -29,8 +29,7 @@ class ConformalReport:
 def conformal_oracle(scores: np.ndarray, quantiles: np.ndarray) -> ConformalReport:
     """Plaintext split-conformal membership."""
     scores = assert_finite("scores", assert_nonempty("scores", scores))
-    quantiles = assert_finite("quantiles",
-                              assert_nonempty("quantiles", quantiles))
+    quantiles = assert_finite("quantiles", assert_nonempty("quantiles", quantiles))
     if scores.shape != quantiles.shape:
         raise ValueError(f"shape mismatch: {scores.shape} vs {quantiles.shape}")
     membership = (scores <= quantiles).astype(np.float64)
@@ -49,16 +48,14 @@ def conformal_circuit_d6(scores: np.ndarray, quantiles: np.ndarray) -> Conformal
       Total: 2 levels.
     """
     scores = assert_finite("scores", assert_nonempty("scores", scores))
-    quantiles = assert_finite("quantiles",
-                              assert_nonempty("quantiles", quantiles))
+    quantiles = assert_finite("quantiles", assert_nonempty("quantiles", quantiles))
     if scores.shape != quantiles.shape:
         raise ValueError(f"shape mismatch: {scores.shape} vs {quantiles.shape}")
     n = pad_pow2(scores).shape[0]
     scores_ct = SlotVec.encrypt(pad_pow2(scores))
     quantiles_pt = pad_pow2(quantiles)
 
-    score_range = max(
-        float(np.max(np.abs(scores_ct.slots - quantiles_pt))), 1e-9)
+    score_range = max(float(np.max(np.abs(scores_ct.slots - quantiles_pt))), 1e-9)
     # Quantiles are auditor-public per the threat model; subtracting
     # an encrypted score from the plaintext quantile is implemented
     # by negating the ciphertext and adding the plaintext vector.
@@ -67,7 +64,5 @@ def conformal_circuit_d6(scores: np.ndarray, quantiles: np.ndarray) -> Conformal
     member_signal = sign_poly_d3(diff)
     membership = (member_signal.slots[: len(scores)] > 0.0).astype(np.float64)
 
-    assert member_signal.depth <= 6, (
-        f"depth budget violated: {member_signal.depth}"
-    )
+    assert member_signal.depth <= 6, f"depth budget violated: {member_signal.depth}"
     return ConformalReport(membership, int(np.sum(membership)))

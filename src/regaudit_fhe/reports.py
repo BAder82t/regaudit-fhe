@@ -75,12 +75,16 @@ SIGNATURE_ALG: str = "Ed25519"
 
 
 REGULATION_MAP: dict[str, list[str]] = {
-    "fairness": ["NYC_LL144", "EU_AI_ACT_ART10", "EU_AI_ACT_ART15",
-                 "COLORADO_AI_ACT", "CFPB_ALG_DISCRIM"],
+    "fairness": [
+        "NYC_LL144",
+        "EU_AI_ACT_ART10",
+        "EU_AI_ACT_ART15",
+        "COLORADO_AI_ACT",
+        "CFPB_ALG_DISCRIM",
+    ],
     "provenance": ["EU_AI_ACT_ART10", "21_CFR_PART_11", "GDPR_ART22", "HIPAA"],
     "concordance": ["FDA_SAMD_PCCP", "EU_AI_ACT_ART15", "EMA_AI_GUIDANCE"],
-    "calibration": ["FDA_SAMD_UQ", "EU_AI_ACT_ART15", "ISO_IEC_23053",
-                    "UNECE_WP29"],
+    "calibration": ["FDA_SAMD_UQ", "EU_AI_ACT_ART15", "ISO_IEC_23053", "UNECE_WP29"],
     "drift": ["EU_AI_ACT_ART15", "FDA_SAMD_PCCP", "BASEL_III"],
     "disagreement": ["OCC_SR_11_7", "EU_AI_ACT_ART15", "FDA_SAMD_PCCP"],
 }
@@ -120,9 +124,9 @@ def canonical_json(payload: Mapping[str, Any]) -> bytes:
     Sorted keys, no whitespace separators, UTF-8, no ASCII escapement.
     Every producer / verifier must use this exact rule.
     """
-    return json.dumps(_to_jsonable(payload), sort_keys=True,
-                      separators=(",", ":"), ensure_ascii=False
-                      ).encode("utf-8")
+    return json.dumps(
+        _to_jsonable(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def sha256_hex(data: bytes) -> str:
@@ -184,11 +188,12 @@ class ParameterSet:
         return sha256_hex(canonical_json(self.to_dict()))
 
 
-def parameter_set_from_ckks_context(ctx: Any,
-                                     *,
-                                     security_bits: int = 128,
-                                     multiplicative_depth: int = 6,
-                                     ) -> ParameterSet:
+def parameter_set_from_ckks_context(
+    ctx: Any,
+    *,
+    security_bits: int = 128,
+    multiplicative_depth: int = 6,
+) -> ParameterSet:
     """Introspect a CKKSContext into a ParameterSet.
 
     ``security_bits`` and ``multiplicative_depth`` are passed through
@@ -203,6 +208,7 @@ def parameter_set_from_ckks_context(ctx: Any,
     backend_version = ""
     with contextlib.suppress(Exception):
         import tenseal as _ts
+
         backend_version = getattr(_ts, "__version__", "")
 
     poly = int(getattr(ctx, "poly_modulus_degree", 0))
@@ -211,9 +217,9 @@ def parameter_set_from_ckks_context(ctx: Any,
         poly_modulus_degree=poly,
         security_bits=int(security_bits),
         multiplicative_depth=int(multiplicative_depth),
-        coeff_mod_bit_sizes=tuple(getattr(
-            ctx, "coeff_mod_bit_sizes",
-            (60, 40, 40, 40, 40, 40, 40, 40, 60))),
+        coeff_mod_bit_sizes=tuple(
+            getattr(ctx, "coeff_mod_bit_sizes", (60, 40, 40, 40, 40, 40, 40, 40, 60))
+        ),
         scaling_factor_bits=int(np.log2(getattr(ctx, "scale", 1 << 40))),
         library_version=LIB_VERSION,
         backend_version=backend_version,
@@ -239,9 +245,11 @@ class TimestampAuthority:
 
     def stamp(self, body: bytes) -> dict[str, str]:
         token = self.sign_callable(body)
-        return {"issuer": self.issuer,
-                "token_b64": base64.b64encode(token).decode("ascii"),
-                "issued_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+        return {
+            "issuer": self.issuer,
+            "token_b64": base64.b64encode(token).decode("ascii"),
+            "issued_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -267,13 +275,13 @@ class Signer:
         )
 
     @classmethod
-    def from_pem(cls, *, issuer: str, key_id: str, private_pem: bytes,
-                 password: bytes | None = None) -> Signer:
+    def from_pem(
+        cls, *, issuer: str, key_id: str, private_pem: bytes, password: bytes | None = None
+    ) -> Signer:
         priv = serialization.load_pem_private_key(private_pem, password=password)
         if not isinstance(priv, Ed25519PrivateKey):
             raise TypeError("regaudit-fhe envelope signing requires Ed25519")
-        return cls(issuer=issuer, key_id=key_id,
-                   private_key=priv, public_key=priv.public_key())
+        return cls(issuer=issuer, key_id=key_id, private_key=priv, public_key=priv.public_key())
 
     def public_key_pem(self) -> str:
         return self.public_key.public_bytes(
@@ -285,8 +293,7 @@ class Signer:
         return self.private_key.sign(body)
 
 
-def verify_signature(public_key_pem: str, body: bytes,
-                     signature_b64: str) -> bool:
+def verify_signature(public_key_pem: str, body: bytes, signature_b64: str) -> bool:
     pub = serialization.load_pem_public_key(public_key_pem.encode("ascii"))
     if not isinstance(pub, Ed25519PublicKey):
         return False
@@ -370,7 +377,9 @@ class AuditEnvelope:
             issued_at=data["issued_at"],
             issuer=data.get("issuer", ""),
             receipt=dict(data["receipt"]),
-            timestamp=dict(data["timestamp"]) if "timestamp" in data and data["timestamp"] is not None else None,
+            timestamp=dict(data["timestamp"])
+            if "timestamp" in data and data["timestamp"] is not None
+            else None,
         )
 
 
@@ -379,16 +388,17 @@ class AuditEnvelope:
 # ---------------------------------------------------------------------------
 
 
-def envelope(primitive: str,
-             report: Any,
-             *,
-             depth_consumed: int = 6,
-             regulations: Iterable[str] | None = None,
-             parameter_set: ParameterSet | None = None,
-             input_commitments: Sequence[Mapping[str, str]] | None = None,
-             signer: Signer | None = None,
-             timestamp_authority: TimestampAuthority | None = None,
-             ) -> AuditEnvelope:
+def envelope(
+    primitive: str,
+    report: Any,
+    *,
+    depth_consumed: int = 6,
+    regulations: Iterable[str] | None = None,
+    parameter_set: ParameterSet | None = None,
+    input_commitments: Sequence[Mapping[str, str]] | None = None,
+    signer: Signer | None = None,
+    timestamp_authority: TimestampAuthority | None = None,
+) -> AuditEnvelope:
     """Construct a signed audit envelope.
 
     If ``signer`` is None, a fresh ephemeral Ed25519 keypair is generated
@@ -398,22 +408,18 @@ def envelope(primitive: str,
     a long-lived ``Signer`` whose public key is registered with the
     verifier.
     """
-    regs = list(regulations) if regulations is not None else REGULATION_MAP.get(
-        primitive, []
-    )
+    regs = list(regulations) if regulations is not None else REGULATION_MAP.get(primitive, [])
     params = parameter_set or ParameterSet()
-    issuer = (signer.issuer if signer is not None
-              else "regaudit-fhe-ephemeral")
+    issuer = signer.issuer if signer is not None else "regaudit-fhe-ephemeral"
     if signer is None:
         signer = Signer.generate(issuer=issuer)
 
     issued = _dt.datetime.now(_dt.timezone.utc).isoformat()
     result_dict: dict[str, Any] = report_to_dict(report)
-    commitments_list: list[dict[str, str]] = [
-        dict(c) for c in (input_commitments or [])
-    ]
+    commitments_list: list[dict[str, str]] = [dict(c) for c in (input_commitments or [])]
     depth_budget_dict: dict[str, int] = {
-        "declared": 6, "consumed": int(depth_consumed),
+        "declared": 6,
+        "consumed": int(depth_consumed),
     }
     body: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
@@ -441,8 +447,9 @@ def envelope(primitive: str,
         "public_key_pem": signer.public_key_pem(),
     }
 
-    timestamp_block = (timestamp_authority.stamp(body_bytes)
-                       if timestamp_authority is not None else None)
+    timestamp_block = (
+        timestamp_authority.stamp(body_bytes) if timestamp_authority is not None else None
+    )
 
     return AuditEnvelope(
         schema=SCHEMA_VERSION,
@@ -487,12 +494,13 @@ class VerificationOutcome:
         }
 
 
-def verify_envelope(env: AuditEnvelope,
-                    *,
-                    trusted_keys: Mapping[str, str] | None = None,
-                    require_signature: bool = True,
-                    tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
-                    ) -> VerificationOutcome:
+def verify_envelope(
+    env: AuditEnvelope,
+    *,
+    trusted_keys: Mapping[str, str] | None = None,
+    require_signature: bool = True,
+    tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
+) -> VerificationOutcome:
     """Verify an audit envelope.
 
     ``trusted_keys`` is a ``key_id`` → PEM mapping. If ``None``, the
@@ -531,9 +539,8 @@ def verify_envelope(env: AuditEnvelope,
         if expected is None:
             issuer_ok = False
         else:
-            issuer_ok = (
-                expected.strip().replace("\r\n", "\n")
-                == (pub_pem or "").strip().replace("\r\n", "\n")
+            issuer_ok = expected.strip().replace("\r\n", "\n") == (pub_pem or "").strip().replace(
+                "\r\n", "\n"
             )
 
     if env.timestamp is None:
@@ -550,8 +557,7 @@ def verify_envelope(env: AuditEnvelope,
             ts_ok = True
         else:
             try:
-                ts_ok = bool(tsa_verifier(body_bytes,
-                                           base64.b64decode(token_b64)))
+                ts_ok = bool(tsa_verifier(body_bytes, base64.b64decode(token_b64)))
             except Exception:
                 ts_ok = False
 
@@ -568,12 +574,12 @@ def verify_envelope(env: AuditEnvelope,
     )
 
 
-def verify_envelope_or_raise(env: AuditEnvelope,
-                              *,
-                              trust_store: TrustStore | None = None,
-                              tsa_verifier: Callable[[bytes, bytes],
-                                                      bool] | None = None,
-                              ) -> VerificationOutcome:
+def verify_envelope_or_raise(
+    env: AuditEnvelope,
+    *,
+    trust_store: TrustStore | None = None,
+    tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
+) -> VerificationOutcome:
     """Verify an envelope and raise a typed exception on the first
     failure reason, ordered most-specific first.
 
@@ -596,6 +602,7 @@ def verify_envelope_or_raise(env: AuditEnvelope,
         UntrustedIssuer,
         WrongParameterSet,
     )
+
     if trust_store is None or not isinstance(trust_store, TrustStore):
         raise TypeError(
             "verify_envelope_or_raise requires a TrustStore; pass one "
@@ -606,13 +613,9 @@ def verify_envelope_or_raise(env: AuditEnvelope,
     key_id = env.receipt.get("key_id", "")
 
     if not trust_store.is_known(key_id):
-        raise UntrustedIssuer(
-            f"key_id {key_id!r} is not in the trust store"
-        )
+        raise UntrustedIssuer(f"key_id {key_id!r} is not in the trust store")
     if trust_store.is_revoked(key_id):
-        raise RevokedIssuer(
-            f"key_id {key_id!r} is in the trust store's revocation set"
-        )
+        raise RevokedIssuer(f"key_id {key_id!r} is in the trust store's revocation set")
     pinned_hash = trust_store.expected_parameter_set_hash(key_id)
     if pinned_hash is not None and pinned_hash != env.parameter_set_hash:
         raise WrongParameterSet(
@@ -629,14 +632,9 @@ def verify_envelope_or_raise(env: AuditEnvelope,
     )
 
     if not outcome.sha256_valid:
-        raise HashMismatch(
-            "SHA-256 receipt does not match canonical body"
-        )
+        raise HashMismatch("SHA-256 receipt does not match canonical body")
     if not outcome.signature_valid:
-        raise InvalidSignature(
-            "Ed25519 signature does not verify against the embedded "
-            "public key"
-        )
+        raise InvalidSignature("Ed25519 signature does not verify against the embedded public key")
     if not outcome.issuer_trusted:
         # Reaching this branch means the trust store had the key_id but
         # the embedded PEM disagreed with the registered PEM.
@@ -646,8 +644,7 @@ def verify_envelope_or_raise(env: AuditEnvelope,
         )
     if not outcome.timestamp_valid:
         raise TimestampInvalid(
-            "RFC 3161 timestamp token did not verify against the "
-            "deployer's TSA root"
+            "RFC 3161 timestamp token did not verify against the deployer's TSA root"
         )
     return outcome
 
@@ -655,11 +652,12 @@ def verify_envelope_or_raise(env: AuditEnvelope,
 _VERIFY_RECEIPT_WEAK_WARNED = False
 
 
-def verify_receipt(env: AuditEnvelope,
-                   *,
-                   trusted_keys: Mapping[str, str] | None = None,
-                   strict: bool = False,
-                   ) -> bool:
+def verify_receipt(
+    env: AuditEnvelope,
+    *,
+    trusted_keys: Mapping[str, str] | None = None,
+    strict: bool = False,
+) -> bool:
     """Return True iff the envelope verifies.
 
     By default this checks the SHA-256 receipt and the embedded
@@ -689,8 +687,7 @@ def verify_receipt(env: AuditEnvelope,
             UserWarning,
             stacklevel=2,
         )
-    return verify_envelope(env, trusted_keys=trusted_keys,
-                            require_signature=True).valid
+    return verify_envelope(env, trusted_keys=trusted_keys, require_signature=True).valid
 
 
 def issue_receipt(payload: Mapping[str, Any]) -> dict[str, str]:

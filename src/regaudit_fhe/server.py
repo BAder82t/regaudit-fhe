@@ -69,6 +69,7 @@ try:
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
     from starlette.middleware.base import BaseHTTPMiddleware
+
     HAVE_FASTAPI = True
 except Exception:
     HAVE_FASTAPI = False
@@ -143,26 +144,28 @@ def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
         if host.lower() not in ("localhost",):
             raise RuntimeError(
                 f"REGAUDIT_FHE_DEV_MODE=1 refuses non-loopback bind: "
-                f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost.") from None
+                f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost."
+            ) from None
         return
     if not addr.is_loopback:
         raise RuntimeError(
             f"REGAUDIT_FHE_DEV_MODE=1 refuses non-loopback bind: "
-            f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost.")
+            f"host={host!r}. Bind to 127.0.0.1, ::1, or localhost."
+        )
 
 
 def load_config_from_env() -> ServerConfig:
     return ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
-        max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES",
-                                           1 << 20)),
-        rate_limit_per_min=int(os.environ.get(
-            "REGAUDIT_FHE_RATE_LIMIT_PER_MIN", "60")),
-        request_timeout_s=float(os.environ.get(
-            "REGAUDIT_FHE_REQUEST_TIMEOUT_S", "30")),
-        cors_origins=tuple(s.strip() for s in os.environ.get(
-            "REGAUDIT_FHE_CORS_ORIGINS", "").split(",") if s.strip()),
+        max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20)),
+        rate_limit_per_min=int(os.environ.get("REGAUDIT_FHE_RATE_LIMIT_PER_MIN", "60")),
+        request_timeout_s=float(os.environ.get("REGAUDIT_FHE_REQUEST_TIMEOUT_S", "30")),
+        cors_origins=tuple(
+            s.strip()
+            for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
+            if s.strip()
+        ),
     )
 
 
@@ -171,21 +174,40 @@ def load_config_from_env() -> ServerConfig:
 # ---------------------------------------------------------------------------
 
 
-_RESERVED_LOG_FIELDS = frozenset({
-    "args", "msecs", "relativeCreated", "exc_info", "exc_text",
-    "stack_info", "pathname", "filename", "module", "lineno",
-    "funcName", "created", "thread", "threadName", "processName",
-    "process", "name", "levelname", "levelno", "msg", "message",
-    "logger",
-})
+_RESERVED_LOG_FIELDS = frozenset(
+    {
+        "args",
+        "msecs",
+        "relativeCreated",
+        "exc_info",
+        "exc_text",
+        "stack_info",
+        "pathname",
+        "filename",
+        "module",
+        "lineno",
+        "funcName",
+        "created",
+        "thread",
+        "threadName",
+        "processName",
+        "process",
+        "name",
+        "levelname",
+        "levelno",
+        "msg",
+        "message",
+        "logger",
+    }
+)
 
 
 class _JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         import json
+
         payload: dict[str, Any] = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                time.gmtime(record.created)),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
             "level": record.levelname,
             "msg": record.getMessage(),
             "logger": record.name,
@@ -260,14 +282,10 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                 if int(cl) > self.max_bytes:
                     return JSONResponse(
                         status_code=413,
-                        content={"detail": (
-                            f"request body exceeds limit "
-                            f"{self.max_bytes} bytes"
-                        )})
+                        content={"detail": (f"request body exceeds limit {self.max_bytes} bytes")},
+                    )
             except ValueError:
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": "invalid Content-Length"})
+                return JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
         return await call_next(request)
 
 
@@ -287,12 +305,9 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         try:
-            return await asyncio.wait_for(call_next(request),
-                                          timeout=self.timeout_s)
+            return await asyncio.wait_for(call_next(request), timeout=self.timeout_s)
         except asyncio.TimeoutError:
-            return JSONResponse(
-                status_code=504,
-                content={"detail": "request timed out"})
+            return JSONResponse(status_code=504, content={"detail": "request timed out"})
 
 
 class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
@@ -314,20 +329,28 @@ class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
             self.logger.info(
                 "http_request",
                 extra={
-                    "request_id": request_id, "method": method,
-                    "path": path, "status": response.status_code,
-                    "duration_ms": round(elapsed, 2), "client": client,
-                })
+                    "request_id": request_id,
+                    "method": method,
+                    "path": path,
+                    "status": response.status_code,
+                    "duration_ms": round(elapsed, 2),
+                    "client": client,
+                },
+            )
             return response
         except Exception as exc:
             elapsed = (time.perf_counter() - start) * 1000.0
             self.logger.error(
                 "http_unhandled_exception",
                 extra={
-                    "request_id": request_id, "method": method,
-                    "path": path, "duration_ms": round(elapsed, 2),
-                    "client": client, "exception": type(exc).__name__,
-                })
+                    "request_id": request_id,
+                    "method": method,
+                    "path": path,
+                    "duration_ms": round(elapsed, 2),
+                    "client": client,
+                    "exception": type(exc).__name__,
+                },
+            )
             raise
 
 
@@ -353,16 +376,17 @@ def _hash_token(token: str, salt: bytes) -> bytes:
     return hashlib.sha256(salt + token.encode("utf-8")).digest()
 
 
-def _freeze_api_keys(api_keys: dict[str, frozenset], salt: bytes
-                     ) -> tuple[tuple[bytes, frozenset], ...]:
-    return tuple((_hash_token(tok, salt), scopes)
-                 for tok, scopes in api_keys.items())
+def _freeze_api_keys(
+    api_keys: dict[str, frozenset], salt: bytes
+) -> tuple[tuple[bytes, frozenset], ...]:
+    return tuple((_hash_token(tok, salt), scopes) for tok, scopes in api_keys.items())
 
 
-def make_auth_dependency(config: ServerConfig,
-                          *,
-                          salt: bytes,
-                          ) -> Callable[..., Caller]:
+def make_auth_dependency(
+    config: ServerConfig,
+    *,
+    salt: bytes,
+) -> Callable[..., Caller]:
     """Build an auth dependency that compares bearer tokens in
     constant time.
 
@@ -384,7 +408,8 @@ def make_auth_dependency(config: ServerConfig,
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="bearer token required",
-                headers={"WWW-Authenticate": "Bearer"})
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         candidate = _hash_token(token, salt)
         matched_scopes: frozenset | None = None
         for stored_hash, scopes in frozen:
@@ -394,7 +419,8 @@ def make_auth_dependency(config: ServerConfig,
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="unknown bearer token",
-                headers={"WWW-Authenticate": "Bearer"})
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return Caller(key_id=candidate.hex()[:12], scopes=matched_scopes)
 
     return dependency
@@ -408,7 +434,8 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
     if missing:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"missing required scope(s): {','.join(sorted(missing))}")
+            detail=f"missing required scope(s): {','.join(sorted(missing))}",
+        )
     return caller
 
 
@@ -423,30 +450,30 @@ if HAVE_FASTAPI:
 # ---------------------------------------------------------------------------
 
 
-def build_app(*, config: ServerConfig | None = None,
-              logger: logging.Logger | None = None,
-              salt: bytes | None = None,
-              ) -> Any:
+def build_app(
+    *,
+    config: ServerConfig | None = None,
+    logger: logging.Logger | None = None,
+    salt: bytes | None = None,
+) -> Any:
     if not HAVE_FASTAPI:
-        raise RuntimeError(
-            "FastAPI not installed. Run `pip install regaudit-fhe[server]`."
-        )
+        raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
     config = config or load_config_from_env()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
     auth_salt = salt if salt is not None else os.urandom(32)
 
     if config.dev_mode:
-        logger.warning("dev_mode_enabled",
-                       extra={"warning": "auth disabled, do not use in prod"})
-    logger.warning("privacy_boundary_warning",
-                   extra={"warning": PRIVACY_WARNING})
+        logger.warning("dev_mode_enabled", extra={"warning": "auth disabled, do not use in prod"})
+    logger.warning("privacy_boundary_warning", extra={"warning": PRIVACY_WARNING})
 
     app = FastAPI(
         title="regaudit-fhe",
-        description=("Encrypted regulatory audit primitives at CKKS "
-                     "depth six. NOT a privacy boundary by itself; see "
-                     "server module docstring."),
+        description=(
+            "Encrypted regulatory audit primitives at CKKS "
+            "depth six. NOT a privacy boundary by itself; see "
+            "server module docstring."
+        ),
         version=LIB_VERSION,
     )
 
@@ -465,11 +492,11 @@ def build_app(*, config: ServerConfig | None = None,
 
     auth_dep = make_auth_dependency(config, salt=auth_salt)
 
-    def authed_with(*scopes: str
-                    ) -> Callable[[Request], Caller]:
+    def authed_with(*scopes: str) -> Callable[[Request], Caller]:
         def dep(request: Request) -> Caller:
             caller = auth_dep(request)
             return _check_scopes(caller, scopes)
+
         return dep
 
     def rate_limit_or_raise(caller: Caller) -> None:
@@ -477,7 +504,8 @@ def build_app(*, config: ServerConfig | None = None,
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="rate limit exceeded",
-                headers={"Retry-After": "60"})
+                headers={"Retry-After": "60"},
+            )
 
     # ----- Probes (no auth) ------------------------------------------------
 
@@ -504,6 +532,7 @@ def build_app(*, config: ServerConfig | None = None,
     def version() -> dict[str, str]:
         try:
             import tenseal
+
             backend_version = tenseal.__version__
         except Exception:
             backend_version = "unavailable"
@@ -516,14 +545,13 @@ def build_app(*, config: ServerConfig | None = None,
     # ----- Schemas (read scope) -------------------------------------------
 
     @app.get("/v1/schemas")
-    def schemas_index(caller: Caller = Depends(authed_with(SCOPE_READ))
-                       ) -> dict[str, Any]:
+    def schemas_index(caller: Caller = Depends(authed_with(SCOPE_READ))) -> dict[str, Any]:
         return {"schemas": list(list_schemas())}
 
     @app.get("/v1/schemas/{name}")
-    def schema_by_name(name: str,
-                       caller: Caller = Depends(authed_with(SCOPE_READ))
-                       ) -> dict[str, Any]:
+    def schema_by_name(
+        name: str, caller: Caller = Depends(authed_with(SCOPE_READ))
+    ) -> dict[str, Any]:
         try:
             return load_schema(name)
         except KeyError as exc:
@@ -532,10 +560,11 @@ def build_app(*, config: ServerConfig | None = None,
     # ----- Audit (run scope) ----------------------------------------------
 
     @app.post("/v1/audit/{primitive}")
-    def audit(primitive: str,
-              payload: dict[str, Any] = Body(...),
-              caller: Caller = Depends(authed_with(SCOPE_RUN))
-              ) -> dict[str, Any]:
+    def audit(
+        primitive: str,
+        payload: dict[str, Any] = Body(...),
+        caller: Caller = Depends(authed_with(SCOPE_RUN)),
+    ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
             raise HTTPException(404, f"unknown primitive {primitive!r}")
@@ -544,25 +573,35 @@ def build_app(*, config: ServerConfig | None = None,
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
         # Never log payload — it may contain PHI / PII.
-        logger.info("audit_evaluated",
-                    extra={"key_id": caller.key_id, "primitive": primitive,
-                           "depth_consumed": env.depth_budget["consumed"],
-                           "envelope_digest": env.receipt["sha256"]})
+        logger.info(
+            "audit_evaluated",
+            extra={
+                "key_id": caller.key_id,
+                "primitive": primitive,
+                "depth_consumed": env.depth_budget["consumed"],
+                "envelope_digest": env.receipt["sha256"],
+            },
+        )
         return env.to_dict()
 
     # ----- Verify (verify scope) ------------------------------------------
 
     @app.post("/v1/verify")
-    def verify(req: VerifyRequest = Body(...),
-               caller: Caller = Depends(authed_with(SCOPE_VERIFY))
-               ) -> dict[str, Any]:
+    def verify(
+        req: VerifyRequest = Body(...), caller: Caller = Depends(authed_with(SCOPE_VERIFY))
+    ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         env = AuditEnvelope.from_dict(req.envelope)
         valid = verify_receipt(env)
-        logger.info("envelope_verified",
-                    extra={"key_id": caller.key_id, "primitive": env.primitive,
-                           "valid": valid})
-        return {"valid": valid, "primitive": env.primitive,
-                "issued_at": env.issued_at, "regulations": env.regulations}
+        logger.info(
+            "envelope_verified",
+            extra={"key_id": caller.key_id, "primitive": env.primitive, "valid": valid},
+        )
+        return {
+            "valid": valid,
+            "primitive": env.primitive,
+            "issued_at": env.issued_at,
+            "regulations": env.regulations,
+        }
 
     return app

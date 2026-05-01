@@ -59,8 +59,7 @@ def test_chain_too_short_rejected():
 
 def test_log_q_above_seal_bound_rejected():
     with pytest.raises(ParameterValidationError, match="exceeds"):
-        CKKSParams(ring_dim=1 << 14,
-                   coeff_mod_bit_sizes=(60, 60, 60, 60, 60, 60, 60, 60, 60))
+        CKKSParams(ring_dim=1 << 14, coeff_mod_bit_sizes=(60, 60, 60, 60, 60, 60, 60, 60, 60))
 
 
 def test_first_mod_size_smaller_than_scaling_rejected():
@@ -128,9 +127,6 @@ def test_build_context_from_validated_params():
     pytest_importorskip("tenseal")
     from regaudit_fhe.fhe import build_d6_context_from_params
 
-    p = CKKSParams(ring_dim=1 << 14,
-                   multiplicative_depth=6,
-                   scaling_mod_size=40,
-                   first_mod_size=60)
+    p = CKKSParams(ring_dim=1 << 14, multiplicative_depth=6, scaling_mod_size=40, first_mod_size=60)
     ctx = build_d6_context_from_params(p)
     assert ctx.poly_modulus_degree == p.ring_dim

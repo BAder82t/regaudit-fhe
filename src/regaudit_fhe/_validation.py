@@ -61,14 +61,11 @@ def assert_same_length(*pairs: tuple) -> None:
         raise ValueError(f"input length mismatch: {items}")
 
 
-def assert_in_range(name: str, value: float, *,
-                    low: float, high: float) -> float:
+def assert_in_range(name: str, value: float, *, low: float, high: float) -> float:
     if not np.isfinite(value):
         raise ValueError(f"{name} must be finite; got {value!r}")
     if value < low or value > high:
-        raise ValueError(
-            f"{name} must lie in [{low}, {high}]; got {value}"
-        )
+        raise ValueError(f"{name} must lie in [{low}, {high}]; got {value}")
     return float(value)
 
 

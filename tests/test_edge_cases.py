@@ -40,23 +40,21 @@ def test_drift_rejects_nan_or_inf(bad):
 @pytest.mark.parametrize("bad", [np.nan, math.inf, -math.inf])
 def test_calibration_rejects_nan_or_inf(bad):
     with pytest.raises(ValueError, match="non-finite"):
-        rf.audit_calibration(np.array([0.1, bad, 0.5, 0.7]),
-                             np.full(4, 0.5))
+        rf.audit_calibration(np.array([0.1, bad, 0.5, 0.7]), np.full(4, 0.5))
 
 
 @pytest.mark.parametrize("bad", [np.nan, math.inf])
 def test_concordance_rejects_nan_or_inf(bad):
     with pytest.raises(ValueError, match="non-finite"):
-        rf.audit_concordance(np.array([1.0, bad, 3.0]),
-                             np.array([10.0, 20.0, 30.0]),
-                             np.array([1.0, 0.0, 1.0]))
+        rf.audit_concordance(
+            np.array([1.0, bad, 3.0]), np.array([10.0, 20.0, 30.0]), np.array([1.0, 0.0, 1.0])
+        )
 
 
 @pytest.mark.parametrize("bad", [np.nan, math.inf])
 def test_provenance_rejects_nan_or_inf(bad):
     with pytest.raises(ValueError, match="non-finite"):
-        rf.audit_provenance(np.array([0.1, bad, 0.5, 0.7]),
-                            np.arange(4), n_buckets=2, k=1)
+        rf.audit_provenance(np.array([0.1, bad, 0.5, 0.7]), np.arange(4), n_buckets=2, k=1)
 
 
 @pytest.mark.parametrize("bad", [np.nan, math.inf])
@@ -73,8 +71,7 @@ def test_disagreement_rejects_nan_or_inf(bad):
 
 def test_empty_arrays_rejected_for_fairness():
     with pytest.raises(ValueError, match="non-empty"):
-        rf.audit_fairness(np.array([]), np.array([]),
-                          np.array([]), np.array([]))
+        rf.audit_fairness(np.array([]), np.array([]), np.array([]), np.array([]))
 
 
 def test_empty_arrays_rejected_for_drift():
@@ -108,15 +105,14 @@ def test_drift_rejects_shape_mismatch():
 
 def test_calibration_rejects_shape_mismatch():
     with pytest.raises(ValueError, match="shape mismatch"):
-        rf.audit_calibration(np.array([0.1, 0.5]),
-                             np.array([0.5, 0.6, 0.7]))
+        rf.audit_calibration(np.array([0.1, 0.5]), np.array([0.5, 0.6, 0.7]))
 
 
 def test_concordance_rejects_length_mismatch():
     with pytest.raises(ValueError, match="length mismatch"):
-        rf.audit_concordance(np.array([1.0, 2.0, 3.0]),
-                             np.array([10.0, 20.0]),
-                             np.array([1.0, 0.0]))
+        rf.audit_concordance(
+            np.array([1.0, 2.0, 3.0]), np.array([10.0, 20.0]), np.array([1.0, 0.0])
+        )
 
 
 # --------------------------------------------------------------------------
@@ -212,8 +208,7 @@ def test_fairness_threshold_outside_unit_interval_rejected():
 
 def test_drift_negative_threshold_rejected():
     with pytest.raises(ValueError, match="non-negative"):
-        rf.audit_drift(np.array([1.0, 2.0]), np.array([1.0, 2.0]),
-                       drift_threshold=-1e-3)
+        rf.audit_drift(np.array([1.0, 2.0]), np.array([1.0, 2.0]), drift_threshold=-1e-3)
 
 
 # --------------------------------------------------------------------------
@@ -238,20 +233,17 @@ def test_large_batch_runs_within_seconds():
 
 def test_provenance_rejects_k_zero():
     with pytest.raises(ValueError, match="k must be"):
-        rf.audit_provenance(np.array([0.1, 0.2, 0.3, 0.4]),
-                            np.arange(4), n_buckets=4, k=0)
+        rf.audit_provenance(np.array([0.1, 0.2, 0.3, 0.4]), np.arange(4), n_buckets=4, k=0)
 
 
 def test_provenance_rejects_k_above_n_buckets():
     with pytest.raises(ValueError, match="k must be"):
-        rf.audit_provenance(np.array([0.1, 0.2, 0.3, 0.4]),
-                            np.arange(4), n_buckets=4, k=10)
+        rf.audit_provenance(np.array([0.1, 0.2, 0.3, 0.4]), np.arange(4), n_buckets=4, k=10)
 
 
 def test_provenance_rejects_zero_buckets():
     with pytest.raises(ValueError, match="n_buckets must be"):
-        rf.audit_provenance(np.array([0.1, 0.2]),
-                            np.arange(2), n_buckets=0, k=1)
+        rf.audit_provenance(np.array([0.1, 0.2]), np.arange(2), n_buckets=0, k=1)
 
 
 # --------------------------------------------------------------------------

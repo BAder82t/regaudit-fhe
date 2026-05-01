@@ -25,7 +25,7 @@ Ciphertext = Any
 
 @dataclass
 class CKKSContext:
-    context: Any                # tenseal.Context
+    context: Any  # tenseal.Context
     scale: float
     poly_modulus_degree: int
     n_slots: int
@@ -33,6 +33,7 @@ class CKKSContext:
 
     def encrypt_vector(self, values: Sequence[float]) -> Ciphertext:
         import tenseal as ts
+
         return ts.ckks_vector(self.context, list(values))
 
     def decrypt_vector(self, ct: Ciphertext) -> list[float]:
@@ -47,6 +48,7 @@ def build_d6_context_from_params(params: CKKSParams) -> CKKSContext:
     validated record into an active TenSEAL context.
     """
     from .params import CKKSParams as _CKKSParams
+
     if not isinstance(params, _CKKSParams):
         raise TypeError("build_d6_context_from_params requires CKKSParams")
     return build_d6_context(
@@ -57,12 +59,13 @@ def build_d6_context_from_params(params: CKKSParams) -> CKKSContext:
     )
 
 
-def build_d6_context(*,
-                     poly_modulus_degree: int = 1 << 14,
-                     scale_bits: int = 40,
-                     coeff_mod_bit_sizes: Sequence[int] | None = None,
-                     rotation_steps: Sequence[int] | None = None,
-                     ) -> CKKSContext:
+def build_d6_context(
+    *,
+    poly_modulus_degree: int = 1 << 14,
+    scale_bits: int = 40,
+    coeff_mod_bit_sizes: Sequence[int] | None = None,
+    rotation_steps: Sequence[int] | None = None,
+) -> CKKSContext:
     """Construct a TenSEAL CKKS context for the audit primitives.
 
     The default ``poly_modulus_degree = 2**14`` (ring 16384) admits a
@@ -102,13 +105,13 @@ def build_d6_context(*,
         poly_modulus_degree=poly_modulus_degree,
         coeff_mod_bit_sizes=list(coeff_mod_bit_sizes),
     )
-    ctx.global_scale = float(2 ** scale_bits)
+    ctx.global_scale = float(2**scale_bits)
     ctx.generate_galois_keys()
     ctx.generate_relin_keys()
 
     return CKKSContext(
         context=ctx,
-        scale=float(2 ** scale_bits),
+        scale=float(2**scale_bits),
         poly_modulus_degree=poly_modulus_degree,
         n_slots=n_slots,
         rotation_steps=tuple(rotation_steps),

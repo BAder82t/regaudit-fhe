@@ -21,16 +21,21 @@ def _sample_report() -> rf.FairnessReport:
 
 def test_envelope_carries_full_security_block() -> None:
     signer = rf.Signer.generate(issuer="acme.example", key_id="acme-2026-01")
-    params = rf.ParameterSet(backend="tenseal-ckks",
-                             poly_modulus_degree=32768,
-                             multiplicative_depth=6,
-                             coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                             scaling_factor_bits=40,
-                             backend_version="0.3.16")
-    env = rf.envelope("fairness", _sample_report(),
-                      parameter_set=params, signer=signer,
-                      input_commitments=rf.commitments_for(
-                          {"y_true": np.array([1, 0, 1, 0])}))
+    params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=32768,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+        backend_version="0.3.16",
+    )
+    env = rf.envelope(
+        "fairness",
+        _sample_report(),
+        parameter_set=params,
+        signer=signer,
+        input_commitments=rf.commitments_for({"y_true": np.array([1, 0, 1, 0])}),
+    )
     body = env.to_dict()
     assert body["schema"] == "regaudit-fhe.report.v1"
     assert body["schema_version"] == "regaudit-fhe.report.v1"
@@ -77,13 +82,14 @@ def test_tamper_in_result_fails_verification() -> None:
 
 def test_tamper_in_parameter_set_fails_verification() -> None:
     signer = rf.Signer.generate(issuer="acme.example")
-    params = rf.ParameterSet(backend="tenseal-ckks",
-                             poly_modulus_degree=32768,
-                             multiplicative_depth=6,
-                             coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
-                             scaling_factor_bits=40)
-    env = rf.envelope("fairness", _sample_report(),
-                      parameter_set=params, signer=signer)
+    params = rf.ParameterSet(
+        backend="tenseal-ckks",
+        poly_modulus_degree=32768,
+        multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60, 40, 40, 40, 40, 40, 40, 60),
+        scaling_factor_bits=40,
+    )
+    env = rf.envelope("fairness", _sample_report(), parameter_set=params, signer=signer)
     env.parameter_set["poly_modulus_degree"] = 16384
     out = rf.verify_envelope(env)
     assert out.valid is False
@@ -110,15 +116,13 @@ def test_trusted_key_pinning_rejects_unknown_issuer() -> None:
 def test_trusted_key_pinning_accepts_known_issuer() -> None:
     signer = rf.Signer.generate(issuer="A", key_id="acme-2026-01")
     env = rf.envelope("fairness", _sample_report(), signer=signer)
-    out = rf.verify_envelope(
-        env, trusted_keys={"acme-2026-01": signer.public_key_pem()})
+    out = rf.verify_envelope(env, trusted_keys={"acme-2026-01": signer.public_key_pem()})
     assert out.issuer_trusted is True
     assert out.valid is True
 
 
 def test_input_commitments_record_all_inputs() -> None:
-    inputs = {"y_true": np.array([1, 0, 1, 0]),
-              "y_pred": np.array([1, 0, 0, 0])}
+    inputs = {"y_true": np.array([1, 0, 1, 0]), "y_pred": np.array([1, 0, 0, 0])}
     commits = rf.commitments_for(inputs)
     names = sorted(c["name"] for c in commits)
     assert names == ["y_pred", "y_true"]
@@ -130,11 +134,10 @@ def test_input_commitments_record_all_inputs() -> None:
 def test_optional_timestamp_block_is_signed() -> None:
     def fake_tsa(body: bytes) -> bytes:
         return b"FAKE-TSA-RESPONSE-" + body[:8]
-    tsa = rf.TimestampAuthority(issuer="https://tsa.example",
-                                sign_callable=fake_tsa)
+
+    tsa = rf.TimestampAuthority(issuer="https://tsa.example", sign_callable=fake_tsa)
     signer = rf.Signer.generate(issuer="A")
-    env = rf.envelope("fairness", _sample_report(),
-                      signer=signer, timestamp_authority=tsa)
+    env = rf.envelope("fairness", _sample_report(), signer=signer, timestamp_authority=tsa)
     assert env.timestamp is not None
     assert env.timestamp["issuer"] == "https://tsa.example"
     decoded = base64.b64decode(env.timestamp["token_b64"])

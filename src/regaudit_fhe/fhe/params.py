@@ -42,12 +42,12 @@ SECURITY_LEVELS = {
 # for each ring dimension at 128-bit IND-CPA security. Below these
 # bounds the parameter set is accepted; at or above, SEAL refuses.
 SEAL_MAX_LOG_Q_128: dict[int, int] = {
-    1024:    27,
-    2048:    54,
-    4096:   109,
-    8192:   218,
-    16384:  438,
-    32768:  881,
+    1024: 27,
+    2048: 54,
+    4096: 109,
+    8192: 218,
+    16384: 438,
+    32768: 881,
     65536: 1762,
 }
 
@@ -69,12 +69,9 @@ class CKKSParams:
     precision_loss_bound: float = 1e-2
 
     def __post_init__(self) -> None:
-        coeffs = (self.coeff_mod_bit_sizes
-                  or self._default_coeff_chain())
-        rotations = (self.rotation_steps
-                     or self._default_rotation_steps())
-        rotations = tuple(sorted(set(rotations)
-                                  | set(self.extra_rotation_steps)))
+        coeffs = self.coeff_mod_bit_sizes or self._default_coeff_chain()
+        rotations = self.rotation_steps or self._default_rotation_steps()
+        rotations = tuple(sorted(set(rotations) | set(self.extra_rotation_steps)))
         object.__setattr__(self, "coeff_mod_bit_sizes", tuple(coeffs))
         object.__setattr__(self, "rotation_steps", rotations)
         self._validate()
@@ -184,13 +181,9 @@ class CKKSParams:
                 f"got {self.coeff_mod_bit_sizes}"
             )
         if self.coeff_mod_bit_sizes[0] < self.first_mod_size:
-            raise ParameterValidationError(
-                "the leading prime must be ≥ first_mod_size"
-            )
+            raise ParameterValidationError("the leading prime must be ≥ first_mod_size")
         if self.coeff_mod_bit_sizes[-1] < self.first_mod_size:
-            raise ParameterValidationError(
-                "the trailing prime must be ≥ first_mod_size"
-            )
+            raise ParameterValidationError("the trailing prime must be ≥ first_mod_size")
 
     def _check_no_bootstrap_required(self) -> None:
         # Bootstrapping is only ever required if the modulus chain runs
@@ -201,8 +194,7 @@ class CKKSParams:
         available = len(self.coeff_mod_bit_sizes) - 2
         if consumed > available:
             raise ParameterValidationError(
-                "modulus chain too short to evaluate the declared depth "
-                "without bootstrapping."
+                "modulus chain too short to evaluate the declared depth without bootstrapping."
             )
 
     def _check_rotation_key_minimality(self) -> None:
@@ -219,8 +211,7 @@ class CKKSParams:
         missing = required - actual
         if missing:
             raise ParameterValidationError(
-                f"rotation_steps is missing required Halevi-Shoup steps: "
-                f"{sorted(missing)}"
+                f"rotation_steps is missing required Halevi-Shoup steps: {sorted(missing)}"
             )
         excess = actual - required
         if excess:
@@ -237,13 +228,12 @@ class CKKSParams:
     def _check_precision_loss_bound(self) -> None:
         if not (0 < self.precision_loss_bound <= 1):
             raise ParameterValidationError(
-                "precision_loss_bound must lie in (0, 1]; "
-                f"got {self.precision_loss_bound}"
+                f"precision_loss_bound must lie in (0, 1]; got {self.precision_loss_bound}"
             )
         # Worst-case CKKS rescale-side precision loss after `d`
         # multiplications is bounded by `d * 2^-(scaling_mod_size)`. We
         # require this to stay below the declared precision_loss_bound.
-        worst_case = self.multiplicative_depth * (2.0 ** -self.scaling_mod_size)
+        worst_case = self.multiplicative_depth * (2.0**-self.scaling_mod_size)
         if worst_case > self.precision_loss_bound:
             raise ParameterValidationError(
                 f"declared scaling_mod_size {self.scaling_mod_size} is "
@@ -271,9 +261,9 @@ class CKKSParams:
         }
 
     def hash(self) -> str:
-        body = json.dumps(self.to_dict(), sort_keys=True,
-                          separators=(",", ":"),
-                          ensure_ascii=False).encode("utf-8")
+        body = json.dumps(
+            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
         return hashlib.sha256(body).hexdigest()
 
     def to_envelope_parameter_set(self):
@@ -282,9 +272,11 @@ class CKKSParams:
         import contextlib
 
         from ..reports import ParameterSet
+
         backend_version = ""
         with contextlib.suppress(Exception):
             import tenseal as _ts
+
             backend_version = getattr(_ts, "__version__", "")
         return ParameterSet(
             backend="tenseal-ckks",

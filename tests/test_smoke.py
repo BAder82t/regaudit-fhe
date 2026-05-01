@@ -19,8 +19,7 @@ RNG = np.random.default_rng(20260426)
 
 def test_version_and_modules():
     assert rf.__version__ == "0.0.7"
-    for name in ["egf_imss", "etk_fpa_hbc", "esc_cia",
-                 "ecp_qssp", "ew1_cdsf", "ecmd_jps"]:
+    for name in ["egf_imss", "etk_fpa_hbc", "esc_cia", "ecp_qssp", "ew1_cdsf", "ecmd_jps"]:
         assert hasattr(rf, name)
 
 
@@ -52,8 +51,7 @@ def test_egf_imss_detects_disparity():
     report = rf.audit_fairness(y_true, y_pred, group_a, group_b, threshold=0.1)
     oracle = rf.fairness_oracle(y_true, y_pred, group_a, group_b, threshold=0.1)
     assert report.threshold_breached == oracle.threshold_breached
-    assert abs(report.demographic_parity_diff
-               - oracle.demographic_parity_diff) < 1e-6
+    assert abs(report.demographic_parity_diff - oracle.demographic_parity_diff) < 1e-6
 
 
 def test_etk_fpa_hbc_topk_matches_oracle():
@@ -142,8 +140,7 @@ def test_ecmd_jps_detects_disagreement():
 
 def test_ecmd_jps_rejects_M_lt_3():
     with pytest.raises(ValueError):
-        rf.audit_disagreement([(0, 1, 0, 0), (0, 0.5, 0, 0)],
-                              np.linspace(0, 1, 8), threshold=0.01)
+        rf.audit_disagreement([(0, 1, 0, 0), (0, 0.5, 0, 0)], np.linspace(0, 1, 8), threshold=0.01)
 
 
 def test_envelope_roundtrip_passes_receipt_check():
@@ -162,12 +159,17 @@ def test_envelope_roundtrip_passes_receipt_check():
 
 def test_envelope_carries_correct_regulations_per_primitive():
     cases = [
-        ("fairness", rf.audit_fairness(
-            np.array([1.0, 0.0]), np.array([1.0, 0.0]),
-            np.array([1.0, 0.0]), np.array([0.0, 1.0]))),
+        (
+            "fairness",
+            rf.audit_fairness(
+                np.array([1.0, 0.0]),
+                np.array([1.0, 0.0]),
+                np.array([1.0, 0.0]),
+                np.array([0.0, 1.0]),
+            ),
+        ),
         ("drift", rf.audit_drift(np.array([1.0, 2.0]), np.array([1.0, 2.0]))),
-        ("calibration", rf.audit_calibration(
-            np.array([0.1, 0.4]), np.array([0.5, 0.5]))),
+        ("calibration", rf.audit_calibration(np.array([0.1, 0.4]), np.array([0.5, 0.5]))),
     ]
     for primitive, report in cases:
         env = rf.envelope(primitive, report)
@@ -180,18 +182,15 @@ def test_depth_budget_respected_on_all_primitives():
     y = np.array([1.0, 0.0, 1.0, 0.0])
     rf.audit_fairness(y, y, y, 1.0 - y)
 
-    rf.audit_provenance(np.abs(RNG.standard_normal(16)),
-                        np.arange(16), n_buckets=4, k=2)
+    rf.audit_provenance(np.abs(RNG.standard_normal(16)), np.arange(16), n_buckets=4, k=2)
 
-    rf.audit_concordance(RNG.standard_normal(8),
-                         np.abs(RNG.standard_normal(8)),
-                         np.ones(8))
+    rf.audit_concordance(RNG.standard_normal(8), np.abs(RNG.standard_normal(8)), np.ones(8))
 
     rf.audit_calibration(RNG.uniform(size=8), np.full(8, 0.5))
 
-    rf.audit_drift(np.array([1.0, 2.0, 3.0, 4.0]),
-                   np.array([2.0, 2.0, 3.0, 3.0]),
-                   drift_threshold=0.005)
+    rf.audit_drift(
+        np.array([1.0, 2.0, 3.0, 4.0]), np.array([2.0, 2.0, 3.0, 3.0]), drift_threshold=0.005
+    )
 
     rf.audit_disagreement(
         [(0, 1, 0, 0), (0, 0.9, 0, 0), (0, 1.1, 0, 0)],

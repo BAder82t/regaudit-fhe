@@ -36,8 +36,12 @@ from .schemas import SchemaError, list_schemas, load_schema, validate_input
 from .trust import EnvelopeVerificationError, TrustStore, TrustStoreError
 
 PRIMITIVES = {
-    "fairness", "provenance", "concordance",
-    "calibration", "drift", "disagreement",
+    "fairness",
+    "provenance",
+    "concordance",
+    "calibration",
+    "drift",
+    "disagreement",
 }
 
 
@@ -172,14 +176,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         )
         return 2
     from .server import assert_safe_bind, build_app, load_config_from_env
+
     config = load_config_from_env()
     try:
         assert_safe_bind(args.host, dev_mode=config.dev_mode)
     except RuntimeError as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
-    uvicorn.run(build_app(config=config), host=args.host, port=args.port,
-                log_level="info")
+    uvicorn.run(build_app(config=config), host=args.host, port=args.port, log_level="info")
     return 0
 
 
@@ -199,36 +203,52 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         try:
             verify_envelope_or_raise(env, trust_store=trust_store)
         except EnvelopeVerificationError as exc:
-            print(json.dumps({
-                "valid": False,
-                "reason": type(exc).__name__,
-                "detail": str(exc),
-                "primitive": env.primitive,
-                "issued_at": env.issued_at,
-                "regulations": env.regulations,
-                "trusted_issuer": True,
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "valid": False,
+                        "reason": type(exc).__name__,
+                        "detail": str(exc),
+                        "primitive": env.primitive,
+                        "issued_at": env.issued_at,
+                        "regulations": env.regulations,
+                        "trusted_issuer": True,
+                    },
+                    indent=2,
+                )
+            )
             return 1
-        print(json.dumps({
-            "valid": True,
-            "primitive": env.primitive,
-            "issued_at": env.issued_at,
-            "regulations": env.regulations,
-            "trusted_issuer": True,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "valid": True,
+                    "primitive": env.primitive,
+                    "issued_at": env.issued_at,
+                    "regulations": env.regulations,
+                    "trusted_issuer": True,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     if args.strict:
-        sys.stderr.write(
-            "--strict requires --trusted-keys to authenticate the issuer.\n"
-        )
+        sys.stderr.write("--strict requires --trusted-keys to authenticate the issuer.\n")
         return 2
 
     ok = verify_receipt(env)
-    print(json.dumps({"valid": ok, "primitive": env.primitive,
-                      "issued_at": env.issued_at,
-                      "regulations": env.regulations,
-                      "trusted_issuer": False}, indent=2))
+    print(
+        json.dumps(
+            {
+                "valid": ok,
+                "primitive": env.primitive,
+                "issued_at": env.issued_at,
+                "regulations": env.regulations,
+                "trusted_issuer": False,
+            },
+            indent=2,
+        )
+    )
     return 0 if ok else 1
 
 
@@ -243,35 +263,35 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("primitive", choices=sorted(PRIMITIVES))
     audit.add_argument("--input", "-i", help="JSON input file")
     audit.add_argument("--output", "-o", help="JSON output file (default stdout)")
-    audit.add_argument("--schema", action="store_true",
-                       help="Print the expected input schema and exit.")
+    audit.add_argument(
+        "--schema", action="store_true", help="Print the expected input schema and exit."
+    )
     audit.set_defaults(func=_cmd_audit)
 
-    verify = sub.add_parser("verify",
-                            help="Verify the receipt of an audit envelope.")
-    verify.add_argument("--input", "-i", required=True,
-                        help="Audit envelope JSON to verify")
-    verify.add_argument("--trusted-keys",
-                        help="Path to JSON object mapping key_id -> PEM "
-                             "public key. Required for issuer authentication.")
-    verify.add_argument("--strict", action="store_true",
-                        help="Reject envelopes whose key_id is not in "
-                             "--trusted-keys. Recommended for regulator-side "
-                             "verifiers.")
+    verify = sub.add_parser("verify", help="Verify the receipt of an audit envelope.")
+    verify.add_argument("--input", "-i", required=True, help="Audit envelope JSON to verify")
+    verify.add_argument(
+        "--trusted-keys",
+        help="Path to JSON object mapping key_id -> PEM "
+        "public key. Required for issuer authentication.",
+    )
+    verify.add_argument(
+        "--strict",
+        action="store_true",
+        help="Reject envelopes whose key_id is not in "
+        "--trusted-keys. Recommended for regulator-side "
+        "verifiers.",
+    )
     verify.set_defaults(func=_cmd_verify)
 
-    serve = sub.add_parser("serve",
-                           help="Run the HTTP audit server (requires [server]).")
+    serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", "-p", type=int, default=8080)
     serve.set_defaults(func=_cmd_serve)
 
-    schema = sub.add_parser("schema",
-                            help="Dump a bundled JSON Schema by name.")
-    schema.add_argument("name", nargs="?",
-                        help="Schema name (e.g. fairness.input, envelope).")
-    schema.add_argument("--list", action="store_true",
-                        help="List all bundled schema names.")
+    schema = sub.add_parser("schema", help="Dump a bundled JSON Schema by name.")
+    schema.add_argument("name", nargs="?", help="Schema name (e.g. fairness.input, envelope).")
+    schema.add_argument("--list", action="store_true", help="List all bundled schema names.")
     schema.set_defaults(func=_cmd_schema)
     return p
 

@@ -26,7 +26,7 @@ from regaudit_fhe.fhe import CKKSParams, ParameterValidationError
 
 def test_default_precision_bound_is_strict_for_depth_six():
     p = CKKSParams()
-    worst_case = p.multiplicative_depth * (2.0 ** -p.scaling_mod_size)
+    worst_case = p.multiplicative_depth * (2.0**-p.scaling_mod_size)
     assert worst_case <= p.precision_loss_bound
 
 
@@ -38,8 +38,8 @@ def test_too_small_scaling_mod_size_rejected():
 def test_precision_bound_scales_with_depth():
     p_low = CKKSParams(multiplicative_depth=1)
     p_high = CKKSParams(multiplicative_depth=6)
-    worst_low = p_low.multiplicative_depth * (2.0 ** -p_low.scaling_mod_size)
-    worst_high = p_high.multiplicative_depth * (2.0 ** -p_high.scaling_mod_size)
+    worst_low = p_low.multiplicative_depth * (2.0**-p_low.scaling_mod_size)
+    worst_high = p_high.multiplicative_depth * (2.0**-p_high.scaling_mod_size)
     assert worst_high > worst_low
     assert worst_high <= p_high.precision_loss_bound
 
@@ -70,11 +70,11 @@ def ctx():
 # benchmark SUMMARY.md are entitled to claim. If a primitive starts
 # violating its bound, this test fails loudly.
 PRECISION_ENVELOPES = {
-    "fairness":     5e-5,
-    "provenance":   5e-4,
-    "drift":        5e-4,
-    "calibration":  1e-9,
-    "concordance":  1e-9,
+    "fairness": 5e-5,
+    "provenance": 5e-4,
+    "drift": 5e-4,
+    "calibration": 1e-9,
+    "concordance": 1e-9,
     "disagreement": 5e-5,
 }
 
@@ -88,12 +88,11 @@ def test_fairness_decrypt_error_within_envelope(ctx):
     g_b = 1.0 - g_a
     plain = rf.audit_fairness(y_t, y_p, g_a, g_b)
     enc = fhe_p.fairness_encrypted(ctx, y_t, y_p, g_a, g_b)
-    err = max(abs(plain.demographic_parity_diff
-                  - enc.demographic_parity_diff),
-              abs(plain.equal_opportunity_diff
-                  - enc.equal_opportunity_diff),
-              abs(plain.predictive_parity_diff
-                  - enc.predictive_parity_diff))
+    err = max(
+        abs(plain.demographic_parity_diff - enc.demographic_parity_diff),
+        abs(plain.equal_opportunity_diff - enc.equal_opportunity_diff),
+        abs(plain.predictive_parity_diff - enc.predictive_parity_diff),
+    )
     assert err < PRECISION_ENVELOPES["fairness"]
 
 
@@ -106,8 +105,7 @@ def test_drift_decrypt_error_within_envelope(ctx):
     enc = fhe_p.w1_encrypted(ctx, p, q)
     err = abs(plain.distance - enc.distance)
     assert err < PRECISION_ENVELOPES["drift"], (
-        f"drift error {err:.3e} exceeds envelope "
-        f"{PRECISION_ENVELOPES['drift']:.3e}"
+        f"drift error {err:.3e} exceeds envelope {PRECISION_ENVELOPES['drift']:.3e}"
     )
 
 
@@ -118,8 +116,7 @@ def test_provenance_decrypt_error_within_envelope(ctx):
     rows = np.arange(n)
     plain = rf.audit_provenance(attr, rows, n_buckets=8, k=3)
     enc = fhe_p.topk_provenance_encrypted(ctx, attr, rows, n_buckets=8, k=3)
-    err = float(np.max(np.abs(plain.bucket_aggregates
-                              - enc.bucket_aggregates)))
+    err = float(np.max(np.abs(plain.bucket_aggregates - enc.bucket_aggregates)))
     assert err < PRECISION_ENVELOPES["provenance"]
 
 

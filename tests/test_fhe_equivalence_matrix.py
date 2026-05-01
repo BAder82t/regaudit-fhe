@@ -33,9 +33,9 @@ from regaudit_fhe.fhe import build_d6_context  # noqa: E402
 from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
 
 RNG = np.random.default_rng(20260426)
-EQUIVALENCE_TOL = 5e-2     # CKKS noise after up to six multiplications
-RUNTIME_BOUND_S = 5.0      # encrypted call must complete in under 5 s
-                            # at N=2^14 in the test ring
+EQUIVALENCE_TOL = 5e-2  # CKKS noise after up to six multiplications
+RUNTIME_BOUND_S = 5.0  # encrypted call must complete in under 5 s
+# at N=2^14 in the test ring
 
 
 @pytest.fixture(scope="module")
@@ -62,8 +62,13 @@ def _fairness_inputs() -> dict[str, Any]:
     y_true = (RNG.uniform(size=n) < 0.4).astype(float)
     y_pred = ((RNG.uniform(size=n) < 0.4) | y_true.astype(bool)).astype(float)
     g_a = (RNG.uniform(size=n) < 0.5).astype(float)
-    return {"y_true": y_true, "y_pred": y_pred,
-            "group_a": g_a, "group_b": 1.0 - g_a, "threshold": 0.1}
+    return {
+        "y_true": y_true,
+        "y_pred": y_pred,
+        "group_a": g_a,
+        "group_b": 1.0 - g_a,
+        "threshold": 0.1,
+    }
 
 
 def _fairness_breach_inputs() -> dict[str, Any]:
@@ -71,13 +76,22 @@ def _fairness_breach_inputs() -> dict[str, Any]:
     y_true = np.array([1, 1, 1, 1, 0, 0, 0, 0], dtype=float)
     y_pred = np.array([1, 1, 1, 0, 1, 0, 0, 0], dtype=float)
     g_a = np.array([1, 1, 1, 1, 0, 0, 0, 0], dtype=float)
-    return {"y_true": y_true, "y_pred": y_pred,
-            "group_a": g_a, "group_b": 1.0 - g_a, "threshold": 0.25}
+    return {
+        "y_true": y_true,
+        "y_pred": y_pred,
+        "group_a": g_a,
+        "group_b": 1.0 - g_a,
+        "threshold": 0.25,
+    }
 
 
 def _provenance_inputs() -> dict[str, Any]:
-    return {"attributions": np.abs(RNG.standard_normal(64)),
-            "row_ids": np.arange(64), "n_buckets": 8, "k": 3}
+    return {
+        "attributions": np.abs(RNG.standard_normal(64)),
+        "row_ids": np.arange(64),
+        "n_buckets": 8,
+        "k": 3,
+    }
 
 
 def _concordance_inputs() -> dict[str, Any]:
@@ -85,15 +99,16 @@ def _concordance_inputs() -> dict[str, Any]:
     # all-pairs Harrell C-index materialises an N(N-1)-length pair
     # vector under encryption; runtime grows quadratically in N.
     n = 16
-    return {"risk": RNG.standard_normal(n),
-            "time": np.abs(RNG.standard_normal(n)) * 100,
-            "event": (RNG.uniform(size=n) < 0.7).astype(float)}
+    return {
+        "risk": RNG.standard_normal(n),
+        "time": np.abs(RNG.standard_normal(n)) * 100,
+        "event": (RNG.uniform(size=n) < 0.7).astype(float),
+    }
 
 
 def _calibration_inputs() -> dict[str, Any]:
     K = 16
-    return {"scores": RNG.uniform(size=K),
-            "quantiles": np.full(K, 0.5)}
+    return {"scores": RNG.uniform(size=K), "quantiles": np.full(K, 0.5)}
 
 
 def _drift_inputs() -> dict[str, Any]:
@@ -112,20 +127,17 @@ def _drift_breach_inputs() -> dict[str, Any]:
 
 
 def _disagreement_inputs() -> dict[str, Any]:
-    coeffs = [(0.0, 1.00, 0.05, 0.0),
-              (0.0, 0.95, 0.06, 0.0),
-              (0.0, 1.05, 0.04, 0.0)]
-    return {"model_polynomials": coeffs,
-            "test_input": np.linspace(-0.4, 0.4, 32)}
+    coeffs = [(0.0, 1.00, 0.05, 0.0), (0.0, 0.95, 0.06, 0.0), (0.0, 1.05, 0.04, 0.0)]
+    return {"model_polynomials": coeffs, "test_input": np.linspace(-0.4, 0.4, 32)}
 
 
 def _disagreement_breach_inputs() -> dict[str, Any]:
-    coeffs = [(0.0, 1.0, 0.0, 0.0),
-              (0.0, 1.5, 0.0, 0.0),
-              (0.0, 0.5, 0.0, 0.0)]
-    return {"model_polynomials": coeffs,
-            "test_input": np.linspace(-0.4, 0.4, 32),
-            "threshold": 0.001}
+    coeffs = [(0.0, 1.0, 0.0, 0.0), (0.0, 1.5, 0.0, 0.0), (0.0, 0.5, 0.0, 0.0)]
+    return {
+        "model_polynomials": coeffs,
+        "test_input": np.linspace(-0.4, 0.4, 32),
+        "threshold": 0.001,
+    }
 
 
 def _calibration_breach_inputs() -> dict[str, Any]:
@@ -138,25 +150,33 @@ def _calibration_breach_inputs() -> dict[str, Any]:
 
 CASES = [
     Case(
-        name="fairness", declared_depth=4, runtime_bound_s=RUNTIME_BOUND_S,
+        name="fairness",
+        declared_depth=4,
+        runtime_bound_s=RUNTIME_BOUND_S,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_fairness,
         encrypted=fhe_p.fairness_encrypted,
         extract=lambda r: r.demographic_parity_diff,
-        inputs=_fairness_inputs, breach_field="threshold_breached",
+        inputs=_fairness_inputs,
+        breach_field="threshold_breached",
         breach_inputs=_fairness_breach_inputs,
     ),
     Case(
-        name="provenance", declared_depth=3, runtime_bound_s=RUNTIME_BOUND_S,
+        name="provenance",
+        declared_depth=3,
+        runtime_bound_s=RUNTIME_BOUND_S,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_provenance,
         encrypted=fhe_p.topk_provenance_encrypted,
         extract=lambda r: float(np.max(r.bucket_aggregates)),
-        inputs=_provenance_inputs, breach_field=None,
+        inputs=_provenance_inputs,
+        breach_field=None,
         breach_inputs=_provenance_inputs,
     ),
     Case(
-        name="concordance", declared_depth=5, runtime_bound_s=15.0,
+        name="concordance",
+        declared_depth=5,
+        runtime_bound_s=15.0,
         # The encrypted Harrell C-index reconstructs four concordance
         # bins from three sign-poly aggregates per shift. With
         # ``sign_poly_d3``'s ~30% worst-case error near zero,
@@ -169,11 +189,14 @@ CASES = [
         plaintext=rf.audit_concordance,
         encrypted=fhe_p.c_index_encrypted,
         extract=lambda r: r.c_index,
-        inputs=_concordance_inputs, breach_field=None,
+        inputs=_concordance_inputs,
+        breach_field=None,
         breach_inputs=_concordance_inputs,
     ),
     Case(
-        name="calibration", declared_depth=4, runtime_bound_s=RUNTIME_BOUND_S,
+        name="calibration",
+        declared_depth=4,
+        runtime_bound_s=RUNTIME_BOUND_S,
         # set_size can drift by ±2 from sign-poly-d3 noise on scores
         # near the quantile threshold; absolute tolerance scales with
         # K (16 here).
@@ -181,25 +204,32 @@ CASES = [
         plaintext=rf.audit_calibration,
         encrypted=fhe_p.conformal_encrypted,
         extract=lambda r: float(r.set_size),
-        inputs=_calibration_inputs, breach_field=None,
+        inputs=_calibration_inputs,
+        breach_field=None,
         breach_inputs=_calibration_breach_inputs,
     ),
     Case(
-        name="drift", declared_depth=2, runtime_bound_s=RUNTIME_BOUND_S,
+        name="drift",
+        declared_depth=2,
+        runtime_bound_s=RUNTIME_BOUND_S,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_drift,
         encrypted=fhe_p.w1_encrypted,
         extract=lambda r: r.distance,
-        inputs=_drift_inputs, breach_field="drift_bit",
+        inputs=_drift_inputs,
+        breach_field="drift_bit",
         breach_inputs=_drift_breach_inputs,
     ),
     Case(
-        name="disagreement", declared_depth=5, runtime_bound_s=RUNTIME_BOUND_S,
+        name="disagreement",
+        declared_depth=5,
+        runtime_bound_s=RUNTIME_BOUND_S,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_disagreement,
         encrypted=fhe_p.disagreement_encrypted,
         extract=lambda r: r.pairwise_variance,
-        inputs=_disagreement_inputs, breach_field="breach",
+        inputs=_disagreement_inputs,
+        breach_field="breach",
         breach_inputs=_disagreement_breach_inputs,
     ),
 ]
@@ -213,8 +243,7 @@ def test_equivalence_value_within_tolerance(case: Case, ctx) -> None:
     enc = case.encrypted(ctx, **args)
     diff = abs(case.extract(plain) - case.extract(enc))
     assert diff <= case.abs_tol, (
-        f"{case.name}: |plain − enc| = {diff} exceeds tolerance "
-        f"{case.abs_tol}"
+        f"{case.name}: |plain − enc| = {diff} exceeds tolerance {case.abs_tol}"
     )
 
 
@@ -226,12 +255,9 @@ def test_depth_within_declared_budget(case: Case, ctx) -> None:
     consumed = fhe_p.last_depth(case.name)
     declared = fhe_p.declared_depth(case.name)
     assert consumed <= declared, (
-        f"{case.name}: depth_consumed = {consumed} > declared_depth = "
-        f"{declared}"
+        f"{case.name}: depth_consumed = {consumed} > declared_depth = {declared}"
     )
-    assert declared <= 6, (
-        f"{case.name}: declared_depth = {declared} exceeds the d=6 budget"
-    )
+    assert declared <= 6, f"{case.name}: declared_depth = {declared} exceeds the d=6 budget"
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
@@ -252,14 +278,13 @@ def test_no_bootstrapping(case: Case, ctx) -> None:
         f"bootstrapping the d=6 modulus chain"
     )
     import regaudit_fhe.fhe as fhe_pkg
+
     src = fhe_pkg.primitives.__file__
     with open(src) as fh:
         body = fh.read()
-    callsites = [line for line in body.splitlines()
-                 if "bootstrap(" in line or ".bootstrap" in line]
+    callsites = [line for line in body.splitlines() if "bootstrap(" in line or ".bootstrap" in line]
     assert not callsites, (
-        "Encrypted primitives must not call any bootstrap method; "
-        f"found in {src}: {callsites}"
+        f"Encrypted primitives must not call any bootstrap method; found in {src}: {callsites}"
     )
 
 
@@ -267,7 +292,7 @@ def test_no_bootstrapping(case: Case, ctx) -> None:
 def test_runtime_within_documented_bound(case: Case, ctx) -> None:
     """Runtime below the documented benchmark bound."""
     args = case.inputs()
-    case.encrypted(ctx, **args)        # warm up
+    case.encrypted(ctx, **args)  # warm up
     t0 = time.perf_counter()
     case.encrypted(ctx, **args)
     elapsed = time.perf_counter() - t0
@@ -312,26 +337,29 @@ def test_full_matrix_summary(ctx) -> None:
         t0 = time.perf_counter()
         enc = case.encrypted(ctx, **args)
         elapsed = time.perf_counter() - t0
-        rows.append({
-            "primitive": case.name,
-            "abs_diff": abs(case.extract(plain) - case.extract(enc)),
-            "tolerance": case.abs_tol,
-            "depth_consumed": fhe_p.last_depth(case.name),
-            "declared_depth": fhe_p.declared_depth(case.name),
-            "runtime_s": elapsed,
-            "runtime_bound_s": case.runtime_bound_s,
-        })
+        rows.append(
+            {
+                "primitive": case.name,
+                "abs_diff": abs(case.extract(plain) - case.extract(enc)),
+                "tolerance": case.abs_tol,
+                "depth_consumed": fhe_p.last_depth(case.name),
+                "declared_depth": fhe_p.declared_depth(case.name),
+                "runtime_s": elapsed,
+                "runtime_bound_s": case.runtime_bound_s,
+            }
+        )
     failures: list[str] = []
     for r in rows:
         if r["abs_diff"] > r["tolerance"]:
-            failures.append(f"{r['primitive']}: |diff|={r['abs_diff']:.4g} "
-                            f"exceeds tol={r['tolerance']}")
+            failures.append(
+                f"{r['primitive']}: |diff|={r['abs_diff']:.4g} exceeds tol={r['tolerance']}"
+            )
         if r["depth_consumed"] > r["declared_depth"]:
-            failures.append(f"{r['primitive']}: depth "
-                            f"{r['depth_consumed']} > "
-                            f"declared {r['declared_depth']}")
+            failures.append(
+                f"{r['primitive']}: depth {r['depth_consumed']} > declared {r['declared_depth']}"
+            )
         if r["runtime_s"] > r["runtime_bound_s"]:
-            failures.append(f"{r['primitive']}: runtime "
-                            f"{r['runtime_s']:.2f}s > "
-                            f"bound {r['runtime_bound_s']}s")
+            failures.append(
+                f"{r['primitive']}: runtime {r['runtime_s']:.2f}s > bound {r['runtime_bound_s']}s"
+            )
     assert not failures, "matrix failures:\n  " + "\n  ".join(failures)

@@ -79,11 +79,14 @@ def test_audit_and_verify_roundtrip(client: TestClient) -> None:
 
 
 def test_drift_endpoint(client: TestClient) -> None:
-    r = client.post("/v1/audit/drift", json={
-        "p": [1, 2, 3, 4],
-        "q": [2, 2, 3, 3],
-        "drift_threshold": 0.005,
-    })
+    r = client.post(
+        "/v1/audit/drift",
+        json={
+            "p": [1, 2, 3, 4],
+            "q": [2, 2, 3, 3],
+            "drift_threshold": 0.005,
+        },
+    )
     assert r.status_code == 200
     env = r.json()
     assert "distance" in env["result"]

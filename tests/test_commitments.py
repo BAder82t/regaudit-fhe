@@ -54,18 +54,16 @@ def test_commit_input_array_and_equivalent_list_produce_same_digest():
     """
     arr = np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float64)
     lst = [1.0, 0.0, 1.0, 1.0]
-    assert (rf.commit_input("y_true", arr)["sha256"]
-            == rf.commit_input("y_true", lst)["sha256"])
+    assert rf.commit_input("y_true", arr)["sha256"] == rf.commit_input("y_true", lst)["sha256"]
 
     int_arr = np.array([1, 0, 1, 1], dtype=np.int64)
-    assert (rf.commit_input("y_true", int_arr)["sha256"]
-            != rf.commit_input("y_true", arr)["sha256"])
+    assert rf.commit_input("y_true", int_arr)["sha256"] != rf.commit_input("y_true", arr)["sha256"]
 
 
 def test_commitments_for_emits_one_record_per_input():
     inputs = {
-        "y_true":  np.array([1, 0, 1, 0]),
-        "y_pred":  np.array([1, 0, 1, 0]),
+        "y_true": np.array([1, 0, 1, 0]),
+        "y_pred": np.array([1, 0, 1, 0]),
         "group_a": np.array([1, 1, 0, 0]),
         "group_b": np.array([0, 0, 1, 1]),
     }
@@ -77,22 +75,19 @@ def test_commitments_for_emits_one_record_per_input():
 
 
 def test_commitments_for_is_sorted_by_name():
-    inputs = {"zeta": np.array([1]), "alpha": np.array([2]),
-              "mike": np.array([3])}
+    inputs = {"zeta": np.array([1]), "alpha": np.array([2]), "mike": np.array([3])}
     names = [r["name"] for r in rf.commitments_for(inputs)]
     assert names == sorted(names)
 
 
 def test_envelope_carries_input_commitments():
-    inputs = {"y_true": np.array([1, 0, 1, 1]),
-              "y_pred": np.array([1, 0, 0, 1])}
+    inputs = {"y_true": np.array([1, 0, 1, 1]), "y_pred": np.array([1, 0, 0, 1])}
     y = inputs["y_true"].astype(float)
     yp = inputs["y_pred"].astype(float)
     g_a = np.array([1.0, 1.0, 0.0, 0.0])
     g_b = 1.0 - g_a
     report = rf.audit_fairness(y, yp, g_a, g_b)
-    env = rf.envelope("fairness", report,
-                      input_commitments=rf.commitments_for(inputs))
+    env = rf.envelope("fairness", report, input_commitments=rf.commitments_for(inputs))
     body = env.to_dict()
     names = [c["name"] for c in body["input_commitments"]]
     assert names == sorted(names)
@@ -104,8 +99,7 @@ def test_modifying_committed_input_fails_envelope_verification():
     y = inputs["y_true"].astype(float)
     g = np.array([1.0, 1.0, 0.0, 0.0])
     report = rf.audit_fairness(y, y, g, 1.0 - g)
-    env = rf.envelope("fairness", report,
-                      input_commitments=rf.commitments_for(inputs))
+    env = rf.envelope("fairness", report, input_commitments=rf.commitments_for(inputs))
     env.input_commitments[0]["sha256"] = "0" * 64
     out = rf.verify_envelope(env)
     assert out.sha256_valid is False
