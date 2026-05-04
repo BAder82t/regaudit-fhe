@@ -41,7 +41,7 @@ httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via regaudit-fhe (pyproject.toml)
-hypothesis==6.152.3
+hypothesis==6.152.4
     # via regaudit-fhe (pyproject.toml)
 idna==3.13
     # via
