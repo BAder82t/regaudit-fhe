@@ -73,11 +73,11 @@ psutil==7.2.2
     # via regaudit-fhe (pyproject.toml)
 pycparser==3.0
     # via cffi
-pydantic==2.13.3
+pydantic==2.13.4
     # via
     #   fastapi
     #   regaudit-fhe (pyproject.toml)
-pydantic-core==2.46.3
+pydantic-core==2.46.4
     # via pydantic
 pygments==2.20.0
     # via pytest
@@ -119,7 +119,7 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
-uvicorn[standard]==0.46.0
+uvicorn[standard]==0.47.0
     # via regaudit-fhe (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
