@@ -76,7 +76,7 @@ from .trust import (
     WrongParameterSet,
 )
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 
 audit_fairness = fairness_circuit_d6

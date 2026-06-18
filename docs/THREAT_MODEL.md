@@ -308,3 +308,4 @@ and returns a structured outcome covering all of them. Steps 1, 2, 3,
 | 2026-04-26 | Initial threat model, drafted alongside v0.0.1.              |
 | 2026-04-26 | Added Ed25519 signing, parameter_set_hash, input_commitments, optional timestamp authority (v0.0.2). |
 | 2026-04-30 | v0.0.7: real encrypted concordance/calibration/disagreement primitives, verifier hardening (`verify_receipt` warns on missing trust store; CLI `--trusted-keys`/`--strict`). |
+| 2026-06-18 | v0.0.8: differential-privacy output perturbation with a signed `dp` disclosure block; `CallableKeyProvider` external key custody (KMS/HSM); experimental OpenFHE CKKS backend behind the backend registry. |

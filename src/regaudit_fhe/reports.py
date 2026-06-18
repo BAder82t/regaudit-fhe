@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
-LIB_VERSION: str = "0.0.7"
+LIB_VERSION: str = "0.0.8"
 SIGNATURE_ALG: str = "Ed25519"
 
 
