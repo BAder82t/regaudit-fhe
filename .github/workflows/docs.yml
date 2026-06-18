@@ -1,0 +1,29 @@
+name: docs
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  api-docs:
+    name: build API reference (pdoc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: scripts/build_api_docs.sh site/api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-docs
+          path: site/api

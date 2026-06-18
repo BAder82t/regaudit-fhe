@@ -16,3 +16,5 @@ htmlcov/
 *.so
 .DS_Store
 regulator_submission.json
+site/
+.hypothesis/

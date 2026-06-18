@@ -30,6 +30,15 @@ def _require_tenseal() -> None:
 
 
 from . import primitives  # noqa: E402
+from .backends import (  # noqa: E402
+    BackendError,
+    FHEBackend,
+    all_backends,
+    available_backends,
+    default_backend,
+    get_backend,
+    register_backend,
+)
 from .context import (  # noqa: E402
     CKKSContext,
     build_d6_context,
@@ -46,11 +55,18 @@ from .slot_vec import EncryptedSlotVec  # noqa: E402
 __all__ = [
     "SEAL_MAX_LOG_Q_128",
     "SECURITY_LEVELS",
+    "BackendError",
     "CKKSContext",
     "CKKSParams",
     "EncryptedSlotVec",
+    "FHEBackend",
     "ParameterValidationError",
+    "all_backends",
+    "available_backends",
     "build_d6_context",
     "build_d6_context_from_params",
+    "default_backend",
+    "get_backend",
     "primitives",
+    "register_backend",
 ]

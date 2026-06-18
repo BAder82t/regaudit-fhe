@@ -406,12 +406,18 @@ the top of this README reflects the latest result.
 | Property                                | Status                                                                              |
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
-| 275-test pytest suite                   | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
+| 309-test pytest suite                   | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; baseline 84%.                                 |
 | Type checking                           | `mypy` gates CI: zero errors across 19 source files.                                |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
+| OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; equivalence-tested for 5/6          |
+|                                         | primitives (concordance pending rectangular `mm_pt`). Not the verified reference.   |
+| External key custody (KMS / HSM)        | `CallableKeyProvider` keeps the signing key off-host; fails closed on bad sig.      |
+| Differential-privacy output noise       | Optional `regaudit_fhe.dp` (Laplace / Gaussian); signed `dp` block. Sensitivity is  |
+|                                         | the deployer's responsibility — the library calibrates, it does not bound.          |
+| Generated API reference                 | `pdoc` HTML built in CI (`docs.yml`); see [docs/API.md](docs/API.md).               |
 | Signed audit envelope (Ed25519)         | Shipped; canonical-JSON + tamper tests.                                             |
 | Trust store + typed verifier failures   | `TrustStore` + six `EnvelopeVerificationError` subclasses; CLI `--trusted-keys`.    |
 | JSON Schemas                            | Shipped; validated on every CLI / API request.                                      |
@@ -434,8 +440,11 @@ prove, regulation by regulation.
 > **Description:** *Depth-tracked regulatory audit primitives for
 > privacy-preserving AI audits.*
 >
-> **Active backend:** TenSEAL CKKS (`regaudit_fhe.fhe`). OpenFHE is
-> not currently included; see
+> **Backends:** TenSEAL CKKS is the verified reference backend
+> (`regaudit_fhe.fhe`). An **experimental** OpenFHE CKKS backend
+> (`regaudit_fhe.fhe.openfhe`) is also selectable through the backend
+> registry; it covers every primitive except encrypted concordance
+> (which needs rectangular `mm_pt`). See
 > [docs/roadmap/openfhe_backend.md](docs/roadmap/openfhe_backend.md)
 > for the design note.
 
@@ -444,6 +453,9 @@ The current release ships:
 - the plaintext SlotVec model with strict depth-budget enforcement,
 - a TenSEAL CKKS backend that mirrors the SlotVec algebra and passes
   end-to-end ciphertext / plaintext equivalence tests,
+- a pluggable backend registry (`regaudit_fhe.fhe.get_backend` /
+  `available_backends`) with an experimental OpenFHE CKKS backend that
+  runs the same circuits via the Halevi–Shoup diagonal method,
 - the Ed25519-signed audit envelope with canonical-JSON rules,
   parameter-set hashing, and input commitments,
 - a typed verifier surface — `TrustStore` (key_id → PEM, optional
@@ -451,6 +463,12 @@ The current release ships:
   `verify_envelope_or_raise` raising `UntrustedIssuer` /
   `RevokedIssuer` / `WrongParameterSet` / `HashMismatch` /
   `InvalidSignature` / `TimestampInvalid` for regulator-side use,
+- a key-custody seam — `CallableKeyProvider` keeps the Ed25519 signing
+  key in a KMS/HSM, so only a public PEM and a sign-callable enter the
+  audit host,
+- an optional differential-privacy output-perturbation layer
+  (`regaudit_fhe.dp`: Laplace / Gaussian mechanisms, a basic-composition
+  accountant, and a signed `dp` disclosure block in the envelope),
 - JSON Schemas for every input, output, and the envelope itself,
 - the hardened HTTP audit server with constant-time bearer-token
   compare, opaque hashed key_id in logs, scopes, body-size limit,

@@ -1,10 +1,15 @@
-# OpenFHE backend — design note (NOT IMPLEMENTED)
+# OpenFHE backend — design note (EXPERIMENTAL, PARTIAL)
 
-> **Status: roadmap, not shipping.** This file documents the
-> integration surface for a future OpenFHE-CKKS backend. It is **not
-> installed by the `[fhe]` extra** — that extra installs **TenSEAL**
-> today. The repository's only encrypted backend is TenSEAL CKKS at
-> `regaudit_fhe.fhe`.
+> **Status: experimental, partially shipping.** An OpenFHE-CKKS backend
+> now exists at `regaudit_fhe.fhe.openfhe` and registers itself with the
+> backend registry (`regaudit_fhe.fhe.get_backend("openfhe-ckks")`),
+> installed via the separate `[openfhe]` extra (the `[fhe]` extra still
+> installs **TenSEAL**, which remains the verified reference backend).
+> The OpenFHE backend runs five of the six primitives — encrypted
+> concordance is pending because it needs rectangular `mm_pt`, whereas
+> the current adapter implements only the square (diagonal-method) case.
+> The notes below record the original design rationale and the remaining
+> work.
 
 ## Why a separate OpenFHE build is on the roadmap
 

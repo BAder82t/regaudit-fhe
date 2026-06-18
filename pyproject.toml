@@ -30,6 +30,9 @@ dependencies = [
 fhe = [
   "tenseal>=0.3.14",
 ]
+openfhe = [
+  "openfhe>=1.1",
+]
 server = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -44,6 +47,7 @@ dev = [
   "httpx>=0.27",
   "hypothesis>=6",
   "psutil>=5",
+  "pdoc>=14",
 ]
 
 [project.urls]

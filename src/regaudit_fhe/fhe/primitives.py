@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextvars import ContextVar
+from typing import Any
 
 import numpy as np
 
@@ -80,7 +81,29 @@ DECLARED_DEPTH: dict[str, int] = {
 }
 
 
-def _record_depth(primitive: str, *vectors: EncryptedSlotVec) -> int:
+def _resolve_backend(ctx: Any) -> tuple[Any, Any]:
+    """Return ``(slotvec_cls, sign_poly)`` for the context's backend.
+
+    Dispatches on the context type so the same primitive circuit runs
+    unchanged on either the TenSEAL reference backend or the experimental
+    OpenFHE backend. Defaults to TenSEAL for the historical
+    :class:`CKKSContext`.
+    """
+    from .context import CKKSContext
+
+    if isinstance(ctx, CKKSContext):
+        return EncryptedSlotVec, sign_poly_d3
+    try:
+        from .openfhe import OpenFHEContext, OpenFHESlotVec
+        from .openfhe import sign_poly_d3 as openfhe_sign_poly
+    except Exception:  # pragma: no cover - openfhe adapter unimportable
+        raise TypeError(f"unsupported CKKS context type: {type(ctx).__name__}") from None
+    if isinstance(ctx, OpenFHEContext):
+        return OpenFHESlotVec, openfhe_sign_poly
+    raise TypeError(f"unsupported CKKS context type: {type(ctx).__name__}")
+
+
+def _record_depth(primitive: str, *vectors: Any) -> int:
     d = max(v.depth for v in vectors) if vectors else 0
     _ld()[primitive] = d
     declared = DECLARED_DEPTH.get(primitive, 6)
@@ -97,6 +120,7 @@ def fairness_encrypted(
     group_b: np.ndarray,
     threshold: float = 0.1,
 ) -> FairnessReport:
+    SV, _sign_poly = _resolve_backend(ctx)
     y_true_p = pad_pow2(y_true)
     y_pred_p = pad_pow2(y_pred)
     g_a = pad_pow2(group_a)
@@ -109,7 +133,7 @@ def fairness_encrypted(
     n_pred_pos_a = max(float(np.sum(y_pred_p * g_a)), 1.0)
     n_pred_pos_b = max(float(np.sum(y_pred_p * g_b)), 1.0)
 
-    y_p = EncryptedSlotVec.encrypt(ctx, y_pred_p)
+    y_p = SV.encrypt(ctx, y_pred_p)
 
     pred_a = y_p.mul_pt(g_a).sum_all().mul_scalar(1.0 / n_a)
     pred_b = y_p.mul_pt(g_b).sum_all().mul_scalar(1.0 / n_b)
@@ -135,16 +159,17 @@ def fairness_encrypted(
 def topk_provenance_encrypted(
     ctx: CKKSContext, attributions: np.ndarray, row_ids: np.ndarray, n_buckets: int, k: int
 ) -> ProvenanceReport:
+    SV, _sign_poly = _resolve_backend(ctx)
     n_slots = max(pad_pow2(attributions).shape[0], n_buckets)
     bucket_ids = hash_to_buckets(row_ids, n_buckets)
     masks = bucket_masks(bucket_ids, n_buckets, n_slots)
     attr_padded = np.zeros(n_slots, dtype=np.float64)
     attr_padded[: len(attributions)] = attributions
 
-    attr_ct = EncryptedSlotVec.encrypt(ctx, attr_padded)
+    attr_ct = SV.encrypt(ctx, attr_padded)
 
     aggregates = np.zeros(n_buckets, dtype=np.float64)
-    last_summed: EncryptedSlotVec | None = None
+    last_summed: Any = None
     for b in range(n_buckets):
         masked = attr_ct.mul_pt(masks[b])
         last_summed = masked.sum_all()
@@ -230,6 +255,7 @@ def c_index_encrypted(
     n = len(risk)
     if n < 2:
         return CIndexReport(0.0, 0.0, 0.5)
+    SV, sign_poly = _resolve_backend(ctx)
     risk_arr = np.asarray(risk, dtype=float)
     time_arr = np.asarray(time, dtype=float)
     event_arr = np.asarray(event, dtype=float)
@@ -246,16 +272,16 @@ def c_index_encrypted(
 
     M_risk, M_time, M_event = _build_pair_matrices(n, P)
 
-    risk_ct = EncryptedSlotVec.encrypt(ctx, risk_norm)
-    time_ct = EncryptedSlotVec.encrypt(ctx, time_norm)
-    event_ct = EncryptedSlotVec.encrypt(ctx, event_arr)
+    risk_ct = SV.encrypt(ctx, risk_norm)
+    time_ct = SV.encrypt(ctx, time_norm)
+    event_ct = SV.encrypt(ctx, event_arr)
 
     risk_diffs = risk_ct.mm_pt(M_risk)
     time_diffs = time_ct.mm_pt(M_time)
     event_pairs = event_ct.mm_pt(M_event)
 
-    sgn_risk = sign_poly_d3(risk_diffs)
-    sgn_time = sign_poly_d3(time_diffs)
+    sgn_risk = sign_poly(risk_diffs)
+    sgn_time = sign_poly(time_diffs)
 
     s1_agg = sgn_time.copy().mul_ct(event_pairs.copy()).sum_all()
     s3_agg = sgn_risk.copy().mul_ct(event_pairs.copy()).sum_all()
@@ -334,6 +360,7 @@ def conformal_encrypted(
         treats the ``mul_scalar`` summands as depth-free).
       Total: 4 levels.
     """
+    SV, sign_poly = _resolve_backend(ctx)
     n = pad_pow2(scores).shape[0]
     scores_padded = pad_pow2(scores)
     quant_padded = pad_pow2(quantiles)
@@ -346,14 +373,14 @@ def conformal_encrypted(
     scale = float(score_range)
     inv_scale = 1.0 / max(scale, 1e-9)
 
-    scores_ct = EncryptedSlotVec.encrypt(ctx, scores_padded)
+    scores_ct = SV.encrypt(ctx, scores_padded)
     # diff = (quantile - score) / score_range. Quantile is plaintext-
     # public. Subtracting an encrypted value from a plaintext list is
     # implemented by negating the ciphertext and adding the plaintext.
     diff_raw = -scores_ct + quant_padded
     diff = diff_raw.mul_pt(np.full(n, inv_scale))
 
-    member_signal = sign_poly_d3(diff)
+    member_signal = sign_poly(diff)
     member_decoded = np.array(member_signal.decrypt())[: len(scores)]
     membership = (member_decoded > 0.0).astype(np.float64)
     _record_depth("calibration", member_signal)
@@ -363,14 +390,15 @@ def conformal_encrypted(
 def w1_encrypted(
     ctx: CKKSContext, p: np.ndarray, q: np.ndarray, drift_threshold: float = 0.005
 ) -> DriftReport:
+    SV, _sign_poly = _resolve_backend(ctx)
     p_padded = pad_pow2(p / max(float(np.sum(p)), 1e-12))
     q_padded = pad_pow2(q / max(float(np.sum(q)), 1e-12))
     n = p_padded.shape[0]
 
     cdf_matrix = np.triu(np.ones((n, n), dtype=float))
 
-    p_ct = EncryptedSlotVec.encrypt(ctx, p_padded)
-    q_ct = EncryptedSlotVec.encrypt(ctx, q_padded)
+    p_ct = SV.encrypt(ctx, p_padded)
+    q_ct = SV.encrypt(ctx, q_padded)
 
     f_p = p_ct.mm_pt(cdf_matrix)
     f_q = q_ct.mm_pt(cdf_matrix)
@@ -406,9 +434,10 @@ def disagreement_encrypted(
     M = len(model_polynomials)
     if M < 3:
         raise ValueError("requires M >= 3 model versions")
+    SV, _sign_poly = _resolve_backend(ctx)
     n = len(test_input)
 
-    x = EncryptedSlotVec.encrypt(ctx, test_input)
+    x = SV.encrypt(ctx, test_input)
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
 

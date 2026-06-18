@@ -56,7 +56,7 @@ import os
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 from cryptography.exceptions import InvalidSignature as _CryptoInvalidSignature
@@ -226,6 +226,40 @@ def parameter_set_from_ckks_context(
     )
 
 
+def parameter_set_from_openfhe_context(
+    ctx: Any,
+    *,
+    security_bits: int = 128,
+    multiplicative_depth: int = 6,
+) -> ParameterSet:
+    """Introspect an :class:`regaudit_fhe.fhe.openfhe.OpenFHEContext` into a
+    ``ParameterSet`` tagged ``openfhe-ckks``.
+
+    The envelope's ``parameter_set_hash`` therefore pins the OpenFHE
+    backend distinctly from TenSEAL, so a verifier can require a specific
+    implementation. ``scaling_factor_bits`` is read from the context's
+    ``scale_bits``; the multiplicative depth reflects the audit budget,
+    not the larger modulus chain the context provisions for headroom.
+    """
+    backend_version = ""
+    with contextlib.suppress(Exception):
+        import openfhe as _openfhe
+
+        backend_version = getattr(_openfhe, "__version__", "")
+
+    n_slots = int(getattr(ctx, "n_slots", 0))
+    return ParameterSet(
+        backend="openfhe-ckks",
+        poly_modulus_degree=n_slots * 2,
+        security_bits=int(security_bits),
+        multiplicative_depth=int(multiplicative_depth),
+        coeff_mod_bit_sizes=(),
+        scaling_factor_bits=int(getattr(ctx, "scale_bits", 40)),
+        library_version=LIB_VERSION,
+        backend_version=backend_version,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Timestamp authority hook
 # ---------------------------------------------------------------------------
@@ -253,7 +287,105 @@ class TimestampAuthority:
 
 
 # ---------------------------------------------------------------------------
-# Ed25519 signer
+# Key custody seam
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class KeyProvider(Protocol):
+    """The signing capability the envelope builder depends on.
+
+    Anything that can name an issuer + key, expose an Ed25519 public key
+    as PEM, and produce a detached signature over canonical-body bytes is
+    a valid key provider. The in-process :class:`Signer` is one
+    implementation; :class:`CallableKeyProvider` wraps an external
+    custodian (AWS KMS, GCP KMS, a PKCS#11 HSM, a remote signing service)
+    so the private key never enters the audit host's address space — the
+    deployment posture the server module and threat model call for.
+    """
+
+    issuer: str
+    key_id: str
+
+    def public_key_pem(self) -> str:  # pragma: no cover - structural
+        ...
+
+    def sign(self, body: bytes) -> bytes:  # pragma: no cover - structural
+        ...
+
+
+@dataclass
+class CallableKeyProvider:
+    """Key provider backed by an out-of-process signing callable.
+
+    The private key is held by an external custodian; only its Ed25519
+    public key (as PEM) and a ``sign_callable`` that returns a 64-byte
+    detached Ed25519 signature over the given bytes cross into this
+    process. Use this to keep envelope signing keys in a KMS/HSM.
+
+    Example (AWS KMS, Ed25519 / "EdDSA" key)::
+
+        import boto3
+        kms = boto3.client("kms")
+
+        def kms_sign(body: bytes) -> bytes:
+            resp = kms.sign(
+                KeyId="alias/regaudit-issuer",
+                Message=body,
+                MessageType="RAW",
+                SigningAlgorithm="EDDSA",
+            )
+            return resp["Signature"]
+
+        provider = CallableKeyProvider(
+            issuer="acme-health",
+            key_id="alias/regaudit-issuer",
+            public_pem=open("issuer.pub.pem").read(),
+            sign_callable=kms_sign,
+        )
+        env = envelope("fairness", report, signer=provider)
+
+    The provided ``public_pem`` is validated as an Ed25519 key at
+    construction time, and every signature the callable returns is
+    verified against it before the envelope is emitted, so a
+    misconfigured custodian fails closed instead of shipping an
+    unverifiable envelope.
+    """
+
+    issuer: str
+    key_id: str
+    public_pem: str
+    sign_callable: Callable[[bytes], bytes]
+
+    def __post_init__(self) -> None:
+        pub = serialization.load_pem_public_key(self.public_pem.encode("ascii"))
+        if not isinstance(pub, Ed25519PublicKey):
+            raise TypeError("CallableKeyProvider requires an Ed25519 public key PEM")
+        self._public_key = pub
+
+    def public_key_pem(self) -> str:
+        return self._public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+
+    def sign(self, body: bytes) -> bytes:
+        signature = self.sign_callable(body)
+        if not isinstance(signature, (bytes, bytearray)):
+            raise TypeError("sign_callable must return raw signature bytes")
+        signature = bytes(signature)
+        try:
+            self._public_key.verify(signature, body)
+        except _CryptoInvalidSignature as exc:
+            raise ValueError(
+                "external sign_callable returned a signature that does not "
+                "verify against the configured public key"
+            ) from exc
+        return signature
+
+
+# ---------------------------------------------------------------------------
+# Ed25519 signer (in-process key custody)
 # ---------------------------------------------------------------------------
 
 
@@ -326,11 +458,13 @@ class AuditEnvelope:
     issuer: str
     receipt: dict[str, Any]
     timestamp: dict[str, str] | None = None
+    dp: dict[str, Any] | None = None
 
     def signed_body(self) -> dict[str, Any]:
         """Return the envelope payload that the receipt is computed
         over — every field except the receipt and the optional
-        timestamp."""
+        timestamp. The ``dp`` block, when present, IS signed: a verifier
+        must be able to trust the disclosed noise parameters."""
         body = self.to_dict()
         body.pop("receipt", None)
         body.pop("timestamp", None)
@@ -353,6 +487,8 @@ class AuditEnvelope:
             "issuer": self.issuer,
             "receipt": dict(self.receipt),
         }
+        if self.dp is not None:
+            out["dp"] = _to_jsonable(self.dp)
         if self.timestamp is not None:
             out["timestamp"] = dict(self.timestamp)
         return out
@@ -380,6 +516,7 @@ class AuditEnvelope:
             timestamp=dict(data["timestamp"])
             if "timestamp" in data and data["timestamp"] is not None
             else None,
+            dp=dict(data["dp"]) if "dp" in data and data["dp"] is not None else None,
         )
 
 
@@ -396,8 +533,9 @@ def envelope(
     regulations: Iterable[str] | None = None,
     parameter_set: ParameterSet | None = None,
     input_commitments: Sequence[Mapping[str, str]] | None = None,
-    signer: Signer | None = None,
+    signer: Signer | KeyProvider | None = None,
     timestamp_authority: TimestampAuthority | None = None,
+    dp: Mapping[str, Any] | None = None,
 ) -> AuditEnvelope:
     """Construct a signed audit envelope.
 
@@ -407,6 +545,11 @@ def envelope(
     and rejects unknown issuers. For production deployments always pass
     a long-lived ``Signer`` whose public key is registered with the
     verifier.
+
+    ``dp`` is the optional differential-privacy disclosure block returned
+    by :func:`regaudit_fhe.dp.privatize_report`. When present it is folded
+    into the signed body so a verifier can trust the disclosed mechanism,
+    epsilon, and sensitivity alongside the noised ``result``.
     """
     regs = list(regulations) if regulations is not None else REGULATION_MAP.get(primitive, [])
     params = parameter_set or ParameterSet()
@@ -421,6 +564,7 @@ def envelope(
         "declared": 6,
         "consumed": int(depth_consumed),
     }
+    dp_block: dict[str, Any] | None = _to_jsonable(dict(dp)) if dp is not None else None
     body: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
@@ -436,6 +580,8 @@ def envelope(
         "issued_at": issued,
         "issuer": issuer,
     }
+    if dp_block is not None:
+        body["dp"] = dp_block
     body_bytes = canonical_json(body)
     digest = sha256_hex(body_bytes)
     signature = signer.sign(body_bytes)
@@ -467,6 +613,7 @@ def envelope(
         issuer=issuer,
         receipt=receipt,
         timestamp=timestamp_block,
+        dp=dp_block,
     )
 
 
