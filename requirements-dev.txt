@@ -63,7 +63,7 @@ numpy==2.4.4
     # via regaudit-fhe (pyproject.toml)
 packaging==26.2
     # via pytest
-pathspec==1.1.0
+pathspec==1.1.1
     # via mypy
 pluggy==1.6.0
     # via
