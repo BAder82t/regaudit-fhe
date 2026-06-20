@@ -31,7 +31,7 @@ jobs:
           echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
       - run: python -m build
       - run: ls -lh dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -54,7 +54,7 @@ jobs:
           inputs: |
             ./dist/*.tar.gz
             ./dist/*.whl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sigstore-bundles
           path: |
@@ -93,7 +93,7 @@ jobs:
       - run: pip install -e ".[server,fhe]"
       - run: cyclonedx-py environment --output-format JSON --output-file sbom.cdx.json
       - run: cd dist && sha256sum *.tar.gz *.whl > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-attestations
           path: |
