@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.ecp_qssp`
 **Public API:** `regaudit_fhe.audit_calibration(...)`
-**Depth budget:** 3 of 6
+**Depth budget:** 3 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -10,7 +10,7 @@
 Computes the conformal prediction-set membership bitmask over `K`
 candidate labels in a single CKKS circuit by pre-encoding all per-class
 calibration quantile thresholds into one packed plaintext vector, then
-producing an encrypted membership signal via a depth-2 polynomial.
+producing an encrypted membership signal via a sign polynomial (+2 levels; 3 of 6 in total with the rescale).
 
 ## Why it exists
 
@@ -53,7 +53,7 @@ membership        = (member_signal > 0)
 
 The `quantiles` vector is auditor-public per the security model.
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 plaintext-sub + plaintext-mul rescale : +1 level

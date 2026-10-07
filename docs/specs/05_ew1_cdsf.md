@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.ew1_cdsf`
 **Public API:** `regaudit_fhe.audit_drift(...)`
-**Depth budget:** 1 of 6
+**Depth budget:** 1 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -61,7 +61,7 @@ sq = diff * diff                      # depth 1
 distance = sum_slots(sq)              # depth 1
 ```
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 prefix-sum CDF : +0 levels (rotate-and-add only)
@@ -71,6 +71,8 @@ sum            : +0 levels
                 ───────
                  1 of 6
 ```
+
+> **TenSEAL backend:** the prefix-sum CDF costs +1 level (`mm_pt`), so the declared ceiling is 2 and the observed depth is 2.
 
 ## Security analysis
 

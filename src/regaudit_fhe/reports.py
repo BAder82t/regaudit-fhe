@@ -560,6 +560,8 @@ def envelope(
     issued = _dt.datetime.now(_dt.timezone.utc).isoformat()
     result_dict: dict[str, Any] = report_to_dict(report)
     commitments_list: list[dict[str, str]] = [dict(c) for c in (input_commitments or [])]
+    # "declared" is the circuit-wide ceiling (MAX_DEPTH), not the per-primitive
+    # DECLARED_DEPTH; "consumed" is the observed depth for this call.
     depth_budget_dict: dict[str, int] = {
         "declared": 6,
         "consumed": int(depth_consumed),

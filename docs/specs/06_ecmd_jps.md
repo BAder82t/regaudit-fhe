@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.ecmd_jps`
 **Public API:** `regaudit_fhe.audit_disagreement(...)`
-**Depth budget:** 5 of 6
+**Depth budget:** 5 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -53,7 +53,7 @@ avg_var = var_acc * (1 / pair_count)                      # depth 5
 The breach indicator is decided plaintext-side after the auditor
 decrypts `avg_var`, keeping the on-encrypted depth strictly below six.
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 x², x³                          : +2 levels

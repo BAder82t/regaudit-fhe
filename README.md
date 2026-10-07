@@ -58,14 +58,19 @@ recomputes the receipt to detect tampering between issuance and review.
 
 ## The six primitives
 
-| Module        | API                       | Depth | Use case (technical evidence supporting…)                                |
-| ------------- | ------------------------- | ----- | ------------------------------------------------------------------------ |
-| `egf_imss`    | `audit_fairness`          | 4     | NYC LL144, EU AI Act §10/§15, Colorado AI Act, CFPB workflows.           |
-| `etk_fpa_hbc` | `audit_provenance`        | 3     | EU AI Act §10, 21 CFR Part 11, GDPR §22, HIPAA workflows.                |
-| `esc_cia`     | `audit_concordance`       | 4     | FDA SaMD oncology PCCP, EU AI Act §15, EMA workflows.                    |
-| `ecp_qssp`    | `audit_calibration`       | 3     | FDA SaMD UQ, EU AI Act §15, ISO/IEC 23053, UNECE WP.29 workflows.        |
-| `ew1_cdsf`    | `audit_drift`             | 3     | EU AI Act §15, FDA SaMD PCCP, Basel III workflows.                       |
-| `ecmd_jps`    | `audit_disagreement`      | 5     | OCC SR 11-7, EU AI Act §15, FDA SaMD PCCP workflows.                     |
+| Module        | API                       | Spec depth (budgeted) | Use case (technical evidence supporting…)                                |
+| ------------- | ------------------------- | --------------------- | ------------------------------------------------------------------------ |
+| `egf_imss`    | `audit_fairness`          | 4                     | NYC LL144, EU AI Act §10/§15, Colorado AI Act, CFPB workflows.           |
+| `etk_fpa_hbc` | `audit_provenance`        | 3                     | EU AI Act §10, 21 CFR Part 11, GDPR §22, HIPAA workflows.                |
+| `esc_cia`     | `audit_concordance`       | 4                     | FDA SaMD oncology PCCP, EU AI Act §15, EMA workflows.                    |
+| `ecp_qssp`    | `audit_calibration`       | 3                     | FDA SaMD UQ, EU AI Act §15, ISO/IEC 23053, UNECE WP.29 workflows.        |
+| `ew1_cdsf`    | `audit_drift`             | 1                     | EU AI Act §15, FDA SaMD PCCP, Basel III workflows.                       |
+| `ecmd_jps`    | `audit_disagreement`      | 5                     | OCC SR 11-7, EU AI Act §15, FDA SaMD PCCP workflows.                     |
+
+> **"Spec depth" is a design budget, not a measurement.** It is the
+> multiplicative depth each primitive is *allowed* to consume in the
+> plaintext slot-vector model, as written in `docs/specs/`. It is an
+> upper-bound target, not what the encrypted backend actually uses.
 
 > **Compliance scope and disclaimer.** `regaudit-fhe` produces
 > *technical evidence* — encrypted scalars, signed envelopes,
@@ -76,28 +81,37 @@ recomputes the receipt to detect tampering between issuance and review.
 > for the binding scope statement and the
 > "what-it-does-NOT-prove" mapping per regulation.
 
-Each primitive's depth budget — the number of multiplicative levels it
-consumes inside the d=6 CKKS circuit — is shown above. All six fit
-under six on the TenSEAL backend, leaving headroom for downstream
-commit-and-verify chaining. The values below are observed at runtime
-on the real CKKS execution path; the source of truth is
-`benchmarks/results/SUMMARY.md` and the `last_depth(name)` /
-`last_depths()` accessors in `regaudit_fhe.fhe.primitives` (the
-underlying state is held in a `ContextVar` so concurrent encrypted
-calls do not race on the depth record).
+### Three different depth numbers — do not mix them
+
+| Term                  | Meaning                                                                 | Where it lives                                                    |
+| --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Spec depth**        | Design budget in the plaintext model (table above). Theoretical.        | `docs/specs/*.md`                                                 |
+| **Declared depth**    | Per-backend ceiling enforced at runtime on TenSEAL; the run fails if exceeded. It can be *higher* than spec depth because TenSEAL has no native rotation (rotation and prefix sums cost extra levels). | `DECLARED_DEPTH` in `regaudit_fhe.fhe.primitives` |
+| **Observed depth**    | Levels actually consumed on the real CKKS execution path. Measured.     | `benchmarks/results/SUMMARY.md`, `last_depth(name)` / `last_depths()` |
+
+Observed depth is always ≤ declared depth. It is **not** required to
+equal spec depth: it can be lower (for example, fairness is budgeted at
+4 but consumes 1) or the declared ceiling can exceed the spec budget
+(concordance: spec 4, declared 5 on TenSEAL). All declared ceilings fit
+within the d=6 CKKS circuit, leaving headroom for downstream
+commit-and-verify chaining. The `last_depth` state is held in a
+`ContextVar`, so concurrent encrypted calls do not race on it.
+
+Observed vs. declared depth, measured on TenSEAL (identical at
+N = 2^14 and 2^15):
 
 ```
-Depth budget visualisation (each ▮ = 1 consumed level; observed on TenSEAL)
+Each ▮ = 1 consumed level (observed). "decl" = TenSEAL declared ceiling;
+"spec" = design budget from the table above.
 
-    primitive             1 2 3 4 5 6
-    ───────────────────────────────────
-    audit_fairness        ▮ ▮ . . . .   2 of 6   (encrypt + mul_pt + mul_scalar)
-    audit_provenance      ▮ ▮ . . . .   2 of 6   (encrypt + mul_pt fold per bucket)
-    audit_drift           ▮ ▮ ▮ . . .   3 of 6   (mm_pt CDF + ct×ct square)
-    audit_calibration     ▮ ▮ ▮ ▮ . .   4 of 6   (mul_pt scale + sign_poly_d3)
-    audit_disagreement    ▮ ▮ ▮ ▮ ▮ .   5 of 6   (deg-3 poly + pairwise sq + scale)
-    audit_concordance     ▮ ▮ ▮ ▮ ▮ ▮   6 of 6   (rotate via mm_pt + sign_poly_d3
-                                                  + ct×ct event mask)
+    primitive             1 2 3 4 5 6   observed  decl  spec
+    ─────────────────────────────────────────────────────────
+    audit_fairness        ▮ . . . . .      1       4     4
+    audit_provenance      ▮ . . . . .      1       3     3
+    audit_drift           ▮ ▮ . . . .      2       2     1
+    audit_calibration     ▮ ▮ ▮ . . .      3       4     3
+    audit_disagreement    ▮ ▮ ▮ . . .      3       5     5
+    audit_concordance     ▮ ▮ ▮ ▮ ▮ .      5       5     4
 ```
 
 Each primitive's full specification, including its algorithm, depth
@@ -341,7 +355,7 @@ The `[fhe]` extra ships a real TenSEAL CKKS backend; its measurements
 are reproduced from `benchmarks/results/SUMMARY.md` (machine-readable
 JSON in `benchmarks/results/bench_fhe_<N>.json`).
 
-| Primitive    | N    | Slots  | Depth obs/decl | Rotations | ct×ct | ct×pt | Runtime | RAM     | Max abs err | Threshold flip |
+| Primitive    | N    | Slots  | Depth obs/decl (TenSEAL) | Rotations | ct×ct | ct×pt | Runtime | RAM     | Max abs err | Threshold flip |
 |--------------|-----:|-------:|----------------|----------:|------:|------:|--------:|--------:|-------------|----------------|
 | fairness     | 2^14 |  8 192 | 1/4            |  36       |   0   |    6  | 0.33 s  |  887 MB | 4.8 × 10⁻⁷ | 0.00% |
 | provenance   | 2^14 |  8 192 | 1/3            |  96       |   0   |   16  | 0.90 s  |  896 MB | 1.1 × 10⁻⁵ | 0.00% |

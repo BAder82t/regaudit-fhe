@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.egf_imss`
 **Public API:** `regaudit_fhe.audit_fairness(...)`
-**Depth budget:** 4 of 6
+**Depth budget:** 4 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -57,7 +57,7 @@ for each metric m in {DP, EO, PP}:
 breached         = sign_poly_3(max(|disparity|) - threshold) # depth 4
 ```
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 plaintext-mul masks         : +1 level   ──┐

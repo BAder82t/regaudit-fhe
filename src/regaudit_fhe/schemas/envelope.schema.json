@@ -79,6 +79,7 @@
     },
     "depth_budget": {
       "type": "object",
+      "description": "declared = circuit-wide ceiling (MAX_DEPTH, 6), not the per-primitive spec or TenSEAL declared depth; consumed = observed multiplicative depth for this call.",
       "additionalProperties": false,
       "required": ["declared", "consumed"],
       "properties": {

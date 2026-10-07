@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.esc_cia`
 **Public API:** `regaudit_fhe.audit_concordance(...)`
-**Depth budget:** 4 of 6
+**Depth budget:** 4 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -39,7 +39,7 @@ does not produce a concordance audit primitive.
 
 The encrypted boundary returns the concordant and comparable counts;
 the ratio is computed plaintext-side after decryption to keep the
-on-encrypted depth at four. No per-row PHI leaves the encrypted domain.
+spec depth at four (five on the TenSEAL backend, see below). No per-row PHI leaves the encrypted domain.
 
 ## Algorithm
 
@@ -58,7 +58,7 @@ comparable = sum across all shifts and slots
 c_index    = concordant / comparable                    # plaintext
 ```
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 two sign-polynomials       : +2 levels each
@@ -67,6 +67,8 @@ mul of result × event      : +1 level
                             ───────
                              4 of 6
 ```
+
+> **TenSEAL backend:** rotation is emulated with `mm_pt`, costing one extra level per shift, so the declared ceiling is 5 and the observed depth is 5 (see README benchmarks).
 
 ## Security analysis
 

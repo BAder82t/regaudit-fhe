@@ -2,7 +2,7 @@
 
 **Module:** `regaudit_fhe.etk_fpa_hbc`
 **Public API:** `regaudit_fhe.audit_provenance(...)`
-**Depth budget:** 3 of 6
+**Depth budget:** 3 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
 ## What it does
@@ -52,7 +52,7 @@ selector_signal   = sign_poly_3(aggregate - threshold)  # depth 3
 top_k             = bucket-ids selected by the signal
 ```
 
-## Depth budget
+## Depth budget (spec, plaintext model)
 
 ```
 plaintext-mul bucket-mask  : +1 level    aggregate[b]
