@@ -44,7 +44,7 @@ jobs:
       id-token: write           # required for keyless OIDC signing
       contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -85,7 +85,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -112,15 +112,15 @@ jobs:
       contents: write           # attach release attestations
       attestations: write       # build provenance
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-attestations
           path: attest/
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sigstore-bundles
           path: sigstore/
