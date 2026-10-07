@@ -22,13 +22,13 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.26",
-  "cryptography>=42",
+  "cryptography>=50.0.2",
   "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]
 fhe = [
-  "tenseal>=0.3.14",
+  "tenseal>=0.3.16",
 ]
 openfhe = [
   "openfhe>=1.1",
