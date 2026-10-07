@@ -7,8 +7,11 @@ CKKS backend support, signed audit envelopes, schema validation, and
 regulatory audit-evidence helpers.
 
 The default execution path is plaintext. Install the `[fhe]` extra to
-enable the TenSEAL CKKS backend where supported. OpenFHE is not
-included in this repository.
+enable the TenSEAL CKKS backend where supported. An **experimental**
+OpenFHE CKKS backend (`regaudit_fhe.fhe.openfhe`) is also included; it
+is opt-in via the `[openfhe]` extra and covers five of the six
+primitives. The OpenFHE library itself is a third-party dependency
+installed by that extra, not vendored in this repository.
 
 [![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
