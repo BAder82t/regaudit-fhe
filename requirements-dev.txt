@@ -27,7 +27,7 @@ click==8.3.3
     # via uvicorn
 coverage[toml]==7.14.0
     # via pytest-cov
-cryptography==47.0.0
+cryptography==50.0.2
     # via regaudit-fhe (pyproject.toml)
 fastapi==0.142.2
     # via regaudit-fhe (pyproject.toml)
