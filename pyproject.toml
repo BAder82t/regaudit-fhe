@@ -34,9 +34,9 @@ openfhe = [
   "openfhe>=1.1",
 ]
 server = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
-  "pydantic>=2",
+  "fastapi>=0.142.2",
+  "uvicorn[standard]>=0.54.0",
+  "pydantic>=2.13.5",
 ]
 dev = [
   "pytest>=8",
