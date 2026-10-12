@@ -29,7 +29,7 @@ coverage[toml]==7.14.0
     # via pytest-cov
 cryptography==50.0.2
     # via regaudit-fhe (pyproject.toml)
-fastapi==0.142.2
+fastapi==0.143.0
     # via regaudit-fhe (pyproject.toml)
 h11==0.16.0
     # via
@@ -73,11 +73,11 @@ psutil==7.2.2
     # via regaudit-fhe (pyproject.toml)
 pycparser==3.0
     # via cffi
-pydantic==2.13.5
+pydantic==2.14.0
     # via
     #   fastapi
     #   regaudit-fhe (pyproject.toml)
-pydantic-core==2.49.0
+pydantic-core==2.50.0
     # via pydantic
 pygments==2.20.0
     # via pytest
