@@ -41,7 +41,7 @@ httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via regaudit-fhe (pyproject.toml)
-hypothesis==6.168.3
+hypothesis==6.168.5
     # via regaudit-fhe (pyproject.toml)
 idna==3.13
     # via
@@ -99,7 +99,7 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-ruff==0.16.10
+ruff==0.17.0
     # via regaudit-fhe (pyproject.toml)
 sortedcontainers==2.4.0
     # via hypothesis
