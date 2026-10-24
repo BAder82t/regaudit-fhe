@@ -757,3 +757,19 @@ def test_deployment_and_threat_model_qualify_their_one_liners():
     assert "development" in row.lower()
     threat = _doc("docs/THREAT_MODEL.md")
     assert "Replay protection is not provided." not in threat.replace("for `report.v1`", "")
+
+
+def test_docs_put_incompatible_configuration_under_exit_2_not_3():
+    readme = _doc("README.md")
+    row3 = next(line for line in readme.splitlines() if line.startswith("| `3` |"))
+    row2 = next(line for line in readme.splitlines() if line.startswith("| `2` |"))
+    assert "unsafe profile" not in row3.lower() and "profile settings" not in row3.lower()
+    assert "incompatible" in row2.lower()
+    spec = _doc("docs/TRUST_SPEC.md")
+    row = next(
+        line
+        for line in spec.splitlines()
+        if "Required verification infrastructure unavailable" in line
+    )
+    assert "unsafe" not in row.lower()
+    assert "incompatible configuration" in spec.lower()

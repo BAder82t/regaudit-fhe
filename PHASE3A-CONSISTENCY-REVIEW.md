@@ -49,7 +49,7 @@ plus mutants B01 and B02.
 | Key scope | PASS | Issuer, deployment, primitive and `not_before` are honoured by the shared engine, the legacy `verify_envelope` / `verify_envelope_or_raise` / `verify_receipt`, the CLI (real process) and HTTP, for v1 and v2: `test_gate_key_scope_is_honoured_by_library_cli_and_http`, `test_legacy_api_honours_entry_scope`, `test_legacy_api_agrees_with_the_engine_on_scoped_entries` |
 | Canonical base64 | PASS | One strict decoder (`canonical.decode_canonical_b64`) is used for v2 parsing, engine timestamp tokens, **and the v1 signature and v1 timestamp-token paths**. The v1 gap was found by the review and fixed (mutants Z02–Z03, E04–E05). `test_gate_alternate_base64_is_refused_on_the_v1_path_too`, `test_gate_alternate_base64_cannot_change_artifact_identity` |
 | v1 compatibility | PASS | v1 verifies over its original canonical bytes and is subject to current policy (profiles, compromised/retired, replay, legacy flag, timestamps never `VERIFIED`) |
-| CLI exit codes | PASS | Real-process tests for every branch; stdout empty for 2 and 3; a replay store failing *during* verification outside development is now 3 / HTTP 503 rather than a policy `1`. Precedence documented: input errors (2) before infrastructure errors (3) |
+| CLI exit codes | PASS | Real-process tests for every branch (incompatible options → 2, unusable specified resources → 3, see §8); stdout empty for 2 and 3; a replay store failing *during* verification outside development is now 3 / HTTP 503 rather than a policy `1`. Precedence documented: input errors (2) before infrastructure errors (3) |
 | Development exception | PASS | `test_gate_no_path_from_self_signed_to_trusted_on_any_entry_point` (library, HTTP, CLI × v1/v2/tampered) and `test_gate_flag_plus_store_never_turns_an_unregistered_issuer_into_trusted` |
 | Retirement boundary | PASS | §1; the stale `≤` in spec §4.1 was found by the review and corrected, and a docs test now forbids `≤ retired_at` |
 | Replay status | PASS | Labels, durability and the spec §8 enum (which had omitted `RECORDED_LOCAL`) are consistent; `RESERVED`/`CONSUMED` are never produced |
@@ -81,11 +81,11 @@ A fresh, independent re-check of all nine gates was run afterwards (§6).
 
 | Check | Result |
 |---|---|
-| Full suite, Python 3.11.7 (with TenSEAL), `CI=1` | **835 passed, 3 skipped**, 1 pre-existing warning |
-| Coverage (`--cov-fail-under=80`) | passed, **89.09%** |
-| Python 3.12 and 3.13 (dev+server extras, no TenSEAL; FHE matrix deselected) | 761 passed, 7 skipped on each |
+| Full suite, Python 3.11.7 (with TenSEAL), `CI=1` | **837 passed, 3 skipped**, 1 pre-existing warning |
+| Coverage (`--cov-fail-under=80`) | passed, **89.03%** |
+| Python 3.12 and 3.13 (dev+server extras, no TenSEAL; FHE matrix deselected) | 763 passed, 7 skipped on each |
 | `ruff check`, `ruff format --check`, `mypy` (28 files), `bandit` medium+ | clean / 0 issues |
-| Mutation check (`scripts/mutation_check_phase3a.py`, 95 mutants) | **92 killed, 3 argued equivalent, 0 survived** |
+| Mutation check (`scripts/mutation_check_phase3a.py`, 96 mutants) | **93 killed, 3 argued equivalent, 0 survived** |
 | Python 3.10, GitHub CI | **not run** |
 
 Targeted regressions added in this round: `tests/test_phase3a_contract.py` (35 tests,
@@ -125,11 +125,19 @@ header-less local proxy limitation, and the larger confidential-computation limi
 (RA-01). Phase 3A remains a candidate trust core, not production readiness. A public
 push, merge or release remains on HOLD.
 
-## 8. One question for the owner
+## 8. Final CLI correction (owner decision applied)
 
-A policy-invalid flag combination exits **3**: `--allow-self-signed` with
-`--profile confidential`, or `--profile confidential` without `--max-age-seconds`. The
-help text and `_cmd_verify` docstring say 3 ("verification infrastructure unavailable
-or *invalidly configured*"), but under the wording "2 = invalid input or usage" these
-could be read as 2. Confirm 3 is intended; if not, it is a one-line change in
-`_cmd_verify` plus the matching tests.
+A policy-invalid flag combination is a command-configuration error, so it exits **2**,
+not 3: `--allow-self-signed` with `--profile confidential` / `high-assurance`, and a
+production profile without its required options (`--max-age-seconds`, replay options,
+`--verifier-id`). Exit **3** is reserved for a required resource that *was specified* but
+is unusable: an unreadable, malformed or empty `--trusted-keys`, an unusable
+`--replay-db`, or a replay store failing while verifying outside development. The line:
+an invalid configuration discovered at startup is 2; an otherwise valid configuration
+whose resource cannot be loaded is 3.
+
+Tests: `test_exit_2_dev_flag_is_a_usage_error_outside_development`,
+`test_exit_2_production_profile_with_missing_required_options` (confidential without
+`--max-age-seconds` or replay options, `high-assurance` without `--verifier-id`),
+`test_unusable_trust_and_replay_resources_still_exit_3_in_a_valid_configuration`, and a
+docs gate. No other behaviour changed.

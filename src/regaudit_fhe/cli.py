@@ -235,9 +235,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     """Exit 0 only if the report is accepted under the selected policy.
 
     0 accepted | 1 well-formed report refused by policy (including
-    SELF_SIGNED_ONLY) | 2 invalid input or usage | 3 required verification
-    infrastructure unavailable or invalidly configured. stdout carries the
-    JSON verdict for exit 0 and 1 only.
+    SELF_SIGNED_ONLY) | 2 invalid input, command usage or an incompatible
+    combination of options | 3 a required trust or verification resource that
+    was specified is unavailable or unusable (trust store, replay store). stdout
+    carries the JSON verdict for exit 0 and 1 only.
     """
     try:
         env = parse_envelope(_read_report(args.input))
@@ -285,8 +286,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             replay_cache=replay_cache,
             replay_mode=args.replay_mode,
         )
+    except PolicyError as exc:
+        # An invalid or incompatible combination of options is a command
+        # configuration error (2), not a failure of verification infrastructure.
+        sys.stderr.write(f"invalid configuration: {exc}\n")
+        return 2
+    try:
         result = verify(env, policy)
-    except (PolicyError, VerificationUnavailable) as exc:
+    except VerificationUnavailable as exc:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
 
@@ -325,7 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
         "verify",
         help="Verify an audit envelope (exit 0 only if accepted; see --help epilog).",
         epilog="Exit codes: 0 accepted; 1 refused by policy (including SELF_SIGNED_ONLY); "
-        "2 invalid input or usage; 3 verification infrastructure unavailable or invalid.",
+        "2 invalid input, usage or incompatible options; 3 a specified trust or verification "
+        "resource is unavailable or unusable.",
     )
     verify_p.add_argument("--input", "-i", required=True, help="Audit envelope JSON to verify")
     verify_p.add_argument(

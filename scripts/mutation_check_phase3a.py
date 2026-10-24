@@ -540,6 +540,12 @@ MUTANTS = [
         "            if False:",
     ),
     Mutant(
+        "X02 incompatible options exit 3 instead of 2",
+        C,
+        '        sys.stderr.write(f"invalid configuration: {exc}\\n")\n        return 2',
+        '        sys.stderr.write(f"invalid configuration: {exc}\\n")\n        return 3',
+    ),
+    Mutant(
         "P05 naive times accepted by the replay store",
         RP,
         "    if moment.tzinfo is None or moment.utcoffset() is None:",

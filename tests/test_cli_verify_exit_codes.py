@@ -274,13 +274,15 @@ def test_exit_3_unusable_replay_store(tmp_path, signer):
 
 
 @pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
-def test_exit_3_dev_flag_is_refused_outside_development(tmp_path, signer, profile):
+def test_exit_2_dev_flag_is_a_usage_error_outside_development(tmp_path, signer, profile):
+    """An incompatible flag combination is command misconfiguration (2), not an
+    infrastructure failure (3)."""
     p = run("-i", _v2_file(tmp_path, signer), "--allow-self-signed", "--profile", profile)
-    assert p.returncode == 3 and p.stdout == ""
-    assert "development" in p.stderr
+    assert p.returncode == 2 and p.stdout == ""
+    assert "development" in p.stderr and "Traceback" not in p.stderr
 
 
-def test_exit_3_production_profile_needs_its_infrastructure(tmp_path, signer):
+def test_exit_2_production_profile_with_missing_required_options(tmp_path, signer):
     report, store = _v2_file(tmp_path, signer), _store_file(tmp_path, signer)
     db = str(tmp_path / "r.db")
     ok = run(
@@ -288,11 +290,38 @@ def test_exit_3_production_profile_needs_its_infrastructure(tmp_path, signer):
         "--max-age-seconds", "3600", "--replay-db", db, "--replay-mode", "record",
     )  # fmt: skip
     assert ok.returncode == 0, ok.stderr
+    other = _v2_file(tmp_path, signer, "r2.json")
     missing_max_age = run(
-        "-i", _v2_file(tmp_path, signer, "r2.json"), "--trusted-keys", store,
-        "--profile", "confidential", "--replay-db", db, "--replay-mode", "record",
+        "-i", other, "--trusted-keys", store, "--profile", "confidential",
+        "--replay-db", db, "--replay-mode", "record",
     )  # fmt: skip
-    assert missing_max_age.returncode == 3 and missing_max_age.stdout == ""
+    assert missing_max_age.returncode == 2 and missing_max_age.stdout == ""
+    assert "max_age" in missing_max_age.stderr
+    missing_replay = run(
+        "-i", other, "--trusted-keys", store, "--profile", "confidential",
+        "--max-age-seconds", "3600",
+    )  # fmt: skip
+    assert missing_replay.returncode == 2 and missing_replay.stdout == ""
+    high = run(
+        "-i", other, "--trusted-keys", store, "--profile", "high-assurance",
+        "--max-age-seconds", "3600", "--replay-db", db, "--replay-mode", "record",
+    )  # fmt: skip
+    assert high.returncode == 2 and "verifier_id" in high.stderr  # needs --verifier-id
+
+
+def test_unusable_trust_and_replay_resources_still_exit_3_in_a_valid_configuration(
+    tmp_path, signer
+):
+    """The distinction: a VALID configuration whose required resource cannot be used is 3."""
+    report = _v2_file(tmp_path, signer)
+    valid_flags = ("--profile", "confidential", "--max-age-seconds", "3600",
+                   "--replay-mode", "record")  # fmt: skip
+    missing_store = run("-i", report, "--trusted-keys", str(tmp_path / "gone.json"), *valid_flags,
+                        "--replay-db", str(tmp_path / "r.db"))  # fmt: skip
+    assert missing_store.returncode == 3 and missing_store.stdout == ""
+    unusable_replay = run("-i", report, "--trusted-keys", _store_file(tmp_path, signer), *valid_flags,
+                          "--replay-db", str(tmp_path))  # fmt: skip
+    assert unusable_replay.returncode == 3 and unusable_replay.stdout == ""
 
 
 # ---------------------------------------------------------------------------

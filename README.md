@@ -277,8 +277,8 @@ configured policy:
 | ---- | ------- |
 | `0` | accepted (`trust_status: TRUSTED`) |
 | `1` | well-formed report refused by policy, including `SELF_SIGNED_ONLY`, a revoked/compromised issuer, a stale or replayed report (the JSON names the `reason`) |
-| `2` | invalid input or usage, including running with neither `--trusted-keys` nor `--allow-self-signed` |
-| `3` | verification infrastructure unavailable or invalid (unreadable/malformed trust store, unusable replay store, unsafe profile settings) |
+| `2` | invalid input, command usage or an incompatible combination of options: a malformed report, running with neither `--trusted-keys` nor `--allow-self-signed`, `--allow-self-signed` with a non-development profile, a `confidential`/`high-assurance` profile without its required options (`--max-age-seconds`, replay options, `--verifier-id`) |
+| `3` | a required trust or verification resource that **was specified** is unavailable or unusable: an unreadable, malformed or empty `--trusted-keys`, an unusable `--replay-db`, or a replay store that fails while verifying outside development |
 
 `--allow-self-signed` is a development-only integrity check: it can report
 `SELF_SIGNED_ONLY` but never accepts a report, and is refused outside the

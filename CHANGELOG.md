@@ -76,8 +76,10 @@ high-assurance historical acceptance are deliberately not implemented.
 ### Changed (breaking, deliberate)
 
 - **`regaudit-fhe verify` exit codes**: `0` accepted, `1` refused by policy
-  (including `SELF_SIGNED_ONLY`), `2` invalid input or usage, `3` verification
-  infrastructure unavailable or invalid. Two behaviours change:
+  (including `SELF_SIGNED_ONLY`), `2` invalid input, usage or incompatible options
+  (e.g. `--allow-self-signed` with a non-development profile, or a production
+  profile without its required options), `3` a specified trust or replay resource
+  that is unavailable or unusable. Two behaviours change:
   a consistent self-signed report used to exit `0` and now exits `1`; an
   unreadable or malformed `--trusted-keys` file used to exit `2` and now exits
   `3`. Running without `--trusted-keys` and without `--allow-self-signed` is a

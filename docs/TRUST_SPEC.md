@@ -669,8 +669,8 @@ one function, called by every entry point.
    |---|---|
    | Accepted under the configured trust policy | `0` |
    | Well-formed report refused by policy (`SELF_SIGNED_ONLY`, revoked, compromised, stale, replayed, ...) | `1` |
-   | Invalid input, malformed report, or usage error, including omitting `--trusted-keys` when it is required (and not using `--allow-self-signed`) | `2` |
-   | Required verification infrastructure unavailable or invalidly configured: `--trusted-keys` **was supplied** (even as an empty value) but the file is missing, unreadable, malformed or inconsistent; the anchor is unavailable; replay state is unavailable; the policy is unsafe | `3` |
+   | Invalid input, malformed report, command usage or **incompatible configuration**: omitting `--trusted-keys` when it is required (and not using `--allow-self-signed`); `--allow-self-signed` with a non-development profile; a production profile without its required options (`max_age`, replay options, `verifier_id`); other conflicting or invalid option combinations | `2` |
+   | Required verification infrastructure unavailable or invalidly configured: `--trusted-keys` **was supplied** (even as an empty value) but the file is missing, unreadable, malformed or inconsistent; the anchor is unavailable; replay state is unavailable | `3` |
 
    An explicit development-only integrity check (`--allow-self-signed`) MAY
    print `integrity_valid: true` and `trust_status: SELF_SIGNED_ONLY`, but
@@ -680,6 +680,11 @@ one function, called by every entry point.
    the actual exit status and the stdout/stderr content for each row,
    including both changed behaviours below. README and CHANGELOG MUST record
    them.
+
+   **Where the line is drawn.** An invalid configuration discovered when the command
+   starts is a usage/configuration error (`2`); an otherwise valid configuration whose
+   required, *specified* trust or replay resource cannot be loaded or used is an
+   infrastructure failure (`3`). **Owner decision (final).**
 
    **Precedence and replay.** If several errors apply, input errors (`2`) are
    reported before infrastructure errors (`3`). A replay store that cannot be
