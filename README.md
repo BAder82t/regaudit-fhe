@@ -13,16 +13,24 @@ is opt-in via the `[openfhe]` extra and covers five of the six
 primitives. The OpenFHE library itself is a third-party dependency
 installed by that extra, not vendored in this repository.
 
-**Signed evidence and trust.** Audit results are wrapped in Ed25519-signed
-envelopes. `report.v1` is still produced by `regaudit-fhe audit` and remains
-verifiable; `report.v2` (library API) signs the full issuer, key, deployment and
-audit-run identity under a domain-separated signature. Both are checked by one
-shared verification policy that separates *integrity* from *issuer trust*
-(`TRUSTED` / `SELF_SIGNED_ONLY` / `INVALID`) and refuses configurations it cannot
-support. This trust core is a **candidate, not production readiness**: see
-[What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated),
-the [trust specification](docs/TRUST_SPEC.md), and the
-[changelog](CHANGELOG.md) for the intentional breaking changes.
+## At a glance
+
+* **What it does:** runs six regulatory audit calculations (fairness, provenance,
+  concordance, calibration, drift, disagreement) that can work on *encrypted* data,
+  and wraps each result in a **signed report** (an "envelope") that a regulator can
+  check.
+* **Who it is for:** a company that must show evidence to a regulator without handing
+  over raw data, and the regulator or auditor who verifies that evidence.
+* **What you get from verification:** a clear answer, `TRUSTED`, `SELF_SIGNED_ONLY`
+  or `INVALID`, that separates *"the file is intact"* from *"a key I approved signed it"*.
+* **Status:** a reference implementation. The verification ("trust") core is a
+  **candidate, not production readiness**. The [last section](#production--regulator-readiness--what-is-and-isnt-validated)
+  lists plainly what is and is not validated.
+
+**Jump to:** [Install](#install) · [Quick start](#quick-start) ·
+[How a report becomes trusted](#how-a-report-becomes-trusted-in-plain-english) ·
+[Command line](#same-flow-command-line) · [What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated) ·
+[Trust specification](docs/TRUST_SPEC.md) · [Changelog](CHANGELOG.md)
 
 [![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
@@ -95,7 +103,8 @@ recomputes the receipt to detect tampering between issuance and review.
 > for the binding scope statement and the
 > "what-it-does-NOT-prove" mapping per regulation.
 
-### Three different depth numbers — do not mix them
+<details>
+<summary><strong>Technical detail: the three different "depth" numbers (spec, declared, observed)</strong></summary>
 
 | Term                  | Meaning                                                                 | Where it lives                                                    |
 | --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -127,6 +136,8 @@ Each ▮ = 1 consumed level (observed). "decl" = TenSEAL declared ceiling;
     audit_disagreement    ▮ ▮ ▮ . . .      3       5     5
     audit_concordance     ▮ ▮ ▮ ▮ ▮ .      5       5     4
 ```
+
+</details>
 
 Each primitive's full specification, including its algorithm, depth
 breakdown, and security analysis, is in
@@ -172,11 +183,27 @@ envelope = rf.envelope("fairness", report, signer=signer)
 print(envelope.to_json())                     # ship this to the regulator
 ```
 
-### Regulator side — verify with the shared policy (recommended)
+### How a report becomes trusted (in plain English)
 
-A verifier needs **trust material** it provisioned itself. The `entries` form of
-the trust store records, per key, the issuer name, status (`active`, `retired`,
-`compromised`), validity start and optional deployment / primitive scope:
+1. **The client signs.** The audited company runs an audit and signs the result with
+   its private key. The result is a JSON file called an *envelope*.
+2. **The regulator keeps its own list of approved keys**, called the *trust store*.
+   The list belongs to the regulator; a report cannot add itself to it.
+3. **The verifier checks the report against that list** and answers with exactly one
+   of three words:
+
+| Answer | In plain words | What to do |
+| --- | --- | --- |
+| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Accept it. |
+| `SELF_SIGNED_ONLY` | It has not been altered, but you gave no list of approved keys, so you cannot tell who signed it. | Do not rely on it. Useful only for development checks. |
+| `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
+
+Everything else in this section is detail layered on that one idea.
+
+### Regulator side — verify a report (recommended)
+
+**Step 1. Write down which keys you approve.** Each key records who it belongs to,
+whether it is still active, and optionally where it may be used:
 
 ```json
 {
@@ -193,43 +220,52 @@ the trust store records, per key, the issuer name, status (`active`, `retired`,
 }
 ```
 
-One public key may be registered under one `key_id` only, and every key must be
-Ed25519. The older flat form (`keys` / `revoked` / `parameter_set_pins`) is still
-accepted.
+A key can be listed under one name only, and it must be an Ed25519 key. (The older
+flat format with `keys` / `revoked` / `parameter_set_pins` still works.)
+
+**Step 2. Verify.**
 
 ```python
 import regaudit_fhe as rf
 
-trust_store = rf.TrustStore.from_json("trust_store.json")   # fails closed if unusable
+trust_store = rf.TrustStore.from_json("trust_store.json")   # refuses to load if unusable
 policy = rf.VerificationPolicy(trust_store=trust_store, verifier_id="regulator-a")
 
-env = rf.parse_envelope(received_text)       # dispatches on `schema`; v1 or v2; strict JSON
+env = rf.parse_envelope(received_text)       # reads v1 or v2; rejects malformed JSON
 result = rf.verify_report(env, policy)
 
-if result.accepted:                          # the authoritative decision
+if result.accepted:                          # the single yes/no decision
     print("trusted:", result.issuer, result.key_id)
 else:
-    print(result.trust_status, result.blocking_reasons)   # e.g. ["ISSUER_UNKNOWN"]
+    print(result.trust_status, result.blocking_reasons)   # e.g. INVALID ['ISSUER_UNKNOWN']
 ```
 
-`result.accepted` is true only for `trust_status == "TRUSTED"`. The result also
-reports `integrity_valid`, `issuer_trusted`, `key_status`, `chronology`,
-`timestamp_status`, `reasons` (everything noted) and `blocking_reasons` (what
-caused a refusal). Branch on `accepted` / `trust_status`, never on `valid`, which
-is deprecated (see below).
+Use `result.accepted` (or `result.trust_status`). Do not use `valid`; it is deprecated
+and, without a trust store, only means "the file is intact".
 
-**The result statuses**
+<details>
+<summary><strong>What else the result tells you</strong></summary>
 
-| `trust_status` | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `TRUSTED` | Integrity holds, the issuer is registered, in scope and not revoked, the signature verifies under the **registered** key, and every policy rule passed. |
-| `SELF_SIGNED_ONLY` | Integrity holds but no trust material was supplied, so the issuer is unauthenticated. Never accepted. |
-| `INVALID` | Integrity, issuer, scope, key status, timestamp, freshness, audience or replay rule failed. |
+| `accepted` | The final decision. True only when `trust_status` is `TRUSTED`. |
+| `integrity_valid` | The hash and signature are consistent (checked against *your* registered key). |
+| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name matches. |
+| `key_status` | `active`, `retired`, `compromised`, `revoked`, `unknown` or `none`. |
+| `chronology` / `timestamp_status` | How well the signing time is established (see the rules below). |
+| `blocking_reasons` | The codes that caused a refusal (for example `ISSUER_UNKNOWN`, `REPORT_TOO_OLD`). |
+| `reasons` | Everything noted, including informational labels such as `LEGACY_V1_FORMAT`. |
+| `consumption`, `replay_scope`, `replay_durable` | What the local replay check did (see the rules below). |
+
+</details>
 
 ### Client side — `report.v2` (candidate)
 
+`report.v2` signs more of the report's identity than `report.v1`: the issuer, key id
+and fingerprint, deployment, a unique run id, and the intended audience.
+
 ```python
-signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")   # KMS/HSM in production
+signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")   # a KMS/HSM in production
 env = rf.envelope_v2(
     "fairness", report, signer=signer,
     deployment_id="prod-eu-1", audience=["regulator-a"],
@@ -237,40 +273,42 @@ env = rf.envelope_v2(
 print(env.to_json())
 ```
 
-`report.v2` signs the issuer, `key_id`, key fingerprint, `deployment_id`, a unique
-`audit_run_id`, the optional `audience` and optional model / dataset commitments.
-Unknown fields, duplicate JSON keys, `NaN`, non-canonical base64 and loose
-timestamps are refused. There is no ephemeral-signer default.
+There is no default signer: you must name the key. Unknown fields, duplicate JSON keys,
+`NaN`, non-canonical base64 and loose timestamps are refused.
 
-### Verification policy, profiles and replay
+<details>
+<summary><strong>The rules in short (profiles, replay, key lifecycle, timestamps, v1)</strong></summary>
 
-`VerificationPolicy` is enforced identically by the library, the CLI, the HTTP
-server and `build_app()`. Profiles (`development`, `confidential`,
-`high-assurance`) tighten it: a production profile requires a trust store,
-`max_age` and a persistent replay cache, and refuses development options.
+`VerificationPolicy` is applied the same way by the library, the CLI, the HTTP server
+and `build_app()`. A *profile* (`development`, `confidential`, `high-assurance`) makes
+it stricter: production profiles require a trust store, a maximum report age and a
+persistent replay cache, and refuse development-only options.
 
 * **Replay detection is local.** `consumption` is `NOT_CHECKED`,
-  `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL` (recorded in this verifier's store at
-  verification time, with no proof the authorised operation completed), and
-  `replay_durable` says whether that record survives a restart. It is never global
-  single-use protection or an exactly-once guarantee.
-* **Key lifecycle.** A retired or compromised key is accepted historically only
-  with authenticated chronology *and* an authenticated trust history. **This
-  release cannot authenticate a trust history, so such reports are refused by
-  default.** Both boundaries are strict: the latest possible signing time must be
-  **strictly earlier** than the retirement or compromise time, so equality is refused, and an unknown compromise
-  boundary refuses everything the key signed.
+  `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL`. `RECORDED_LOCAL` means "recorded in this
+  verifier's own store at verification time"; it does not prove the authorised operation
+  completed. `replay_durable` says whether that record survives a restart. It is never
+  global single-use protection or an exactly-once guarantee.
+* **Retired or compromised keys.** They are accepted for historical reports only with
+  authenticated chronology *and* an authenticated trust history. **This release cannot
+  authenticate a trust history, so such reports are refused by default.** Both
+  boundaries are strict: the latest possible signing time must be **strictly earlier**
+  than the retirement or compromise time, so equality is refused. If the compromise
+  time is unknown, everything that key signed is refused.
 * **Required timestamps** need authenticated evidence from a verifier *you* pin
-  (`timestamp_verifier=`); an absent timestamp never satisfies the requirement and
-  no timestamp authority is bundled. A verified timestamp is **not** proof of
-  non-revocation.
-* **`report.v1`** is verified over its original bytes but is refused under the
-  `confidential` and `high-assurance` profiles (it has no signed `audit_run_id`).
+  (`timestamp_verifier=`). A missing timestamp never satisfies the requirement, and no
+  timestamp authority is bundled or trusted by default. A verified timestamp is
+  **not** proof the key was never revoked.
+* **`report.v1`** is still verified over its original bytes, but it is refused in the
+  `confidential` and `high-assurance` profiles because it has no signed run id.
 
-### Legacy verification API (`report.v1`)
+</details>
 
-The earlier functions remain and enforce the same key scope for `report.v1`, but
-return the legacy `VerificationOutcome`:
+<details>
+<summary><strong>Older API for <code>report.v1</code> (still supported)</strong></summary>
+
+These functions enforce the same key scope for `report.v1` but return the older
+`VerificationOutcome`:
 
 ```python
 trust_store = rf.TrustStore.from_json("trust_store.json")
@@ -292,33 +330,32 @@ except rf.TimestampInvalid:       # an attached timestamp failed validation
 # All subclass rf.EnvelopeVerificationError.
 ```
 
-> **`verify_receipt(env)` with no trust material** only checks that the hash and the
-> embedded signature are self-consistent. That proves the bytes did not change in
-> transit; it does **not** prove an approved auditor produced them, and it emits a
-> one-time `UserWarning`. Pass `trust_store=` (recommended; it enforces revocation,
-> pins and scope) or `trusted_keys=` (registration only). An empty `trusted_keys={}`
-> trusts nobody.
->
-> **`valid` is deprecated and is not a provenance claim.** Without trust material
-> `valid: true` means only that the hash and embedded signature agree. It is kept
-> through the first `report.v2` release (reading it emits a `DeprecationWarning`);
-> use `accepted` / `trust_status`.
->
-> **A `report.v1` timestamp is not proof of non-revocation**: it covers the signed
-> body only, not the signature or key, and sits outside the signature. An attached
-> timestamp is `UNVERIFIED` unless a verifier validates it, and v1 timestamps can
-> never satisfy a required-timestamp policy. See [docs/TRUST_SPEC.md](docs/TRUST_SPEC.md) §5.4.
+* `verify_receipt(env)` with no trust material only checks that the hash and embedded
+  signature agree. That proves the bytes did not change; it does **not** prove an
+  approved auditor produced them, and it emits a one-time `UserWarning`. Pass
+  `trust_store=` (recommended: it enforces revocation, pins and scope) or
+  `trusted_keys=` (registration only). An empty `trusted_keys={}` trusts nobody.
+* `valid` is deprecated and kept through the first `report.v2` release; reading it
+  emits a `DeprecationWarning`.
+* A `report.v1` timestamp is **not** proof of non-revocation: it covers the body only,
+  not the signature or key, so it can never satisfy a required-timestamp policy.
+  See [docs/TRUST_SPEC.md](docs/TRUST_SPEC.md) §5.4.
 
-### HTTP verification
+</details>
+
+<details>
+<summary><strong>Verifying over HTTP</strong></summary>
 
 `POST /v1/verify` takes exactly `{"envelope": ...}` and **fails closed**: it needs
-`REGAUDIT_FHE_TRUST_STORE` (or `serve --trust-store`) and returns 503 otherwise
-(and 503 if the replay store is unavailable outside development). It parses the
-body strictly, bounds chunked uploads, and returns the fields above, including
-`accepted` and a `valid` alias equal to it. `serve --allow-self-signed` is a
-development-only option that can report `SELF_SIGNED_ONLY` but never `TRUSTED`;
-it is refused outside the development profile, over non-loopback or Unix-socket
-transports, and behind forwarding headers. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+`REGAUDIT_FHE_TRUST_STORE` (or `serve --trust-store`) and returns 503 otherwise, and
+also 503 if the replay store is unavailable outside development. It parses the body
+strictly, bounds chunked uploads, and returns the fields above (with `valid` as an alias
+of `accepted`). `serve --allow-self-signed` is a development-only option that can report
+`SELF_SIGNED_ONLY` but never `TRUSTED`; it is refused outside the development profile,
+over non-loopback or Unix-socket transports, and behind forwarding headers. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+</details>
 
 ### Same flow, command line
 
@@ -592,6 +629,10 @@ the top of this README reflects the latest result.
 ---
 
 ## Production / regulator readiness — what is and isn't validated
+
+**In short:** the library is ready to *evaluate and integrate*. It is not a finished
+compliance product, and the verification core is a candidate. The tables below say
+exactly what is checked automatically, what is only partly done, and what is not provided.
 
 > The release gate above guarantees the package builds, imports,
 > exposes the documented CLI / API, and passes its test suite. That
