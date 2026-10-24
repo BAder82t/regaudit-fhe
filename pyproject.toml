@@ -96,6 +96,12 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = ["-q", "--strict-markers", "--strict-config"]
+# `valid` is deliberately deprecated but still exercised by the compatibility tests;
+# tests that assert the warning use pytest.warns, which overrides this filter.
+filterwarnings = [
+  "ignore:VerificationOutcome.valid is deprecated:DeprecationWarning",
+  "ignore:VerificationResult.valid is deprecated:DeprecationWarning",
+]
 testpaths = ["tests"]
 
 [tool.coverage.run]

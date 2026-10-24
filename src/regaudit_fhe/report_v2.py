@@ -502,13 +502,22 @@ def envelope_v2(
         body["dataset_commitment"] = dict(dataset_commitment)
     if dp is not None:
         body["dp"] = _to_jsonable(dict(dp))
-    # Normalise to plain JSON types (tuples -> lists, numpy -> python) so that
-    # to_dict()/from_dict() round-trip exactly and the signed bytes are stable.
-    body = json.loads(canonical_bytes(_to_jsonable(body)))
+    return sign_body_v2(body, signer)
 
+
+def sign_body_v2(body: Mapping[str, Any], signer: KeyProvider) -> AuditEnvelopeV2:
+    """Sign an assembled v2 signed body and return the envelope.
+
+    The body is normalised to plain JSON types (tuples -> lists, numpy ->
+    python) so that ``to_dict()``/``from_dict()`` round-trip exactly and the
+    signed bytes are stable, then parsed strictly, so this cannot emit an
+    envelope the verifier would refuse to read. Used by :func:`envelope_v2`
+    and by the canonical test vectors.
+    """
+    plain = json.loads(canonical_bytes(_to_jsonable(dict(body))))
     unsigned = AuditEnvelopeV2.from_dict(
         {
-            **body,
+            **plain,
             "receipt": {
                 "sha256": "0" * 64,
                 "signature_alg": SIGNATURE_ALG,

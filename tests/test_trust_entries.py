@@ -222,3 +222,14 @@ def test_pem_must_parse_as_an_ed25519_public_key():
     )
     with pytest.raises(TrustStoreError, match="Ed25519"):
         TrustStore.from_dict({"entries": {"k1": _entry(s, public_key_pem=ec_pem)}})
+
+
+def test_trust_store_file_size_and_nesting_are_bounded(tmp_path: Path):
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100000 + "]" * 100000)
+    with pytest.raises(TrustStoreError):
+        TrustStore.from_json(deep)
+    big = tmp_path / "big.json"
+    big.write_text('{"entries": {"k": "' + "a" * (5 * 1024 * 1024) + '"}}')
+    with pytest.raises(TrustStoreError, match="size"):
+        TrustStore.from_json(big)

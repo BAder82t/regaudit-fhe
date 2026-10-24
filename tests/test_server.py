@@ -10,6 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from regaudit_fhe.server import ServerConfig, build_app
+from tests._asgi import client_for
 
 
 def _dev_config(**overrides) -> ServerConfig:
@@ -30,7 +31,7 @@ def client() -> TestClient:
     # allow_self_signed: the audit endpoint signs with an ephemeral issuer
     # that no trust store can register, so /v1/verify can only report
     # SELF_SIGNED_ONLY here. Trusted verification is covered in test_server_trust.
-    return TestClient(build_app(config=_dev_config(allow_self_signed=True)))
+    return client_for(build_app(config=_dev_config(allow_self_signed=True)))
 
 
 def test_healthz(client: TestClient) -> None:

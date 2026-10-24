@@ -81,6 +81,7 @@ def _normalise_pem(pem: str) -> str:
     return pem.strip().replace("\r\n", "\n")
 
 
+MAX_TRUST_STORE_BYTES = 4 * 1024 * 1024
 _STATUSES = ("active", "retired", "compromised")
 _PRIMITIVE_NAMES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
 _ENTRY_KEYS = frozenset(
@@ -303,6 +304,11 @@ class TrustStore:
     def from_json(cls, path: str | Path) -> TrustStore:
         """Load a TrustStore from a JSON file."""
         try:
+            size = Path(path).stat().st_size
+            if size > MAX_TRUST_STORE_BYTES:
+                raise TrustStoreError(
+                    f"trust-store {str(path)!r} size {size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
+                )
             body = Path(path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
@@ -310,6 +316,8 @@ class TrustStore:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
             raise TrustStoreError(f"trust-store {str(path)!r} is not valid JSON: {exc}") from exc
+        except RecursionError as exc:
+            raise TrustStoreError(f"trust-store {str(path)!r} is nested too deeply") from exc
         if not isinstance(payload, Mapping):
             raise TrustStoreError(f"trust-store {str(path)!r} must be a JSON object")
         return cls.from_dict(payload)

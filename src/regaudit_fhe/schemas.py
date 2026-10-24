@@ -64,6 +64,8 @@ def load_schema(name: str) -> dict[str, Any]:
     """
     if name == "envelope":
         path = _schemas_dir() / "envelope.schema.json"
+    elif name == "envelope.v2":
+        path = _schemas_dir() / "envelope.v2.schema.json"
     elif "." in name:
         primitive, direction = name.split(".", 1)
         if primitive not in PRIMITIVES or direction not in DIRECTIONS:
@@ -76,7 +78,7 @@ def load_schema(name: str) -> dict[str, Any]:
 
 
 def list_schemas() -> tuple[str, ...]:
-    out = ["envelope"]
+    out = ["envelope", "envelope.v2"]
     for p in PRIMITIVES:
         for d in DIRECTIONS:
             out.append(f"{p}.{d}")
@@ -108,3 +110,8 @@ def validate_output(primitive: str, payload: Mapping[str, Any]) -> None:
 
 def validate_envelope(payload: Mapping[str, Any]) -> None:
     validate("envelope", payload)
+
+
+def validate_envelope_v2(payload: Mapping[str, Any]) -> None:
+    """Validate a ``regaudit-fhe.report.v2`` envelope against its JSON Schema."""
+    validate("envelope.v2", payload)

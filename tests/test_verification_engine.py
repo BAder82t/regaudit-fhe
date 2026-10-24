@@ -898,3 +898,54 @@ def test_accepted_is_true_only_for_trusted():
     for r in cases:
         assert r.accepted == (r.trust_status == "TRUSTED")
     assert [r.trust_status for r in cases] == ["TRUSTED", "SELF_SIGNED_ONLY", "INVALID"]
+
+
+# ---------------------------------------------------------------------------
+# Security review findings (round 2)
+# ---------------------------------------------------------------------------
+
+
+def test_unparseable_issued_at_is_refused_even_without_max_age():
+    s = _signer()
+    v1 = rf.envelope("fairness", _report(), signer=s)
+    store = _store(s, not_before=(ISSUED - timedelta(days=400)).isoformat())
+    assert verify(v1, _policy(store, now=lambda: datetime.now(UTC))).accepted  # control
+    v1.issued_at = "garbage"
+    r = verify(v1, _policy(store, now=lambda: datetime.now(UTC)))
+    assert r.trust_status == "INVALID" and "MALFORMED_ENVELOPE" in _reasons(r)
+
+
+def test_replay_enabled_implies_a_maximum_age_so_ids_cannot_outlive_their_retention():
+    s = _signer()
+    cache = InMemoryReplayCache()
+    p = _policy(_store(s), replay_mode="record", replay_cache=cache)  # no explicit max_age
+    assert verify(_v2(s, issued_at=NOW - timedelta(days=29)), p).accepted  # control
+    r = verify(_v2(s, issued_at=NOW - timedelta(days=40)), p)
+    assert r.trust_status == "INVALID" and "REPORT_TOO_OLD" in _reasons(r)
+
+
+def test_replay_retention_covers_a_future_dated_report_to_the_last_instant():
+    s = _signer()
+    cache = InMemoryReplayCache()
+    skew = timedelta(minutes=5)
+    max_age = timedelta(days=1)
+    p = _policy(
+        _store(s), replay_mode="record", replay_cache=cache, max_age=max_age, clock_skew=skew
+    )
+    env = _v2(s, issued_at=NOW + skew)  # as far in the future as is tolerated
+    assert verify(env, p).accepted
+    # the instant the report stops being fresh, the id must still be remembered
+    last_fresh = NOW + skew + max_age
+    assert cache.seen("acme-1", env.audit_run_id, now=last_fresh)
+
+
+def test_chronology_is_not_reported_for_an_unauthenticated_issuer():
+    s = _signer()
+    other = _signer("unknown-key")
+    verifier, attach = _tsa(NOW - HOUR)
+    env = attach(_v2(other))
+    r = verify(env, _policy(_store(s), timestamp_verifier=verifier))
+    assert r.trust_status == "INVALID" and "ISSUER_UNKNOWN" in _reasons(r)
+    assert r.chronology == "NONE" and r.signed_not_after is None
+    ok = verify(attach(_v2(s)), _policy(_store(s), timestamp_verifier=verifier))
+    assert ok.chronology == "AUTHENTICATED" and ok.signed_not_after is not None  # control

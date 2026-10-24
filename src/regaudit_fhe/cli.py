@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +33,19 @@ from . import (
     audit_fairness,
     audit_provenance,
 )
-from .reports import AuditEnvelope, envelope, verify_envelope_or_raise, verify_receipt
+from .canonical import MAX_INPUT_BYTES, CanonicalError
+from .replay import ReplayStateError, SqliteReplayCache
+from .report_v2 import EnvelopeFormatError, parse_envelope
+from .reports import AuditEnvelope, envelope
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
-from .trust import EnvelopeVerificationError, TrustStore, TrustStoreError
+from .trust import TrustStore, TrustStoreError
+from .verification import (
+    PROFILES,
+    PolicyError,
+    VerificationPolicy,
+    VerificationUnavailable,
+    verify,
+)
 
 PRIMITIVES = {
     "fairness",
@@ -198,9 +210,43 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _positive_seconds(text: str) -> float:
+    """argparse type: a positive, finite number of seconds that fits a timedelta."""
+    try:
+        value = float(text)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError
+        timedelta(seconds=value)
+    except (ValueError, OverflowError):
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not a positive, finite number of seconds"
+        ) from None
+    return value
+
+
+def _read_report(path: str) -> bytes:
+    size = Path(path).stat().st_size
+    if size > MAX_INPUT_BYTES:
+        raise OSError(f"{size} bytes exceeds the {MAX_INPUT_BYTES}-byte limit")
+    return Path(path).read_bytes()
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
-    body = json.loads(Path(args.input).read_text())
-    env = AuditEnvelope.from_dict(body)
+    """Exit 0 only if the report is accepted under the selected policy.
+
+    0 accepted | 1 well-formed report refused by policy (including
+    SELF_SIGNED_ONLY) | 2 invalid input or usage | 3 required verification
+    infrastructure unavailable or invalidly configured. stdout carries the
+    JSON verdict for exit 0 and 1 only.
+    """
+    try:
+        env = parse_envelope(_read_report(args.input))
+    except OSError as exc:
+        sys.stderr.write(f"cannot read {args.input!r}: {exc}\n")
+        return 2
+    except (CanonicalError, EnvelopeFormatError) as exc:
+        sys.stderr.write(f"malformed report: {exc}\n")
+        return 2
 
     trust_store: TrustStore | None = None
     if args.trusted_keys:
@@ -208,63 +254,50 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             trust_store = TrustStore.from_json(args.trusted_keys)
         except TrustStoreError as exc:
             sys.stderr.write(f"--trusted-keys: {exc}\n")
-            return 2
-
-    if trust_store is not None:
-        try:
-            outcome = verify_envelope_or_raise(env, trust_store=trust_store)
-        except EnvelopeVerificationError as exc:
-            print(
-                json.dumps(
-                    {
-                        "valid": False,
-                        "reason": type(exc).__name__,
-                        "detail": str(exc),
-                        "primitive": env.primitive,
-                        "issued_at": env.issued_at,
-                        "regulations": env.regulations,
-                        "trust_status": "INVALID",
-                        "trusted_issuer": False,
-                    },
-                    indent=2,
-                )
-            )
-            return 1
-        print(
-            json.dumps(
-                {
-                    "valid": True,
-                    "primitive": env.primitive,
-                    "issued_at": env.issued_at,
-                    "regulations": env.regulations,
-                    "trust_status": outcome.trust_status,
-                    "timestamp_status": outcome.timestamp_status,
-                    "trusted_issuer": True,
-                },
-                indent=2,
-            )
+            return 3
+    if trust_store is None and not args.allow_self_signed:
+        sys.stderr.write(
+            "no trust material: pass --trusted-keys to authenticate the issuer, or "
+            "--allow-self-signed for a development-only integrity check "
+            "(which can never accept a report).\n"
         )
-        return 0
-
-    if args.strict:
-        sys.stderr.write("--strict requires --trusted-keys to authenticate the issuer.\n")
         return 2
 
-    ok = verify_receipt(env)
-    print(
-        json.dumps(
-            {
-                "valid": ok,
-                "primitive": env.primitive,
-                "issued_at": env.issued_at,
-                "regulations": env.regulations,
-                "trust_status": "SELF_SIGNED_ONLY" if ok else "INVALID",
-                "trusted_issuer": False,
-            },
-            indent=2,
+    replay_cache: SqliteReplayCache | None = None
+    if args.replay_mode != "off":
+        if not args.replay_db:
+            sys.stderr.write("--replay-mode requires --replay-db\n")
+            return 2
+        try:
+            replay_cache = SqliteReplayCache(args.replay_db)
+        except ReplayStateError as exc:
+            sys.stderr.write(f"--replay-db: {exc}\n")
+            return 3
+
+    try:
+        policy = VerificationPolicy(
+            profile=args.profile,
+            trust_store=trust_store,
+            allow_self_signed=args.allow_self_signed,
+            allow_legacy_v1=False if args.refuse_legacy_v1 else None,
+            verifier_id=args.verifier_id,
+            max_age=timedelta(seconds=args.max_age_seconds) if args.max_age_seconds else None,
+            replay_cache=replay_cache,
+            replay_mode=args.replay_mode,
         )
-    )
-    return 0 if ok else 1
+        result = verify(env, policy)
+    except (PolicyError, VerificationUnavailable) as exc:
+        sys.stderr.write(f"verification not possible: {exc}\n")
+        return 3
+
+    payload = result.to_dict()
+    payload["trusted_issuer"] = result.issuer_trusted
+    if not result.accepted:
+        payload["reason"] = (
+            result.blocking_reasons[0] if result.blocking_reasons else result.reasons[0]
+        )
+    print(json.dumps(payload, indent=2))
+    return 0 if result.accepted else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -283,21 +316,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.set_defaults(func=_cmd_audit)
 
-    verify = sub.add_parser("verify", help="Verify the receipt of an audit envelope.")
-    verify.add_argument("--input", "-i", required=True, help="Audit envelope JSON to verify")
-    verify.add_argument(
-        "--trusted-keys",
-        help="Path to JSON object mapping key_id -> PEM "
-        "public key. Required for issuer authentication.",
+    verify_p = sub.add_parser(
+        "verify",
+        help="Verify an audit envelope (exit 0 only if accepted; see --help epilog).",
+        epilog="Exit codes: 0 accepted; 1 refused by policy (including SELF_SIGNED_ONLY); "
+        "2 invalid input or usage; 3 verification infrastructure unavailable or invalid.",
     )
-    verify.add_argument(
+    verify_p.add_argument("--input", "-i", required=True, help="Audit envelope JSON to verify")
+    verify_p.add_argument(
+        "--trusted-keys",
+        help="Path to a TrustStore JSON (entries form, or the legacy keys/revoked/pins form). "
+        "Required to authenticate the issuer.",
+    )
+    verify_p.add_argument(
         "--strict",
         action="store_true",
-        help="Reject envelopes whose key_id is not in "
-        "--trusted-keys. Recommended for regulator-side "
-        "verifiers.",
+        help="Kept for compatibility: trust material is always required (see "
+        "--allow-self-signed for the development-only alternative).",
     )
-    verify.set_defaults(func=_cmd_verify)
+    verify_p.add_argument(
+        "--allow-self-signed",
+        action="store_true",
+        help="DEVELOPMENT ONLY. Check integrity without trust material. The result is "
+        "SELF_SIGNED_ONLY and the command exits 1, never 0. Ignored when --trusted-keys is "
+        "given; refused outside the development profile.",
+    )
+    verify_p.add_argument("--profile", choices=PROFILES, default="development")
+    verify_p.add_argument("--verifier-id", help="This verifier's audience identifier.")
+    verify_p.add_argument(
+        "--max-age-seconds",
+        type=_positive_seconds,
+        help="Refuse reports older than this many seconds.",
+    )
+    verify_p.add_argument("--replay-db", help="sqlite file for the local persistent replay cache.")
+    verify_p.add_argument(
+        "--replay-mode",
+        choices=("off", "check", "record"),
+        default="off",
+        help="Local replay detection. 'record' marks the report as seen in --replay-db "
+        "(local only; not a global single-use guarantee).",
+    )
+    verify_p.add_argument(
+        "--refuse-legacy-v1", action="store_true", help="Refuse report.v1 envelopes."
+    )
+    verify_p.set_defaults(func=_cmd_verify)
 
     serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")

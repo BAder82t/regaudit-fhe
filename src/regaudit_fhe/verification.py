@@ -211,6 +211,7 @@ class VerificationResult:
     signed_not_after: str | None
     timestamp_status: str
     reasons: tuple[str, ...]
+    blocking_reasons: tuple[str, ...]
     policy_id: str
     format: str
     replay_scope: str
@@ -249,6 +250,7 @@ class VerificationResult:
             "signed_not_after": self.signed_not_after,
             "timestamp_status": self.timestamp_status,
             "reasons": list(self.reasons),
+            "blocking_reasons": list(self.blocking_reasons),
             "policy_id": self.policy_id,
             "format": self.format,
             "replay_scope": self.replay_scope,
@@ -273,6 +275,15 @@ class VerificationResult:
 
 def _norm_pem(pem: str) -> str:
     return pem.strip().replace("\r\n", "\n")
+
+
+def _effective_max_age(policy: VerificationPolicy) -> timedelta | None:
+    """The explicit ``max_age`` or, when replay checking is on without one, the
+    replay retention: a report must never remain acceptable after the cache has
+    forgotten its identifier."""
+    if policy.max_age is not None:
+        return policy.max_age
+    return DEFAULT_RETENTION if policy.replay_mode != "off" else None
 
 
 def _aware_now(policy: VerificationPolicy) -> datetime:
@@ -416,6 +427,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         issued: datetime | None = parse_rfc3339(env.issued_at)
     except ValueError:
         issued = None
+        block("MALFORMED_ENVELOPE")  # an unreadable issue time cannot be reasoned about
     ts_status, evidence = _evaluate_timestamps(env, policy, now)
     if evidence is not None:
         chronology = CHRONOLOGY_AUTHENTICATED
@@ -455,6 +467,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             issuer_trusted=False,
             key_status="none",
             reasons=tuple(reasons),
+            blocking_reasons=tuple(blocking),
             replay_scope="NONE",
             consumption=CONSUMPTION_NOT_CHECKED,
             trust_history=_history_state(policy, now),
@@ -523,12 +536,11 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("AUDIENCE_MISMATCH")
     elif policy.profile == "high-assurance":
         block("AUDIENCE_MISMATCH")
-    if policy.max_age is not None:
-        if issued is None:
-            block("MALFORMED_ENVELOPE")
-        elif issued > now + policy.clock_skew:
+    max_age = _effective_max_age(policy)
+    if max_age is not None and issued is not None:
+        if issued > now + policy.clock_skew:
             block("REPORT_FROM_FUTURE")
-        elif now - issued > policy.max_age:
+        elif now - issued > max_age:
             block("REPORT_TOO_OLD")
 
     # ----- local replay (last: only a report that would be accepted counts) ---
@@ -540,6 +552,11 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         )
 
     accepted = not blocking and integrity_valid and issuer_trusted
+    if not issuer_trusted:
+        # Nothing about time is established for an artifact whose issuer is not
+        # authenticated, so do not present chronology for it.
+        base["chronology"] = CHRONOLOGY_NONE
+        base["signed_not_after"] = None
     return VerificationResult(
         trust_status=TRUSTED if accepted else INVALID,
         accepted=accepted,
@@ -547,6 +564,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         issuer_trusted=issuer_trusted,
         key_status=key_status,
         reasons=tuple(reasons),
+        blocking_reasons=tuple(blocking),
         replay_scope=replay_scope,
         consumption=consumption,
         trust_history=_history_state(policy, now),
@@ -634,7 +652,9 @@ def _apply_replay(
         return CONSUMPTION_NOT_CHECKED, "NONE"
     cache = policy.replay_cache
     assert cache is not None
-    retain = (policy.max_age or DEFAULT_RETENTION) + policy.clock_skew
+    # A report is fresh until issued_at + max_age, and issued_at may be up to
+    # clock_skew in the future, so remember the id for max_age + 2*skew.
+    retain = (_effective_max_age(policy) or DEFAULT_RETENTION) + 2 * policy.clock_skew
     try:
         if policy.replay_mode == "check":
             if cache.seen(key_id, env.audit_run_id, now=now):

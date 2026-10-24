@@ -55,7 +55,7 @@ import json
 import os
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
@@ -647,7 +647,9 @@ class VerificationOutcome:
     ``trust_status == "TRUSTED"`` for that.
     """
 
-    valid: bool
+    # Deprecated: use ``trust_status`` (or ``verification.verify(...).accepted``).
+    # Reading it warns; it is excluded from repr/eq so those never warn.
+    valid: bool = field(repr=False, compare=False)
     sha256_valid: bool
     signature_valid: bool
     issuer_trusted: bool
@@ -660,9 +662,19 @@ class VerificationOutcome:
     revoked: bool = False
     pin_ok: bool = True
 
+    def __getattribute__(self, name: str) -> Any:
+        if name == "valid":
+            warnings.warn(
+                "VerificationOutcome.valid is deprecated; branch on `trust_status` (or use "
+                "regaudit_fhe.verify_report(...).accepted). It is kept for compatibility.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return object.__getattribute__(self, name)
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "valid": bool(self.valid),
+            "valid": bool(object.__getattribute__(self, "valid")),
             "sha256_valid": bool(self.sha256_valid),
             "signature_valid": bool(self.signature_valid),
             "issuer_trusted": bool(self.issuer_trusted),
@@ -940,12 +952,14 @@ def verify_receipt(
             UserWarning,
             stacklevel=2,
         )
-    return verify_envelope(
+    outcome = verify_envelope(
         env,
         trusted_keys=trusted_keys,
         trust_store=trust_store,
         require_signature=True,
-    ).valid
+    )
+    # Internal read: not the deprecated public attribute access.
+    return bool(object.__getattribute__(outcome, "valid"))
 
 
 def issue_receipt(payload: Mapping[str, Any]) -> dict[str, str]:
