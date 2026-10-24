@@ -25,7 +25,6 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-import base64
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -34,7 +33,7 @@ from typing import Any, Protocol
 
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
-from .canonical import CanonicalError
+from .canonical import CanonicalError, decode_canonical_b64
 from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache
 from .report_v2 import AuditEnvelopeV2
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
@@ -215,6 +214,7 @@ class VerificationResult:
     policy_id: str
     format: str
     replay_scope: str
+    replay_durable: bool | None
     consumption: str
     trust_history: str
     trust_store_as_of: str | None
@@ -254,6 +254,7 @@ class VerificationResult:
             "policy_id": self.policy_id,
             "format": self.format,
             "replay_scope": self.replay_scope,
+            "replay_durable": self.replay_durable,
             "consumption": self.consumption,
             "trust_history": self.trust_history,
             "trust_store_as_of": self.trust_store_as_of,
@@ -327,7 +328,7 @@ def _evaluate_timestamps(
     for item in env.timestamps:
         evidence: Any
         try:
-            evidence = verifier(digest, base64.b64decode(item["token_b64"], validate=True))
+            evidence = verifier(digest, decode_canonical_b64(item["token_b64"]))
         except Exception:  # a hostile or broken verifier must never accept
             evidence = None
         if (
@@ -469,6 +470,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             reasons=tuple(reasons),
             blocking_reasons=tuple(blocking),
             replay_scope="NONE",
+            replay_durable=None,
             consumption=CONSUMPTION_NOT_CHECKED,
             trust_history=_history_state(policy, now),
             **base,
@@ -546,8 +548,9 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     # ----- local replay (last: only a report that would be accepted counts) ---
     consumption = CONSUMPTION_NOT_CHECKED
     replay_scope = "NONE"
+    replay_durable: bool | None = None
     if policy.replay_mode != "off" and not blocking:
-        consumption, replay_scope = _apply_replay(
+        consumption, replay_scope, replay_durable = _apply_replay(
             env, policy, now, fmt=fmt, key_id=key_id, note=note, block=block
         )
 
@@ -566,6 +569,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         reasons=tuple(reasons),
         blocking_reasons=tuple(blocking),
         replay_scope=replay_scope,
+        replay_durable=replay_durable,
         consumption=consumption,
         trust_history=_history_state(policy, now),
         **base,
@@ -623,14 +627,17 @@ def _apply_key_lifecycle(
     if policy.profile == "development" and policy.historical_acceptance == "signer-asserted":
         if issued is None:
             block("KEY_RETIRED_NO_CHRONOLOGY")
-        elif issued > retired_at:
+        elif issued >= retired_at:  # strict: equality is refused (no reliable order)
             block("SIGNED_AFTER_RETIREMENT")
         else:
             note("CHRONOLOGY_UNAUTHENTICATED")
         return
     if not v2 or evidence is None:
         block("KEY_RETIRED_NO_CHRONOLOGY")
-    elif evidence.gen_time + evidence.accuracy > retired_at:
+    elif evidence.gen_time + evidence.accuracy >= retired_at:
+        # Strict, like the compromise boundary: a timestamp equal to the retirement
+        # time does not by itself show the signature preceded it. A reliable event
+        # order (e.g. authenticated sequence numbers) would be needed to allow it.
         block("SIGNED_AFTER_RETIREMENT")
     if not history_ok():
         block("TRUST_STORE_FRESHNESS_UNPROVEN")
@@ -645,13 +652,14 @@ def _apply_replay(
     key_id: str,
     note: Callable[[str], None],
     block: Callable[[str], None],
-) -> tuple[str, str]:
+) -> tuple[str, str, bool | None]:
     if not isinstance(env, AuditEnvelopeV2):
         # v1 has no audit_run_id, so it cannot be replay-checked.
         (note if policy.profile == "development" else block)("REPLAY_ID_MISSING")
-        return CONSUMPTION_NOT_CHECKED, "NONE"
+        return CONSUMPTION_NOT_CHECKED, "NONE", None
     cache = policy.replay_cache
     assert cache is not None
+    durable = bool(getattr(cache, "durable", False))
     # A report is fresh until issued_at + max_age, and issued_at may be up to
     # clock_skew in the future, so remember the id for max_age + 2*skew.
     retain = (_effective_max_age(policy) or DEFAULT_RETENTION) + 2 * policy.clock_skew
@@ -659,11 +667,11 @@ def _apply_replay(
         if policy.replay_mode == "check":
             if cache.seen(key_id, env.audit_run_id, now=now):
                 block("REPLAY_DETECTED")
-            return CONSUMPTION_CHECKED, cache.scope
+            return CONSUMPTION_CHECKED, cache.scope, durable
         if cache.record(key_id, env.audit_run_id, now=now, retain=retain):
-            return CONSUMPTION_RECORDED_LOCAL, cache.scope
+            return CONSUMPTION_RECORDED_LOCAL, cache.scope, durable
         block("REPLAY_DETECTED")
-        return CONSUMPTION_CHECKED, cache.scope
+        return CONSUMPTION_CHECKED, cache.scope, durable
     except Exception:  # any store failure, of any type
         (note if policy.profile == "development" else block)("REPLAY_STATE_UNAVAILABLE")
-        return CONSUMPTION_NOT_CHECKED, "NONE"
+        return CONSUMPTION_NOT_CHECKED, "NONE", None

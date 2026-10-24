@@ -308,14 +308,29 @@ signature or the key, and a holder of a later-compromised key could sign a
 previously timestamped body. The target design is in
 [TRUST_SPEC.md](TRUST_SPEC.md) §4-§5.
 
+**Phase 3A contract decisions (candidate trust core).** `RECORDED_LOCAL` is a local
+record made at verification time: it is not global replay protection, not
+exactly-once execution and not proof the authorised operation completed, and
+`replay_durable` discloses whether it survives a restart. `report.v1` is refused
+under `confidential` (it has no signed `audit_run_id`, so it cannot satisfy the
+mandatory replay check). A required timestamp needs authenticated evidence; an
+absent timestamp never satisfies it. Retirement and compromise boundaries are
+**strict**: the latest possible signing time (`genTime + accuracy`) must be earlier
+than the boundary, and equality is refused. For the development self-signed option
+only, Unix sockets and unknown transports are refused (normal verification is
+unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted and
+`3` when it is supplied but unusable. None of this establishes that the trust
+history is complete; the O8 freshness requirement stays in force.
+
 Known limits of the v1 format: the `timestamp` block is outside the signed
 body, so it is never signed evidence. An attached timestamp is
 `UNVERIFIED` unless a `tsa_verifier` validates it, and a verified
 timestamp never overrides revocation. Revocation is a flat set with no
 validity window, and `issued_at` is signer-asserted, so a revoked key's
 earlier reports cannot be told apart from later forgeries without
-independent timestamp or witness evidence. Replay protection is not
-provided.
+independent timestamp or witness evidence. For `report.v1` replay protection is
+not provided (v1 has no signed run identifier); `report.v2` adds local replay
+detection only (see the Phase 3A paragraph above).
 
 ---
 

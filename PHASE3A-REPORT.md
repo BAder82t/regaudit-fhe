@@ -1,5 +1,11 @@
 # regaudit-fhe — Phase 3A report: `report.v2` trust core
 
+> **Superseded in part:** after owner review the six open questions in §10 were
+> decided and a gate-by-gate consistency review was run. The final identities, test
+> counts, boundary semantics and decisions are in
+> [`PHASE3A-CONSISTENCY-REVIEW.md`](PHASE3A-CONSISTENCY-REVIEW.md). This report records
+> the first delivery.
+
 **Status:** candidate trust-core implementation. **Not production readiness.**
 Authorization was for the approved trust core only; nothing was pushed, no PR
 was opened, nothing was merged or released, and Encompute was not touched.

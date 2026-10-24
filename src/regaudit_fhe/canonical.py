@@ -29,6 +29,8 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import math
 from typing import Any
@@ -40,6 +42,26 @@ MAX_INPUT_BYTES = 4 * 1024 * 1024
 
 class CanonicalError(ValueError):
     """The value or text violates the v2 canonicalisation policy."""
+
+
+def decode_canonical_b64(text: str, *, length: int | None = None) -> bytes:
+    """Decode standard-alphabet base64, accepting only the canonical text.
+
+    Re-encoding the decoded bytes must reproduce ``text`` exactly, so unused
+    trailing bits, whitespace, newlines and stray characters cannot be varied
+    to change the text without changing the bytes. Raises ``ValueError``.
+    """
+    if not isinstance(text, str) or not text:
+        raise ValueError("base64 must be a non-empty string")
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("not valid base64") from exc
+    if base64.b64encode(raw).decode("ascii") != text:
+        raise ValueError("not canonical base64")
+    if length is not None and len(raw) != length:
+        raise ValueError(f"must decode to {length} bytes")
+    return raw
 
 
 def check_value(value: Any, depth: int = 0) -> None:

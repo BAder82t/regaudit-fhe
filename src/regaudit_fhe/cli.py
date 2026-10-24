@@ -249,9 +249,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         return 2
 
     trust_store: TrustStore | None = None
-    if args.trusted_keys:
+    if args.trusted_keys is not None:  # supplied (even if empty) => it must be usable
         try:
-            trust_store = TrustStore.from_json(args.trusted_keys)
+            trust_store = TrustStore.from_json(args.trusted_keys.strip())
         except TrustStoreError as exc:
             sys.stderr.write(f"--trusted-keys: {exc}\n")
             return 3
@@ -290,6 +290,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
 
+    if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
+        # The replay store could not be used while verifying. That is an
+        # infrastructure failure, not a verdict on the report (exit 3, not 1).
+        sys.stderr.write("verification not possible: the replay store was unavailable\n")
+        return 3
     payload = result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
     if not result.accepted:

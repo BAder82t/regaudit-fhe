@@ -21,7 +21,7 @@ it says what the gap is and what evidence it does and does not provide.
 |---|---|---|
 | D1 | Issuer identity | An issuer is authenticated only by a verifier-held **trust store entry** binding `key_id` + public key + issuer name (+ optional deployment and primitive scope). In v2 `key_id`, issuer and deployment are inside the signed body. |
 | D2 | Revocation | Ordinary **retirement** and confirmed **compromise** are different states. Neither silently invalidates all history, and neither is decided by signer-controlled time. |
-| D3 | Compromise | If the compromise boundary is unknown, **every** signature by that key is untrusted unless independent chronology proves it was made earlier. Default boundary is "since key creation". |
+| D3 | Compromise | If the compromise boundary is unknown, **every** signature by that key is untrusted evidence, unconditionally (no chronology is sought). With a known boundary, only authenticated chronology strictly earlier than it can qualify. |
 | D4 | Time evidence | Authenticated chronology comes only from a third-party time or witness token over a digest that **covers the signature**. `issued_at` is never chronology. |
 | D5 | Replay / freshness | Signed `audit_run_id` and `audience`, a verifier-side `max_age`, and an optional replay cache. Required by profile, not globally. |
 | D6 | Legacy v1 | Verifiable, labelled `legacy`, and never silently equal to v2 assurance. Integrity-only is a development/forensic mode and is never "accepted". |
@@ -115,7 +115,7 @@ each a `{name, sha256}` object like today's commitments.
 | State | Cause | Meaning for new signatures | Meaning for historical reports |
 |---|---|---|---|
 | `active` | normal | accepted | accepted |
-| `retired` | planned rotation | MUST NOT be produced after `retired_at` | accepted if chronology shows signing ≤ `retired_at` (§4.3) |
+| `retired` | planned rotation | MUST NOT be produced after `retired_at` | accepted only if the latest possible signing time is **strictly earlier** than `retired_at` (§4.3) |
 | `compromised` | confirmed or suspected key exposure | rejected | accepted only if authenticated chronology shows signing < `compromised_from` (§4.4) |
 | `revoked` | v1 flat revocation | rejected | treated as `compromised` with `compromised_from` unknown (§4.4) |
 | `unknown` | not in store | rejected | rejected |
@@ -153,13 +153,15 @@ Outside the `development` profile, a report signed by a `retired` key is
 accepted as trusted evidence only if **all** of the following hold:
 
 1. **Authenticated chronology** (§5): a timestamp or witness record that
-   binds the exact sealed artifact and yields `signed_not_after ≤ retired_at`.
+   binds the exact sealed artifact and whose latest possible signing time is
+   **strictly earlier** than `retired_at` (see "Boundary semantics" below).
 2. **Sufficiently fresh, independently authenticated trust history** (§4.6):
    the verifier's anchor-authenticated store is within the profile's maximum
    age and consistent with its durable monotonic head, so a later compromise
    declaration for that key cannot have been omitted.
-3. No `compromised` declaration in that history places `compromised_from`
-   at or before `signed_not_after`.
+3. No `compromised` declaration in that history places `compromised_from` no
+   later than the latest possible signing time (`latest_signing_time`, defined
+   under "Boundary semantics" below).
 
 Failing any of these is a refusal, not a presumed clean interval:
 
@@ -169,10 +171,29 @@ Failing any of these is a refusal, not a presumed clean interval:
 | trust-history freshness | `INVALID`, `TRUST_STORE_FRESHNESS_UNPROVEN` |
 
 A signer-controlled `issued_at` is never sufficient. An older authentic
-trust-store snapshot does not prove that no later compromise was declared.
+trust-store snapshot does not prove that no later compromise was declared, and a
+valid timestamp does not by itself establish that the trust history is complete
+or that no later compromise declaration applies; the O8 freshness requirement
+stays in force.
+
+**Boundary semantics (normative, retirement and compromise alike).** Let
+`latest_signing_time = genTime + accuracy` of the authenticating token. A report
+is historically acceptable only if
+
+* retired key: `latest_signing_time < retired_at`;
+* compromised key with a known boundary: `latest_signing_time < compromised_from`.
+
+Both comparisons are **strict**: equality is refused. A timestamp equal to a
+boundary does not, by itself, show that the signature preceded the event, because
+clock values alone do not establish an order. Equality could be allowed only where
+independently authenticated evidence (for example authenticated sequence numbers)
+establishes a reliable event order; Phase 3A has no such mechanism, so equality is
+refused. The reason code for a failure is `SIGNED_AFTER_RETIREMENT` or
+`SIGNED_AFTER_COMPROMISE`; despite the names they also cover "at" the boundary.
 
 **`development` only:** the policy MAY set `historical_acceptance =
-"signer-asserted"`, accepting `issued_at ≤ retired_at`. The result then carries
+"signer-asserted"`, accepting `issued_at` **strictly earlier** than `retired_at`
+(equality is refused here too). The result then carries
 `chronology = SIGNER_ASSERTED`, `CHRONOLOGY_UNAUTHENTICATED`, and is never
 presented as high-assurance evidence. `high-assurance` MUST fail closed when
 trust-history freshness cannot be established.
@@ -183,12 +204,14 @@ trust-history freshness cannot be established.
 set conservatively by the incident owner.
 
 * If `compromised_from` is known: accept iff authenticated chronology proves
-  `signed_not_after + accuracy < compromised_from`. Signer-asserted time MUST
-  NOT be used, because under A2 the attacker controls `issued_at`.
+  `latest_signing_time < compromised_from` (strict; `latest_signing_time =
+  genTime + accuracy`, while the reported `signed_not_after` is `genTime`).
+  Signer-asserted time MUST NOT be used, because under A2 the attacker controls `issued_at`.
 * If it is **unknown** (the default for a new `compromised` or any v1
-  `revoked` entry): treat as `not_before` of the key. Every signature by that
-  key is rejected unless independent chronology predates `not_before`, which is
-  effectively never. This is the safe default.
+  `revoked` entry): **every** signature by that key is refused as trusted
+  evidence, whatever any token or `issued_at` claims. Phase 3A does not look for
+  chronology that might predate the key's creation; the refusal is unconditional.
+  This is the safe default.
 * A *time-stamped body* alone (v1 style, F2) never satisfies this rule.
 * Verification MUST NOT infer "signed before revocation" from the revocation
   event being recent, nor from the report being old.
@@ -402,9 +425,9 @@ state which guarantee applied (`replay_scope`).
 | `replay_scope` | Guarantee |
 |---|---|
 | `NONE` | no uniqueness claim |
-| `LOCAL_PROCESS` | single use within one process lifetime; **a restart clears it** |
-| `LOCAL_PERSISTENT` | single use for one verifier instance across restarts |
-| `SHARED` | single use across verifiers that share the store, **provided** the store offers an atomic record-if-absent |
+| `LOCAL_PROCESS` | an identifier is recorded once within one process lifetime (not crash-durable); **a restart clears it** |
+| `LOCAL_PERSISTENT` | an identifier is recorded once for one verifier instance, surviving restarts; still local |
+| `SHARED` | recorded once across verifiers that share the store, **provided** the store offers an atomic record-if-absent (not implemented in Phase 3A) |
 
 Independent verifiers without a shared store can each accept the same report
 once. The library MUST NOT claim global single-use enforcement for them.
@@ -434,13 +457,27 @@ different acts, and the response MUST say which happened.
 | `consumption` | Meaning |
 |---|---|
 | `NOT_CHECKED` | no replay state consulted. This is what a stateless verification API reports. |
-| `CHECKED_NOT_CONSUMED` | the id was looked up and was not present; nothing was recorded |
-| `RESERVED` | the id is held by a caller for an operation in progress, with a lease |
-| `CONSUMED` | the operation completed and the id is permanently recorded |
+| `CHECKED_NOT_CONSUMED` | a local replay check was performed and **this call recorded nothing**; no consumption claim. (The id may already have been recorded earlier, in which case `REPLAY_DETECTED` is among the blocking reasons.) |
+| `RECORDED_LOCAL` | the identifier was recorded in this verifier's local store at verification time, **without any proof that the operation the report authorises completed** |
+| `RESERVED` | the id is reserved for a separately governed operation, with a lease (not produced in Phase 3A) |
+| `CONSUMED` | completion was established under the applicable consumption protocol (not produced in Phase 3A) |
+
+`RECORDED_LOCAL` MUST NOT be presented as global replay protection, as durable
+exactly-once execution, or as successful completion of the underlying operation.
+Independent verifiers that do not share a store can each record the same report.
+
+**Durability disclosure.** Every result that performed a replay check reports
+`replay_durable`: `true` only if a recorded identifier survives a process restart
+(the sqlite cache commits before returning), `false` for the in-memory cache, whose
+records are lost when the process exits and which is therefore not crash-durable.
+`replay_durable` is `null` when no replay check ran. Even a durable local record is
+not an exactly-once guarantee for a downstream operation.
 
 * A verification-only API (including `/v1/verify`) MUST NOT be described as
-  replay-protected, and MUST report `consumption: NOT_CHECKED`, unless it also
-  performs a reservation.
+  replay-protected. When replay checking is not configured it MUST report
+  `consumption: NOT_CHECKED`; when configured it reports `CHECKED_NOT_CONSUMED`
+  (`check` mode) or `RECORDED_LOCAL` (`record` mode), never `RESERVED` or
+  `CONSUMED` unless it also performs a reservation or runs the consumption protocol.
 * **Coupling to the operation.** Accepting a report and performing the action
   it authorises are two steps with a failure window between them. The design
   requirement for Phase 3 is a **reserve -> perform -> commit** protocol keyed
@@ -483,7 +520,7 @@ the result.
 
 | Case | Behaviour |
 |---|---|
-| v1 envelope, trust store match, key `active` | May reach `TRUSTED`, with reason `LEGACY_V1_FORMAT` and `chronology = NONE`. Allowed if `allow_legacy_v1` (default true in `development` and `confidential`, false in `high-assurance`). |
+| v1 envelope, trust store match, key `active` | May reach `TRUSTED`, with reason `LEGACY_V1_FORMAT` and `chronology = NONE`. Allowed if `allow_legacy_v1` (default true in `development`). **In `confidential` it is refused** because a v1 report has no signed `audit_run_id` and cannot satisfy the mandatory replay check (`REPLAY_ID_MISSING`); in `high-assurance` it is refused by default (`LEGACY_V1_FORMAT`). |
 | v1 envelope, key `retired` | Only under `historical_acceptance = signer-asserted`. A v1 body-only timestamp does not provide authenticated chronology (F2). |
 | v1 envelope, key `compromised`/`revoked` | **Always rejected.** v1 timestamps cannot satisfy §4.4. |
 | v1 envelope, no trust material | `SELF_SIGNED_ONLY`; never `accepted`. |
@@ -510,7 +547,8 @@ original canonical signing format. v2 MUST NOT alter that format.
 | `policy_id` | string | Identifier and version of the policy evaluated. |
 | `trust_store_as_of`, `trust_store_sequence` | RFC 3339, int | Which trust-store snapshot the decision used (§4.6). |
 | `replay_scope` | enum | Which uniqueness guarantee applied (§6.1). |
-| `consumption` | enum | `NOT_CHECKED` \| `CHECKED_NOT_CONSUMED` \| `RESERVED` \| `CONSUMED` (§6.2). |
+| `replay_durable` | bool or null | Whether the local record survives a restart (§6.2); `null` if no replay check ran. |
+| `consumption` | enum | `NOT_CHECKED` \| `CHECKED_NOT_CONSUMED` \| `RECORDED_LOCAL` \| `RESERVED` \| `CONSUMED` (§6.2). Phase 3A produces only the first three. |
 | `accepted` | bool | The policy's final decision. |
 | `reasons` | list of stable codes | Machine-readable causes (table below). |
 | `valid` | bool | **Deprecated.** In v2 mode it equals `accepted`. |
@@ -527,16 +565,25 @@ original canonical signing format. v2 MUST NOT alter that format.
 `issuer_trusted` and `reasons` tell a caller why, so a stale but genuine
 report is distinguishable from a forgery.
 
-### 8.3 Reason codes (initial set)
+### 8.3 Reason codes
 
-`HASH_MISMATCH`, `SIGNATURE_INVALID`, `ISSUER_UNKNOWN`, `ISSUER_MISMATCH`,
-`KEY_EMBEDDED_MISMATCH`, `KEY_REVOKED`, `KEY_COMPROMISED_NO_CHRONOLOGY`,
-`KEY_RETIRED_NO_CHRONOLOGY`, `CHRONOLOGY_UNAUTHENTICATED`, `PIN_MISMATCH`,
-`DEPLOYMENT_NOT_ALLOWED`, `PRIMITIVE_NOT_ALLOWED`, `AUDIENCE_MISMATCH`,
-`REPORT_TOO_OLD`, `REPLAY_DETECTED`, `TIMESTAMP_FAILED`,
-`TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`, `TRUST_STORE_ROLLBACK`,
-`TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`, `TRUST_ANCHOR_MISSING`,
-`REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`, `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
+`HASH_MISMATCH`, `SIGNATURE_INVALID`, `MALFORMED_ENVELOPE`, `ISSUER_UNKNOWN`,
+`ISSUER_MISMATCH`, `KEY_EMBEDDED_MISMATCH`, `FINGERPRINT_MISMATCH`, `PIN_MISMATCH`,
+`DEPLOYMENT_NOT_ALLOWED`, `PRIMITIVE_NOT_ALLOWED`, `KEY_NOT_YET_VALID`,
+`KEY_REVOKED`, `KEY_COMPROMISED_NO_CHRONOLOGY`, `SIGNED_AFTER_COMPROMISE`,
+`KEY_RETIRED_NO_CHRONOLOGY`, `SIGNED_AFTER_RETIREMENT`,
+`CHRONOLOGY_UNAUTHENTICATED`, `AUDIENCE_MISMATCH`, `REPORT_TOO_OLD`,
+`REPORT_FROM_FUTURE`, `REPLAY_DETECTED`, `REPLAY_ID_MISSING`,
+`TIMESTAMP_FAILED`, `TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`,
+`TRUST_STORE_ROLLBACK`, `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`,
+`TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
+`LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
+
+Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT` and
+`SELF_SIGNED_NO_TRUST_MATERIAL` are informational unless a policy also refuses on
+them; the result's `blocking_reasons` lists the codes that caused a refusal. The
+`TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
+the held O8 / reserve-commit work and are not emitted in Phase 3A.
 
 Codes are stable API; new codes may be added, existing codes MUST NOT change
 meaning.
@@ -589,8 +636,15 @@ one function, called by every entry point.
       development-only option set under `confidential`/`high-assurance` is
       refused at startup and again at request time.
    2. **Network exposure.** The request's actual transport must satisfy the
-      loopback restriction: the ASGI `scope["server"]` host is loopback, or
-      the transport is a Unix domain socket. Otherwise respond 403.
+      loopback restriction: the ASGI `scope["server"]` is a loopback **TCP**
+      address and the peer address is known and loopback. Otherwise respond 403.
+      **Unix domain sockets and unknown transports are refused** for the
+      development option: uvicorn reports no server address for them, and the
+      application cannot authenticate the transport origin well enough to
+      establish the loopback restriction. This concerns *only* the development
+      option; normal trusted verification works over a Unix socket. A future,
+      explicitly authenticated local-transport policy may be considered
+      separately.
 
    Client-supplied forwarding headers (`X-Forwarded-For`, `Forwarded`,
    `X-Real-IP`, and similar) MUST NOT be treated as proof of loopback origin.
@@ -615,8 +669,8 @@ one function, called by every entry point.
    |---|---|
    | Accepted under the configured trust policy | `0` |
    | Well-formed report refused by policy (`SELF_SIGNED_ONLY`, revoked, compromised, stale, replayed, ...) | `1` |
-   | Invalid input, malformed report, or usage error (for example a malformed report, or `--strict` without trust material) | `2` |
-   | Required verification infrastructure unavailable or invalidly configured (trust store or anchor missing, unreadable, malformed, inconsistent; replay state unavailable) | `3` |
+   | Invalid input, malformed report, or usage error, including omitting `--trusted-keys` when it is required (and not using `--allow-self-signed`) | `2` |
+   | Required verification infrastructure unavailable or invalidly configured: `--trusted-keys` **was supplied** (even as an empty value) but the file is missing, unreadable, malformed or inconsistent; the anchor is unavailable; replay state is unavailable; the policy is unsafe | `3` |
 
    An explicit development-only integrity check (`--allow-self-signed`) MAY
    print `integrity_valid: true` and `trust_status: SELF_SIGNED_ONLY`, but
@@ -626,6 +680,13 @@ one function, called by every entry point.
    the actual exit status and the stdout/stderr content for each row,
    including both changed behaviours below. README and CHANGELOG MUST record
    them.
+
+   **Precedence and replay.** If several errors apply, input errors (`2`) are
+   reported before infrastructure errors (`3`). A replay store that cannot be
+   opened, or that fails while verifying **outside the development profile**, is
+   `3` (HTTP 503), never a policy refusal `1`; in the development profile such a
+   failure is disclosed in `reasons` (`REPLAY_STATE_UNAVAILABLE`) and the trust
+   verdict stands.
 
    **Reconciliation with existing allocations (approved).** Today `verify` uses `0`
    (success), `1` (typed verification failure) and `2` (bad CLI input), as
@@ -641,7 +702,7 @@ one function, called by every entry point.
 | Profile | Development options | Trust store | Chronology / retired keys | v1 envelopes | Replay |
 |---|---|---|---|---|---|
 | `development` | allowed, loopback only | optional | signer-asserted allowed | allowed | off |
-| `confidential` | refused | required, authenticated | authenticated for retired keys | allowed, labelled | required |
+| `confidential` | refused | required, authenticated | authenticated for retired keys | **refused** (cannot be replay-checked) | required |
 | `high-assurance` | refused | required, authenticated, fresh | authenticated always | refused unless waived in policy | required, shared |
 
 A `high-assurance` deployment MUST refuse to start if any required element is
@@ -811,8 +872,8 @@ not an omission.
 1. **Consumption label.** Phase 3A records at verification time, which is not
    "after the operation completed". Rather than reuse `CONSUMED`, the result
    reports `RECORDED_LOCAL`. `RESERVED` and `CONSUMED` are not produced.
-   *Spec ambiguity to resolve:* add `RECORDED_LOCAL` to the §6.2 table, or keep
-   `CONSUMED` reserved for the reserve/perform/commit protocol.
+   **Owner decision (approved):** `RECORDED_LOCAL` is now in the §6.2 table, with
+   the durability disclosure (`replay_durable`).
 2. **Reason codes added** beyond §8.3: `FINGERPRINT_MISMATCH`,
    `SIGNED_AFTER_RETIREMENT`, `SIGNED_AFTER_COMPROMISE`, `KEY_NOT_YET_VALID`,
    `REPORT_FROM_FUTURE`, `MALFORMED_ENVELOPE`, `REPLAY_ID_MISSING`. The result also
@@ -827,34 +888,53 @@ not an omission.
    anyone could attach does not invalidate a good one. If tokens are present, a
    verifier is configured and none verifies, the status is `FAILED` and the report
    is refused.
-6. **Accuracy.** A token's `genTime + accuracy` is used as the latest possible
-   signing time: retirement requires `<= retired_at`, compromise requires `<
-   compromised_from` (strict). `signed_not_after` reports `genTime`.
+6. **Accuracy and boundaries.** A token's `genTime + accuracy` is the latest
+   possible signing time. **Both** boundaries are strict: retirement requires
+   `latest_signing_time < retired_at` and compromise requires
+   `latest_signing_time < compromised_from`; equality is refused for both
+   (§4.3, "Boundary semantics"). `signed_not_after` reports `genTime`. The
+   earlier Phase 3A draft accepted equality for retirement; that was corrected on
+   the owner's direction.
 7. **Chronology for unauthenticated issuers.** When the issuer is not
    authenticated, `chronology` is reported as `NONE` and `signed_not_after` is null.
 8. **`trust_history`** is reported as `UNPROVEN`, `STALE` or `FRESH`; only an
    authenticated, recent `TrustHistory` supplied by the caller can be `FRESH`.
 9. **No trust material.** The library raises `VerificationUnavailable` unless the
-   development self-signed check is enabled. The HTTP server maps this to 503, the
-   CLI to exit 2 (missing flag, a usage error) or 3 (unreadable infrastructure).
+   development self-signed check is enabled. The HTTP server maps this to 503. The
+   CLI exits **2** when `--trusted-keys` is omitted (a usage error) and **3** when it
+   was supplied (even as an empty value) but is unusable. **Owner decision
+   (approved).**
 10. **Replay retention** is `max_age + 2 x clock_skew`. When replay checking is on
     without an explicit `max_age`, a 30-day maximum age is implied so a report
     cannot outlive the cache's memory of it.
 11. **Strict canonical policy** details fixed by `regaudit_fhe.canonical`: depth
     64, 4 MiB input, no non-string keys; the receipt `signature_b64` must be
-    canonical base64 and decode to exactly 64 bytes; timestamps are strict RFC 3339
+    canonical base64 and decode to exactly 64 bytes, **on the `report.v1` verification
+    path as well** (a lenient decoder there would let anyone vary the unsigned
+    receipt text), and timestamp tokens must be canonical base64 in both formats; timestamps are strict RFC 3339
     with a UTC offset and at most 6 fractional digits.
 12. **Trust store.** One public key may appear under one `key_id` only; keys must
     be Ed25519; `issuer` is required in the `entries` form; `as_of` is
     operator-asserted and informational. Phase 1 helpers treat any non-`active`
     entry as revoked because they cannot evaluate chronology.
 
-13. **`report.v1` under `confidential` / `high-assurance`.** §6 requires a replay
-    cache in those profiles and §7 says v1 is "allowed, labelled" in `confidential`.
-    A v1 report has no `audit_run_id` and cannot be replay-checked, so Phase 3A
-    refuses it there (`REPLAY_ID_MISSING`). *Spec ambiguity to resolve:* either
-    v1 is exempt from the replay requirement in `confidential`, or §7's table
-    should say v1 is refused where replay checking is mandatory.
+13. **`report.v1` under `confidential` / `high-assurance`.** A v1 report has no
+    signed `audit_run_id` and cannot be replay-checked, so it cannot satisfy a
+    profile that mandates replay checking and is refused there
+    (`REPLAY_ID_MISSING`). **Owner decision (approved for now):** v1 remains
+    supported in the development profile and in explicitly defined legacy
+    verification modes; §7's "allowed, labelled in `confidential`" is superseded.
+    A separately named restricted legacy profile would need its own threat
+    analysis and explicit authorisation. No unauthenticated identifier is invented.
+14. **Required timestamps.** `require_verified_timestamp` requires authenticated
+    evidence: an absent, unverified, malformed, improperly bound or cryptographically
+    failed timestamp never satisfies it, while `timestamp_status` keeps `ABSENT`
+    distinct from `FAILED` for diagnostics. **Owner decision (approved).** No TSA or
+    witness authority is approved (O9).
+15. **Unix sockets.** For the development option only, a request whose transport
+    origin cannot be authenticated is refused; this covers Unix sockets and uvicorn's
+    missing server address. Normal trusted verification over a Unix socket is
+    unaffected. **Owner decision (approved).** Forwarding headers are never relied on.
 
 ### C.3 Known gaps carried forward
 
@@ -866,3 +946,14 @@ not an omission.
   bounds chunked uploads.
 * JSON number formatting is Python's `repr`; RFC 8785 is needed before a
   non-Python verifier is supported.
+
+### C.4 Owner contract decisions for Phase 3A (final)
+
+| # | Question | Decision | Where it lives |
+|---|---|---|---|
+| 1 | `RECORDED_LOCAL` | Approved; never global protection, exactly-once or proof of completion; durability disclosed via `replay_durable` | §6.2, C.2 item 1 |
+| 2 | `report.v1` in `confidential` | Refused for now (fail-closed); v1 stays in development and defined legacy modes | C.2 item 13 |
+| 3 | Missing `--trusted-keys` | Omitted → exit 2; supplied but unusable → exit 3; policy refusal → 1; accepted → 0 | §9.3.5, C.2 item 9 |
+| 4 | Required timestamps | Absent never satisfies; only authenticated evidence does | C.2 item 14 |
+| 5 | Unix sockets | Refused for the development option only; normal verification unaffected | §9.3.3, C.2 item 15 |
+| 6 | Chronology boundaries | Strict for **both** retirement and compromise; equality refused; O8 freshness still required | §4.3, C.2 item 6 |

@@ -14,16 +14,29 @@ from fastapi.testclient import TestClient
 LOOPBACK_URL = "http://127.0.0.1:8000"
 
 
+_UNSET: Any = object()
+
+
 class WithPeer:
-    def __init__(self, app: Any, peer: tuple[str, int] | None = ("127.0.0.1", 50000)) -> None:
+    def __init__(
+        self,
+        app: Any,
+        peer: tuple[str, int] | None = ("127.0.0.1", 50000),
+        server: Any = _UNSET,
+    ) -> None:
         self.app = app
         self.peer = peer
+        self.server = server
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] == "http":
             scope = {**scope, "client": self.peer}
+            if self.server is not _UNSET:
+                scope["server"] = self.server
         await self.app(scope, receive, send)
 
 
-def client_for(app: Any, *, base_url: str = LOOPBACK_URL, peer=("127.0.0.1", 50000)) -> TestClient:
-    return TestClient(WithPeer(app, peer), base_url=base_url)
+def client_for(
+    app: Any, *, base_url: str = LOOPBACK_URL, peer=("127.0.0.1", 50000), server: Any = _UNSET
+) -> TestClient:
+    return TestClient(WithPeer(app, peer, server), base_url=base_url)

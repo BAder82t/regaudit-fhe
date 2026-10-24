@@ -302,15 +302,23 @@ def _scope(server=("127.0.0.1", 8000), client=("127.0.0.1", 5555)):
 
 @pytest.mark.parametrize(
     "server",
-    [("127.0.0.1", 80), ("::1", 80), ("127.5.5.5", 80), ("/run/regaudit.sock", None)],
+    [("127.0.0.1", 80), ("::1", 80), ("127.5.5.5", 80)],
 )
-def test_exposure_allows_loopback_and_unix_sockets(server):
+def test_exposure_allows_loopback_tcp_sockets(server):
     assert check_dev_exposure(_scope(server=server), {}, ()) is None
 
 
 @pytest.mark.parametrize(
     "server",
-    [("0.0.0.0", 80), ("10.0.0.5", 80), ("example.com", 80), ("testserver", 80), ("", 80), None],
+    [
+        ("0.0.0.0", 80),
+        ("10.0.0.5", 80),
+        ("example.com", 80),
+        ("testserver", 80),
+        ("", 80),
+        None,
+        ("/run/regaudit.sock", None),  # Unix sockets are refused for the development option
+    ],
 )
 def test_exposure_refuses_everything_else(server):
     assert check_dev_exposure(_scope(server=server), {}, ()) is not None
@@ -453,7 +461,8 @@ def test_cli_trust_store_flag_overrides_broken_env_var(monkeypatch, tmp_path: Pa
 def test_exposure_also_requires_a_loopback_client_when_one_is_reported():
     assert check_dev_exposure(_scope(client=("127.0.0.1", 1)), {}, ()) is None  # control
     assert check_dev_exposure(_scope(client=("203.0.113.9", 5555)), {}, ()) is not None
-    assert check_dev_exposure(_scope(client=None), {}, ()) is None  # unix socket / no peer
+    # no peer information: the origin cannot be established, so the option is refused
+    assert check_dev_exposure(_scope(client=None), {}, ()) is not None
 
 
 @pytest.mark.parametrize(

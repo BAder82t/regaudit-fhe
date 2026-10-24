@@ -249,32 +249,37 @@ def check_dev_exposure(
     """Return a refusal reason, or ``None`` if the request may use a
     development-only verification option.
 
-    The server socket the request actually arrived on must be loopback or a
-    Unix domain socket. Client-supplied forwarding headers are never proof of
-    loopback origin: if any are present the request is refused unless an
+    The server socket the request actually arrived on must be a loopback TCP
+    address, and the peer must be known. Unix sockets and unknown transports are
+    refused; this concerns the development option only, never normal trusted
+    verification. Client-supplied forwarding headers are never proof of loopback
+    origin: if any are present the request is refused unless an
     explicit trusted-proxy policy names the immediate peer, in which case the
     original client is the rightmost ``X-Forwarded-For`` entry that is not
     itself a trusted proxy and must be loopback. A malformed policy trusts
     nobody.
     """
     server = scope.get("server")
-    if not server:
-        return "server socket address unknown"
-    host, port = server[0], server[1] if len(server) > 1 else None
-    is_unix = port is None and isinstance(host, str) and host.startswith("/")
-    if not is_unix and not (isinstance(host, str) and _is_loopback_host(host)):
+    if not server or len(server) < 2 or server[1] is None:
+        # No server address, or a Unix socket (ASGI reports ``[path, None]``;
+        # uvicorn reports nothing at all). The transport origin cannot be
+        # authenticated well enough to establish the loopback restriction.
+        return "server socket is not an authenticated loopback TCP address"
+    host = server[0]
+    if not (isinstance(host, str) and _is_loopback_host(host)):
         return "server socket is not loopback"
+    client = scope.get("client")
+    if not client or not client[0]:
+        return "peer address unknown"
     present = [h for h in _FORWARDING_HEADERS if h in headers]
     if not present:
-        client = scope.get("client")
-        if client and client[0] and not _is_loopback_host(str(client[0])):
+        if not _is_loopback_host(str(client[0])):
             return "client is not loopback"
         return None
     nets = _proxy_networks(trusted_proxies)
     if not nets:
         return "forwarding headers present and no trusted-proxy policy is configured"
-    client = scope.get("client")
-    if not client or not _in_networks(str(client[0]), nets):
+    if not _in_networks(str(client[0]), nets):
         return "forwarded request from an untrusted peer"
     xff = ",".join(_header_lines(headers, "x-forwarded-for"))
     if not xff:
@@ -850,7 +855,7 @@ def build_app(
         if config.trust_store is None:
             # No trust material. Fail closed unless the development-only
             # self-signed check is enabled, and even then only for a
-            # development profile reached over a loopback/Unix socket. Both
+            # development profile reached over a loopback TCP socket. Both
             # checks run on every request, whatever entry point built the app.
             if not config.allow_self_signed:
                 raise HTTPException(
@@ -888,6 +893,11 @@ def build_app(
             result = await run_in_threadpool(verify, env, policy)
         except VerificationUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
+            # Infrastructure failure, not a verdict on the report.
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "replay store unavailable; no verdict given"
+            )
         logger.info(
             "envelope_verified",
             extra={

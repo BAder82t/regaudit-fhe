@@ -40,6 +40,7 @@ TESTS = [
     "tests/test_server.py",
     "tests/test_cli_verify_exit_codes.py",
     "tests/test_public_api_v2.py",
+    "tests/test_phase3a_contract.py",
 ]
 
 
@@ -144,8 +145,8 @@ MUTANTS = [
     Mutant(
         "V14 retirement chronology ignored",
         V,
-        "elif evidence.gen_time + evidence.accuracy > retired_at:",
-        "elif False:",
+        "    elif evidence.gen_time + evidence.accuracy >= retired_at:",
+        "    elif False:",
     ),
     Mutant(
         "V15 trust-history freshness ignored",
@@ -267,8 +268,8 @@ MUTANTS = [
     Mutant(
         "S04 server socket loopback check removed",
         S,
-        "if not is_unix and not (isinstance(host, str) and _is_loopback_host(host)):",
-        "if False:",
+        "    if not (isinstance(host, str) and _is_loopback_host(host)):",
+        "    if False:",
     ),
     Mutant(
         "S05 forwarding headers tolerated without a proxy policy",
@@ -285,8 +286,8 @@ MUTANTS = [
     Mutant(
         "S07 untrusted peer may vouch for a forwarded client",
         S,
-        "if not client or not _in_networks(str(client[0]), nets):",
-        "if False:",
+        "    if not _in_networks(str(client[0]), nets):",
+        "    if False:",
     ),
     Mutant(
         "S08 leftmost X-Forwarded-For entry trusted",
@@ -297,8 +298,8 @@ MUTANTS = [
     Mutant(
         "S09 non-loopback direct client tolerated",
         S,
-        "if client and client[0] and not _is_loopback_host(str(client[0])):",
-        "if False:",
+        "        if not _is_loopback_host(str(client[0])):",
+        "        if False:",
     ),
     Mutant(
         "S10 duplicate JSON keys tolerated in the request",
@@ -383,15 +384,15 @@ MUTANTS = [
     ),
     Mutant(
         "E04 non-canonical base64 tolerated",
-        R2,
-        'if base64.b64encode(raw).decode("ascii") != value:',
-        "if False:",
+        K,
+        '    if base64.b64encode(raw).decode("ascii") != text:',
+        "    if False:",
     ),
     Mutant(
         "E05 signature length unchecked",
-        R2,
-        "if length is not None and len(raw) != length:",
-        "if False:",
+        K,
+        "    if length is not None and len(raw) != length:",
+        "    if False:",
     ),
     Mutant(
         "E06 sealed digest omits the signature",
@@ -453,6 +454,90 @@ MUTANTS = [
         RP,
         'conn.execute("BEGIN IMMEDIATE")',
         'conn.execute("SELECT 1")',
+    ),
+    Mutant(
+        "B01 retirement boundary made inclusive",
+        V,
+        "    elif evidence.gen_time + evidence.accuracy >= retired_at:",
+        "    elif evidence.gen_time + evidence.accuracy > retired_at:",
+    ),
+    Mutant(
+        "B02 signer-asserted retirement boundary made inclusive",
+        V,
+        "        elif issued >= retired_at:",
+        "        elif issued > retired_at:",
+    ),
+    Mutant(
+        "U01 Unix sockets allowed for the development option",
+        S,
+        "    if not server or len(server) < 2 or server[1] is None:",
+        "    if not server:",
+    ),
+    Mutant(
+        "U02 unknown peer tolerated for the development option",
+        S,
+        '    if not client or not client[0]:\n        return "peer address unknown"\n',
+        "",
+    ),
+    Mutant(
+        "D01 in-memory replay cache claims to be durable",
+        RP,
+        "    durable = False  # lost when the process exits",
+        "    durable = True  # lost when the process exits",
+    ),
+    Mutant(
+        "D02 sqlite replay cache claims not to be durable",
+        RP,
+        "    durable = True  # committed to the sqlite file before record() returns",
+        "    durable = False  # committed to the sqlite file before record() returns",
+    ),
+    Mutant(
+        "D03 replay durability not reported",
+        V,
+        '"replay_durable": self.replay_durable,',
+        '"replay_durable": None,',
+    ),
+    Mutant(
+        "X01 empty --trusted-keys treated as omitted",
+        C,
+        "    if args.trusted_keys is not None:",
+        "    if args.trusted_keys:",
+    ),
+    Mutant(
+        "Z01 direct TrustStore construction allows key aliases",
+        TR,
+        "        _require_unique_keys(self.keys)\n        for map_key, entry in self.entries.items():",
+        "        for map_key, entry in self.entries.items():",
+    ),
+    Mutant(
+        "Z02 v1 signature base64 decoded leniently",
+        RE,
+        "        signature = decode_canonical_b64(signature_b64, length=64)",
+        "        signature = base64.b64decode(signature_b64)",
+    ),
+    Mutant(
+        "Z03 v1 timestamp token base64 decoded leniently",
+        RE,
+        "        token = decode_canonical_b64(token_b64)",
+        "        token = base64.b64decode(token_b64)",
+    ),
+    Mutant(
+        "Z04 CLI turns an unavailable replay store into a policy refusal",
+        C,
+        '    if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:',
+        "    if False:",
+    ),
+    Mutant(
+        "Z05 HTTP turns an unavailable replay store into a verdict",
+        S,
+        '        if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:',
+        "        if False:",
+    ),
+    Mutant(
+        "Z06 trust-store entry key_id not checked against its map key",
+        TR,
+        "            if entry.key_id != map_key:",
+        "            if False:",
     ),
     Mutant(
         "P05 naive times accepted by the replay store",

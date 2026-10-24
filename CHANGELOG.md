@@ -7,6 +7,33 @@ Candidate trust-core implementation of the approved parts of
 (O8), any timestamp authority (O9), shared replay infrastructure and
 high-assurance historical acceptance are deliberately not implemented.
 
+### Contract decisions applied after owner review
+
+- **`RECORDED_LOCAL`** is a defined consumption state (never global replay
+  protection, exactly-once execution or proof the operation completed). Every
+  replay-checked result discloses `replay_durable` (`false` for the in-memory
+  cache, which is lost on restart; `true` for the sqlite cache).
+- **Retirement boundary is now strict**, like compromise: a timestamp whose
+  latest possible time (`genTime + accuracy`) equals `retired_at` is refused,
+  as is a signer-asserted `issued_at` equal to it (development only). This
+  tightens the earlier candidate, which accepted equality for retirement. A
+  valid timestamp still does not establish that trust history is complete (O8).
+- **Unix sockets** are refused for the development self-signed option only
+  (uvicorn reports no server address for them); normal trusted verification over
+  a Unix socket is unaffected. The development option now also requires a known
+  loopback peer.
+- **`regaudit-fhe verify --trusted-keys`**: omitted is a usage error (`2`);
+  supplied, even as an empty value, but unusable is infrastructure failure (`3`).
+- `report.v1` is refused under `confidential` / `high-assurance` for now.
+- A required timestamp is satisfied only by authenticated evidence.
+- **Directly constructed `TrustStore(...)`** is held to the loaders' rules: Ed25519
+  keys only and no key under two ids (previously only the loaders checked).
+- **Canonical base64 on the `report.v1` path too:** a v1 signature or timestamp
+  token that is not canonical base64 (trailing bits, whitespace, stray characters)
+  no longer verifies.
+- A replay store that fails **while verifying**, outside the development profile,
+  is infrastructure failure (`verify` exit `3`, HTTP `503`), not a policy refusal.
+
 ### Added
 
 - **`regaudit-fhe.report.v2`** (`envelope_v2`, `AuditEnvelopeV2`, `parse_envelope`,
@@ -90,8 +117,8 @@ high-assurance historical acceptance are deliberately not implemented.
   direct construction whose `keys`/`revoked`/`parameter_set_pins` disagree with
   its `entries`.
 - Development-only self-signed verification now also requires, on every
-  request, a loopback/Unix server socket **and** a loopback client, and refuses
-  any forwarding header unless an explicit trusted-proxy policy vouches for it.
+  request, a loopback TCP server socket **and** a known loopback client (Unix
+  sockets are refused for this option), and refuses any forwarding header unless an explicit trusted-proxy policy vouches for it.
 
 ### Security hardening found by independent review during this phase
 
@@ -122,7 +149,8 @@ files.
   (or byte-identical formatting) before claiming v2 compatibility.
 - A header-less local reverse proxy cannot be distinguished from a direct local
   client, so the development self-signed option must not be enabled behind one.
-  Under uvicorn a Unix-socket request reports no server address and is refused.
+  Under uvicorn a Unix-socket request reports no server address; the development
+  option refuses it by decision (normal verification is unaffected).
 - `BodySizeLimitMiddleware` still checks `Content-Length` only for the other
   endpoints (only `/v1/verify` now bounds chunked uploads).
 - Phase 3A does not address the larger confidential-computation limitations

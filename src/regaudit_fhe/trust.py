@@ -252,6 +252,17 @@ class TrustStore:
             self, "parameter_set_pins", MappingProxyType(dict(self.parameter_set_pins))
         )
         object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+        # Direct construction is held to the same rules as the loaders: every key
+        # must be a real Ed25519 public key, and no key may sit under two ids (a
+        # revoked or compromised key must not be re-labelled to regain trust).
+        for key_id, pem in self.keys.items():
+            _checked_pem(key_id, pem)
+        _require_unique_keys(self.keys)
+        for map_key, entry in self.entries.items():
+            if entry.key_id != map_key:
+                raise TrustStoreError(
+                    f"trust-store entry stored under {map_key!r} names key_id {entry.key_id!r}"
+                )
         if self.entries:
             # The legacy views feed the older API and the entries feed the engine;
             # they must describe the same store or the two would disagree.

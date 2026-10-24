@@ -67,6 +67,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from ._time import parse_rfc3339
+from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
@@ -430,7 +431,13 @@ def verify_signature(public_key_pem: str, body: bytes, signature_b64: str) -> bo
     if not isinstance(pub, Ed25519PublicKey):
         return False
     try:
-        pub.verify(base64.b64decode(signature_b64), body)
+        # Canonical base64 only: the receipt text is outside the v1 signature, so a
+        # lenient decoder would let anyone vary it without changing the bytes.
+        signature = decode_canonical_b64(signature_b64, length=64)
+    except ValueError:
+        return False
+    try:
+        pub.verify(signature, body)
         return True
     except _CryptoInvalidSignature:
         return False
@@ -710,7 +717,8 @@ def _timestamp_status(
         # as VERIFIED: the timestamp block is also outside the v1 signed body.
         return TS_UNVERIFIED
     try:
-        return TS_VERIFIED if tsa_verifier(body_bytes, base64.b64decode(token_b64)) else TS_FAILED
+        token = decode_canonical_b64(token_b64)
+        return TS_VERIFIED if tsa_verifier(body_bytes, token) else TS_FAILED
     except Exception:
         return TS_FAILED
 

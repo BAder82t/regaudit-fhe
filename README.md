@@ -240,6 +240,16 @@ if result.accepted:      # the authoritative decision; `valid` is deprecated
     ...
 ```
 
+Replay detection is local and honestly labelled: `consumption` is `NOT_CHECKED`,
+`CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL` (recorded in this verifier's store at
+verification time, with no proof the authorised operation completed), and
+`replay_durable` says whether that record survives a restart. It is never global
+single-use protection. `report.v1` is verified over its original bytes but is
+refused under the `confidential` and `high-assurance` profiles, and a required
+timestamp is satisfied only by authenticated evidence (an absent one never is).
+Retirement and compromise boundaries are both **strictly earlier**: a timestamp
+equal to the boundary is refused.
+
 The trust store's `entries` form records each key's status (`active`, `retired`,
 `compromised`), validity bounds and scope. Retired or compromised keys are
 accepted historically only with authenticated chronology *and* an authenticated

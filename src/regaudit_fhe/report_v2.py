@@ -35,7 +35,13 @@ from typing import Any
 
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
-from .canonical import CanonicalError, canonical_bytes, check_value, loads_strict
+from .canonical import (
+    CanonicalError,
+    canonical_bytes,
+    check_value,
+    decode_canonical_b64,
+    loads_strict,
+)
 from .reports import (
     LIB_VERSION,
     REGULATION_MAP,
@@ -425,19 +431,13 @@ class AuditEnvelopeV2:
 
 
 def _b64(value: Any, name: str, *, length: int | None = None) -> str:
-    """Canonical standard-alphabet base64 only: re-encoding the decoded bytes
-    must reproduce the text exactly, so unused trailing bits cannot be varied
-    to change the text without changing the bytes."""
+    """Canonical standard-alphabet base64 only (see ``decode_canonical_b64``)."""
     if not isinstance(value, str) or not value:
         raise EnvelopeFormatError("BAD_VALUE", f"{name} must be a non-empty string")
     try:
-        raw = base64.b64decode(value, validate=True)
+        decode_canonical_b64(value, length=length)
     except ValueError as exc:
-        raise EnvelopeFormatError("BAD_VALUE", f"{name} is not valid base64") from exc
-    if base64.b64encode(raw).decode("ascii") != value:
-        raise EnvelopeFormatError("BAD_VALUE", f"{name} is not canonical base64")
-    if length is not None and len(raw) != length:
-        raise EnvelopeFormatError("BAD_VALUE", f"{name} must decode to {length} bytes")
+        raise EnvelopeFormatError("BAD_VALUE", f"{name}: {exc}") from exc
     return value
 
 

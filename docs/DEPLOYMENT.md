@@ -83,7 +83,7 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
 | POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope.|
-| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured. |
+| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured (unless the development-only self-signed check is enabled, which can never accept a report) or if the replay store is unavailable outside development. |
 
 `/v1/verify` fails closed: with no trust store it returns **503** rather
 than a verdict. Its response keeps `valid`, `primitive`, `issued_at` and
@@ -99,13 +99,13 @@ with an ephemeral issuer key, so envelopes it produces can only ever be
 `build_app()` validates the verification policy at build time, `/v1/verify`
 fails closed without a trust store, and the development self-signed check
 re-verifies on **every request** that the profile is `development`, that the
-server socket is loopback or a Unix socket, that a directly connected client is
-loopback, and that no forwarding header is present unless a trusted-proxy policy
+server socket is a loopback TCP address, that the peer is known and loopback, and that no forwarding header is present unless a trusted-proxy policy
 vouches for it. Only the *startup* bind-host check remains CLI-only, since only
 the CLI knows its bind address. Limits: a header-less local reverse proxy cannot
 be told apart from a direct local client (do not enable the development option
-behind one), and under uvicorn a Unix-socket request reports no server address
-and is refused.
+behind one). Unix sockets (for which uvicorn reports no server address) are refused
+for the development option only; normal trusted verification over a Unix socket is
+unaffected.
 
 **Replay detection is local.** `record` mode marks a report as seen in this
 verifier's store when it is verified. It is not coupled to any downstream
@@ -114,7 +114,9 @@ verifiers that do not share a store can each accept the same report once. With
 `record` mode on, any caller holding the `audit:verify` scope who has a valid
 report can consume its `audit_run_id` before the intended relying party does.
 `check` mode only looks up and never records. A stateless verification response
-reports `consumption: NOT_CHECKED`.
+reports `consumption: NOT_CHECKED`. Every replay-checked response also reports
+`replay_durable` (`false` for the in-memory cache, whose records are lost when the
+process exits).
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.

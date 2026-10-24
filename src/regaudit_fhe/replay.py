@@ -61,6 +61,9 @@ def _check_text(*values: str) -> None:
 @runtime_checkable
 class ReplayCache(Protocol):
     scope: str
+    # True only if a recorded identifier survives a process restart (is committed to
+    # disk before ``record`` returns). Disclosed in every verification result.
+    durable: bool
 
     def seen(self, key_id: str, run_id: str, *, now: datetime) -> bool: ...
 
@@ -71,6 +74,7 @@ class ReplayCache(Protocol):
 
 class InMemoryReplayCache:
     scope = SCOPE_LOCAL_PROCESS
+    durable = False  # lost when the process exits
 
     def __init__(self, capacity: int = 100_000) -> None:
         self._capacity = capacity
@@ -107,6 +111,7 @@ class InMemoryReplayCache:
 
 class SqliteReplayCache:
     scope = SCOPE_LOCAL_PERSISTENT
+    durable = True  # committed to the sqlite file before record() returns
 
     def __init__(self, path: str | Path, capacity: int = 1_000_000) -> None:
         self._path = str(path)
