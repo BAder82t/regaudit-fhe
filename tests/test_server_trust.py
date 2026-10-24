@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -478,16 +479,21 @@ def test_ipv4_mapped_loopback_is_recognised():
     assert check_dev_exposure(_scope(server=("::ffff:10.0.0.5", 80)), {}, ()) is not None
 
 
-class _MultiHeaders(dict):
+class _MultiHeaders:
     """Starlette-style headers: one name may carry several lines."""
 
     def __init__(self, lines):
-        super().__init__()
-        self._lines = lines
-        for k, v in reversed(lines):
-            self[k.lower()] = (
-                v  # a naive .get() sees only the FIRST line (the client-controlled one)
-            )
+        self._lines = list(lines)
+
+    def __contains__(self, name):
+        return any(k.lower() == name.lower() for k, _ in self._lines)
+
+    def get(self, name, default=None):
+        # a naive .get() sees only the FIRST line (the client-controlled one)
+        for k, v in self._lines:
+            if k.lower() == name.lower():
+                return v
+        return default
 
     def getlist(self, name):
         return [v for k, v in self._lines if k.lower() == name.lower()]
@@ -512,7 +518,7 @@ def test_slow_verification_does_not_block_the_event_loop(signer, monkeypatch):
 
     import httpx
 
-    import regaudit_fhe.server as server_mod
+    server_mod = importlib.import_module("regaudit_fhe.server")
 
     real = server_mod.verify
     released = threading.Event()
@@ -549,6 +555,6 @@ def test_max_age_zero_or_non_finite_is_a_configuration_error_not_no_limit(signer
 
 
 def test_server_module_exports_are_stable_and_the_old_model_is_gone():
-    import regaudit_fhe.server as server
+    server = importlib.import_module("regaudit_fhe.server")
 
     assert hasattr(server, "build_app") and not hasattr(server, "VerifyRequest")

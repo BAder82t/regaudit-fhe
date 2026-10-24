@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 
 import numpy as np
@@ -70,7 +71,7 @@ def test_legacy_outcome_other_access_paths_do_not_warn():
         assert outcome.trust_status == "TRUSTED"
         assert outcome.to_dict()["valid"] is True  # the key is kept for compatibility
         repr(outcome)
-        assert outcome == outcome
+        assert outcome == dataclasses.replace(outcome)  # an equal copy, not a self-comparison
 
 
 def test_verify_receipt_still_returns_a_plain_bool_without_warning():

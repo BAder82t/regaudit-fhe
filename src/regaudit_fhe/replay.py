@@ -65,11 +65,11 @@ class ReplayCache(Protocol):
     # disk before ``record`` returns). Disclosed in every verification result.
     durable: bool
 
-    def seen(self, key_id: str, run_id: str, *, now: datetime) -> bool: ...
+    def seen(self, key_id: str, run_id: str, *, now: datetime) -> bool:
+        """Whether the pair is currently recorded (does not record)."""
 
     def record(self, key_id: str, run_id: str, *, now: datetime, retain: timedelta) -> bool:
         """Atomically record the pair; ``True`` if newly recorded, ``False`` if present."""
-        ...
 
 
 class InMemoryReplayCache:

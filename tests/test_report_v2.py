@@ -520,9 +520,9 @@ def test_with_timestamp_requires_an_aware_datetime():
     ],
 )
 def test_rfc3339_fractions_of_any_length_up_to_six_digits(text, microsecond):
-    from regaudit_fhe._time import parse_rfc3339
+    import regaudit_fhe._time as t
 
-    assert parse_rfc3339(text).microsecond == microsecond
+    assert t.parse_rfc3339(text).microsecond == microsecond
 
 
 def test_rfc3339_hands_fromisoformat_only_six_digit_fractions(monkeypatch):

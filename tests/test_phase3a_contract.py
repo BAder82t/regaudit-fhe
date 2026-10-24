@@ -645,7 +645,7 @@ def test_replay_store_failure_during_verification_is_infrastructure_not_policy_c
     tmp_path: Path, monkeypatch, capsys
 ):
     """Outside development an unavailable replay store is exit 3, never a policy refusal."""
-    from regaudit_fhe import cli
+    import regaudit_fhe.cli as cli
     from regaudit_fhe.replay import ReplayStateError
 
     s = _signer()

@@ -359,7 +359,7 @@ def test_exit_2_for_an_oversized_report_file(tmp_path, signer):
 
 
 def test_oversized_report_is_never_read_into_memory(tmp_path, monkeypatch):
-    from regaudit_fhe import cli
+    import regaudit_fhe.cli as cli
 
     big = tmp_path / "big-report.json"
     big.write_text("x" * (5 * 1024 * 1024))

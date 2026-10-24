@@ -96,7 +96,8 @@ class TimestampVerifier(Protocol):
     and no default authority.
     """
 
-    def __call__(self, sealed_digest: bytes, token: bytes) -> TimestampEvidence | None: ...
+    def __call__(self, sealed_digest: bytes, token: bytes) -> TimestampEvidence | None:
+        """Return the evidence if ``token`` authentically binds ``sealed_digest``, else ``None``."""
 
 
 @dataclass(frozen=True)
