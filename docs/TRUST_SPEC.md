@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | DRAFT for review. Specification only: no code in this document is implemented. |
+| **Status** | Technical decisions O1-O7 and O10 approved by the project owner (§13). **O8 (trust-anchor custody) and the choice of any timestamp authority remain on HOLD.** Specification only: nothing in this document is implemented. |
 | **Applies to** | `regaudit-fhe.report.v1` (as shipped, plus Phase 1 hardening) and the proposed `report.v2` |
 | **Baseline** | Phase 1 candidate `83adc80bcef00e32fe5b63fc358ec8dce11af744` (tree `9c23f4818133330ea3a9603eab51fe1f96cd18fd`) |
-| **Gate** | `report.v2` implementation (Phase 3) is on HOLD until this document is approved. |
+| **Gate** | `report.v2` implementation (Phase 3) is on HOLD. §11 splits it into a core that does not depend on O8 and controls that do. High-assurance trust-store verification MUST NOT be implemented or advertised until the O8 organisational dependencies are satisfied. |
 
 Key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 
@@ -146,14 +146,36 @@ cannot be edited to remove a past compromise).
 
 ### 4.3 Retirement
 
-For a `retired` key, a report is accepted iff **either**:
+`retired` does **not** automatically invalidate historical signatures, and it
+does not automatically validate them either.
 
-* **(authenticated)** verified chronology (§5) yields `signed_not_after ≤ retired_at`; or
-* **(signer-asserted)** the verifier policy sets `historical_acceptance =
-  "signer-asserted"` and `issued_at ≤ retired_at`. The result then carries
-  `chronology = SIGNER_ASSERTED` and the reason code `CHRONOLOGY_UNAUTHENTICATED`.
+Outside the `development` profile, a report signed by a `retired` key is
+accepted as trusted evidence only if **all** of the following hold:
 
-Signer-asserted acceptance is the default only in the `development` profile.
+1. **Authenticated chronology** (§5): a timestamp or witness record that
+   binds the exact sealed artifact and yields `signed_not_after ≤ retired_at`.
+2. **Sufficiently fresh, independently authenticated trust history** (§4.6):
+   the verifier's anchor-authenticated store is within the profile's maximum
+   age and consistent with its durable monotonic head, so a later compromise
+   declaration for that key cannot have been omitted.
+3. No `compromised` declaration in that history places `compromised_from`
+   at or before `signed_not_after`.
+
+Failing any of these is a refusal, not a presumed clean interval:
+
+| Missing | Result |
+|---|---|
+| chronology | `INVALID`, `KEY_RETIRED_NO_CHRONOLOGY` |
+| trust-history freshness | `INVALID`, `TRUST_STORE_FRESHNESS_UNPROVEN` |
+
+A signer-controlled `issued_at` is never sufficient. An older authentic
+trust-store snapshot does not prove that no later compromise was declared.
+
+**`development` only:** the policy MAY set `historical_acceptance =
+"signer-asserted"`, accepting `issued_at ≤ retired_at`. The result then carries
+`chronology = SIGNER_ASSERTED`, `CHRONOLOGY_UNAUTHENTICATED`, and is never
+presented as high-assurance evidence. `high-assurance` MUST fail closed when
+trust-history freshness cannot be established.
 
 ### 4.4 Compromise with an unknown boundary
 
@@ -195,6 +217,39 @@ In `confidential` and `high-assurance` profiles the bundle MUST be signed by
 the anchor, and carry `sequence`, `issued_at`, `next_update` and
 `prev_bundle_hash`. If `next_update` has passed, the verifier fails closed
 with `TRUST_STORE_STALE`.
+
+**Architecture (technical design, approved as the basis for implementation
+of its software parts):**
+
+```
+independently provisioned,        authenticated trust-store      durable, monotonic
+deployment-scoped trust anchor -> bundles (signed by anchor) ->  verifier-side history
+```
+
+The verifier MUST refuse: a missing or inconsistent anchor; an invalid
+anchor succession; a rollback (`TRUST_STORE_ROLLBACK`); a fork
+(`TRUST_STORE_FORK`); and a history gap that violates its policy.
+
+A hash chain proves **linkage between the records supplied**. It does not
+prove **completeness of all records ever issued**. Rollback resistance comes
+from the independently maintained monotonic head and an authenticated refresh
+mechanism, within the stated threat model, and from nothing else.
+
+**What the software cannot decide.** Software cannot establish who
+legitimately controls the trust anchor. The following are **organisational
+designations, currently PENDING owner designation**; this specification does
+not name roles, organisations or credentials for them:
+
+| Field | Status |
+|---|---|
+| Anchor custodian | Pending owner designation |
+| Independent approval authority | Pending owner designation |
+| Rotation quorum and procedure | Pending owner designation |
+| Recovery arrangements (loss or compromise of the anchor) | Pending owner designation |
+| Initial distribution mechanism to each verifier | Pending owner designation |
+
+Until these are designated and satisfied, trust-store verification MUST NOT
+be implemented or advertised as `high-assurance`.
 
 ### 4.6 Offline verification and trust-history completeness
 
@@ -239,22 +294,37 @@ channel, the verifier cannot know that no later compromise was declared.
 
 ### 5.1 What is timestamped
 
-Timestamp evidence MUST cover the **sealed envelope digest**:
+Timestamp evidence MUST cover the **sealed envelope digest**, a
+domain-separated digest of the complete signed artifact:
 
 ```
-sealed_digest = SHA-256( canonical_json({
-    "signed_body": <the v2 signed body, incl. key_id and fingerprint>,
-    "signature_alg": <receipt.signature_alg>,
-    "signature_b64": <receipt.signature_b64>
-}) )
+sealed_digest = SHA-256(
+    b"regaudit-fhe/sealed-envelope/v2\x00"
+    || canonical_json({
+        "signed_body": <the v2 signed body, incl. key_id, key fingerprint,
+                        issuer and deployment_id>,
+        "signature_alg": <receipt.signature_alg>,
+        "signature_b64": <receipt.signature_b64>
+    })
+)
 ```
 
 (`canonical_json` is the existing rule: sorted keys, no whitespace, UTF-8.)
 
-The digest MUST be computed **after** signing, and MUST exclude the `timestamp`
-block itself and any embedded PEM. This closes F2: because the digest covers
-the signature, a token proves the *signed* envelope existed by `genTime`, so a
-later forgery with a compromised key cannot reuse it.
+* The domain-separation prefix prevents a token over this digest from being
+  confused with a token over any other regaudit-fhe digest (for example the
+  v1 body digest).
+* The digest covers the canonical signed body, the signature and the
+  signer-key identity (inside the signed body).
+* **No circular dependency.** The signature is computed over the signed body,
+  which excludes the `timestamp` block. The digest is computed over the body
+  and the signature, and is computed **after** signing. The timestamp is then
+  attached outside both. Nothing signed or timestamped depends on the token.
+* The digest MUST exclude the `timestamp` block and any embedded PEM.
+
+This closes F2: because the digest covers the signature, a token proves the
+*signed* envelope existed by `genTime`, so a later forgery with a compromised
+key cannot reuse it.
 
 ### 5.2 Token format and verification
 
@@ -300,7 +370,7 @@ the trust store's dated history.
 | Class | Source | Allowed to satisfy |
 |---|---|---|
 | `NONE` | no evidence | active keys only |
-| `SIGNER_ASSERTED` | `issued_at` | retirement under `historical_acceptance = signer-asserted` only |
+| `SIGNER_ASSERTED` | `issued_at` | retirement under `historical_acceptance = signer-asserted`, **`development` profile only** (§4.3) |
 | `AUTHENTICATED` | verified timestamp or witness over `sealed_digest` | retirement and compromise rules |
 
 ---
@@ -356,6 +426,44 @@ Requirements for `confidential` and `high-assurance`:
   `audit_run_id` by submitting a forgery that reuses it.
 * **Clock.** Expiry uses the verifier's clock, never the envelope's.
 
+### 6.2 Verification versus consumption
+
+Verifying a report and **consuming** it for a consequential operation are
+different acts, and the response MUST say which happened.
+
+| `consumption` | Meaning |
+|---|---|
+| `NOT_CHECKED` | no replay state consulted. This is what a stateless verification API reports. |
+| `CHECKED_NOT_CONSUMED` | the id was looked up and was not present; nothing was recorded |
+| `RESERVED` | the id is held by a caller for an operation in progress, with a lease |
+| `CONSUMED` | the operation completed and the id is permanently recorded |
+
+* A verification-only API (including `/v1/verify`) MUST NOT be described as
+  replay-protected, and MUST report `consumption: NOT_CHECKED`, unless it also
+  performs a reservation.
+* **Coupling to the operation.** Accepting a report and performing the action
+  it authorises are two steps with a failure window between them. The design
+  requirement for Phase 3 is a **reserve -> perform -> commit** protocol keyed
+  by `(key_id, audit_run_id)`:
+  * *Reserve* atomically records the id with an owner token and a lease
+    (`RESERVED`). Of several processes verifying the same report concurrently,
+    exactly one obtains the reservation; the others are refused
+    (`REPLAY_DETECTED`).
+  * *Commit* marks the id `CONSUMED` only after the consequential operation
+    has completed.
+  * If the holder crashes, the lease expires. The id then returns to
+    available **only if** the operation did not complete. A consumer whose
+    operation is not idempotent MUST persist its own completion record before
+    commit so recovery can tell the cases apart.
+  * Marking an id consumed *before* the action completes, or leaving it
+    unconsumed *after* it completes, are both defects. The guarantee is stated
+    per consumer as at-most-once or at-least-once, never silently as both.
+* This is a design requirement, not a request to build a distributed
+  transaction system. The library defines the interface and the states;
+  durability, atomicity and recovery are properties of the store the operator
+  supplies, and `replay_scope` (§6.1) reports what that store can actually
+  guarantee.
+
 Required by profile:
 
 | Profile | `max_age` | `audience` | replay cache | challenge |
@@ -402,6 +510,7 @@ original canonical signing format. v2 MUST NOT alter that format.
 | `policy_id` | string | Identifier and version of the policy evaluated. |
 | `trust_store_as_of`, `trust_store_sequence` | RFC 3339, int | Which trust-store snapshot the decision used (§4.6). |
 | `replay_scope` | enum | Which uniqueness guarantee applied (§6.1). |
+| `consumption` | enum | `NOT_CHECKED` \| `CHECKED_NOT_CONSUMED` \| `RESERVED` \| `CONSUMED` (§6.2). |
 | `accepted` | bool | The policy's final decision. |
 | `reasons` | list of stable codes | Machine-readable causes (table below). |
 | `valid` | bool | **Deprecated.** In v2 mode it equals `accepted`. |
@@ -427,7 +536,7 @@ report is distinguishable from a forgery.
 `REPORT_TOO_OLD`, `REPLAY_DETECTED`, `TIMESTAMP_FAILED`,
 `TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`, `TRUST_STORE_ROLLBACK`,
 `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`, `TRUST_ANCHOR_MISSING`,
-`REPLAY_STATE_UNAVAILABLE`, `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
+`REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`, `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
 
 Codes are stable API; new codes may be added, existing codes MUST NOT change
 meaning.
@@ -439,8 +548,10 @@ meaning.
 * `valid` is retained in the Phase 1 library API **unchanged** (integrity-only
   without trust material) so v1 callers do not break, but the documentation
   MUST label it as not a provenance claim.
-* After the first release that ships v2, `valid` emits a `DeprecationWarning`
-  from the library and is removed at the next minor version.
+* `accepted` is the authoritative policy decision. `valid` is **deprecated**:
+  it is kept through the first release that ships v2 and emits a
+  `DeprecationWarning` from the library. **Removal is deferred** to a
+  subsequent, explicitly breaking release; this document does not schedule it.
 * The HTTP endpoint already returns `valid == (trust_status == TRUSTED)`; in
   v2 mode it equals `accepted`.
 
@@ -459,7 +570,7 @@ one function, called by every entry point.
 | Entry point | Supported | Notes |
 |---|---|---|
 | `regaudit-fhe serve` (CLI, Docker `ENTRYPOINT`) | yes | Builds the app through the library factory. |
-| `build_app(config)` (embedding / ASGI) | **yes, documented** | It is public and used by `examples/server_client.py`. It SHOULD be added to `__all__`. |
+| `build_app(config)` (embedding / ASGI) | **yes, documented (approved O7)** | It MUST be exported in `__all__` and documented as a supported embedding entry point. Library security checks MUST NOT depend on the CLI wrapper. |
 | `regaudit-fhe verify` (CLI) | yes | Must share the same policy engine (F8). |
 | Library `verify_envelope` / `verify_envelope_or_raise` | yes | |
 
@@ -470,12 +581,30 @@ one function, called by every entry point.
    and the profile restrictions below.
 2. A **development-only** option (`allow_self_signed`, `dev_mode`) is refused
    in `confidential`/`high-assurance`, regardless of entry point.
-3. Because `build_app` cannot know its bind host, loopback is also enforced
-   **at request time**: when a development-only option is active, a request is
-   refused (403) unless the ASGI `scope["server"]` host is loopback (or a Unix
-   socket). This holds even under `uvicorn module:app --host 0.0.0.0`.
-   Where the bind is known (the CLI), the startup check remains as an
-   additional early failure.
+3. **Development-only options need two independent checks**, both enforced
+   inside the library for every verification request, including embedded
+   `build_app()` deployments:
+
+   1. **Profile.** The application profile must permit the option. A
+      development-only option set under `confidential`/`high-assurance` is
+      refused at startup and again at request time.
+   2. **Network exposure.** The request's actual transport must satisfy the
+      loopback restriction: the ASGI `scope["server"]` host is loopback, or
+      the transport is a Unix domain socket. Otherwise respond 403.
+
+   Client-supplied forwarding headers (`X-Forwarded-For`, `Forwarded`,
+   `X-Real-IP`, and similar) MUST NOT be treated as proof of loopback origin.
+   Behind a reverse proxy the socket peer is the proxy, so the development
+   option is refused unless an explicit **trusted-proxy policy** names the
+   proxies, and even then only forwarding data from those peers is honoured.
+   Absent such a policy, the escape hatch is refused.
+
+   Where the bind is known (the CLI), a startup check remains as an
+   additional early failure. Passing one check never substitutes for the
+   other.
+
+   **Invariant.** `--allow-self-signed` never turns `SELF_SIGNED_ONLY` into
+   `TRUSTED`, and never yields `accepted: true`.
 4. Trusted verification requires trust material; absent or invalid material
    fails closed with no fallback.
 5. The CLI `verify` exits 0 **only** when the report is accepted under the
@@ -486,14 +615,19 @@ one function, called by every entry point.
    |---|---|
    | Accepted under the configured trust policy | `0` |
    | Well-formed report refused by policy (`SELF_SIGNED_ONLY`, revoked, compromised, stale, replayed, ...) | `1` |
-   | Invalid input, malformed report, or usage error | `2` |
+   | Invalid input, malformed report, or usage error (for example a malformed report, or `--strict` without trust material) | `2` |
    | Required verification infrastructure unavailable or invalidly configured (trust store or anchor missing, unreadable, malformed, inconsistent; replay state unavailable) | `3` |
 
    An explicit development-only integrity check (`--allow-self-signed`) MAY
    print `integrity_valid: true` and `trust_status: SELF_SIGNED_ONLY`, but
    exits `1`, never `0`.
 
-   **Reconciliation with existing allocations.** Today `verify` uses `0`
+   **Tests (required).** Regression tests MUST run the real process and assert
+   the actual exit status and the stdout/stderr content for each row,
+   including both changed behaviours below. README and CHANGELOG MUST record
+   them.
+
+   **Reconciliation with existing allocations (approved).** Today `verify` uses `0`
    (success), `1` (typed verification failure) and `2` (bad CLI input), as
    documented in the README; `3` is unused. Two present behaviours change:
    (a) a self-consistent self-signed report currently exits `0` and will exit
@@ -531,12 +665,36 @@ missing, and MUST NOT fall back to a weaker profile.
 ## 11. Phase 3 contract summary (`report.v2`)
 
 Not implemented. Phase 3 would add, in the **signed body**: `key_id`,
-`public_key_fingerprint`, `deployment_id`, `audit_run_id`, optional `audience`,
-`trust_policy_version`, optional named `model_commitment` and
+`public_key_fingerprint`, `issuer`, `deployment_id`, `audit_run_id`, optional
+`audience`, `trust_policy_version`, optional named `model_commitment` and
 `dataset_commitment`; and, outside it: a `timestamps` list and the receipt as
 today. `schema` becomes `regaudit-fhe.report.v2`. The canonicalisation rule is
 unchanged. Open point: JSON number canonicalisation across implementations
 (consider RFC 8785) before any non-Python verifier is supported.
+
+### 11.1 Proposed split of Phase 3
+
+**Implementable core** (does not depend on O8 custody decisions):
+
+| Item | Spec |
+|---|---|
+| Signed v2 identity (`key_id`, fingerprint, issuer, `deployment_id`) | §3, O1 |
+| Explicit verification statuses and `accepted`; `valid` deprecated | §8, O10 |
+| Sealed digest definition and a verifier hook for a **caller-pinned** timestamp verifier; no default authority | §5, O2, O9 |
+| `VerificationPolicy` shared by CLI, HTTP and embedded use; `build_app` exported | §9, O7 |
+| Two-part development-option checks, trusted-proxy policy | §9.3.3, O5 |
+| CLI exit codes `0/1/2/3` with process-level tests | §9.3.5, O6 |
+| Retired/compromised key states in a **locally provisioned** store; unknown chronology refuses | §4.1-§4.4, O3, O4 |
+| Locally scoped replay policy (`LOCAL_PROCESS`, `LOCAL_PERSISTENT`), `consumption` states | §6 |
+
+**Deployment-dependent controls** (blocked until the organisation satisfies O8):
+
+| Item | Why blocked |
+|---|---|
+| Trust-anchor provisioning, anchor-signed bundles, anchor rotation | custodian, approval authority, quorum, recovery and distribution are undesignated |
+| Durable monotonic history, authenticated refresh, `high-assurance` historical acceptance | depends on the anchor and refresh authority |
+| `SHARED` replay store across verifiers | operator and store not designated |
+| Selection of any real timestamp authority or witness | O9 HOLD |
 
 ---
 
@@ -559,31 +717,29 @@ Each rule gets a positive control and a refused case.
 
 ---
 
-## 13. Decisions needed from the project owner
+## 13. Owner decisions
 
-"Owner status" records the reviewer's responses so far. It is not an approval
-of any item whose wording the reviewer has not yet seen confirmed against this
-table.
+Final rulings on the exact wording of this table.
 
-| # | Decision | Recommendation | Owner status |
+| # | Decision | Ruling | Conditions |
 |---|---|---|---|
-| O1 | Move `key_id` and the key fingerprint into the signed body in v2 | Yes (F1) | Direction approved ("signed issuer and deployment identity"); the verifier must compare signed identity with its independently configured trust policy. Exact wording pending confirmation. |
-| O2 | Make the timestamp digest cover the signature (the sealed digest) | Yes (F2); document that v1 tokens do not meet it | Direction approved: the token must bind a canonical digest of the complete signed artifact, including signature and key identity. Pending confirmation. |
-| O3 | Default historical policy for retired keys outside `development` | Authenticated chronology | Pending |
-| O4 | Compromise default when the boundary is unknown | Reject all (D3) | Approved fail-closed: affected signatures are not trusted evidence; no inference from `issued_at`. |
-| O5 | Request-time loopback enforcement for development options | Yes (§9.3.3) | Pending |
-| O6 | CLI `verify` behaviour change | Yes, with a changelog entry; exit codes per §9.3.5 | Approved in principle; exit-code contract is a proposal pending reconciliation with existing allocations (see §9.3.5). |
-| O7 | Export `build_app` in `__all__` and document it as a supported embedding entry point | Yes | Pending |
-| O8 | Trust-store bundle signing scheme and trust-anchor distribution | Provisioned deployment-scoped anchor outside the bundle (§4.5); custody and distribution are an organisational decision | **HOLD**: no trust-distribution architecture approved. No TOFU, HTTPS-alone, or in-bundle anchor. |
-| O9 | Which TSA/witness roots to ship examples for | None. Allow an explicitly configured, pinned timestamp verifier; ship no automatically trusted authority | **HOLD** on selecting any authority. Examples must not establish trust in the example authority. |
-| O10 | Remove `valid` from the library API (timing) | After the first v2 release; deprecation warning first (§8.4) | Direction approved: `accepted` is the authoritative decision and ambiguous `valid` is deprecated. Removal timing pending. |
+| O1 | Move `key_id` and key fingerprint into the signed body | **APPROVED** | Sign `key_id`, key fingerprint, issuer identity and `deployment_id`. The verifier compares them with independently provisioned trust policy. |
+| O2 | Timestamp digest covers the signature (sealed digest) | **APPROVED** | Timestamp a domain-separated digest covering the canonical signed body, signature and signer-key identity. No circular signature/timestamp dependency (§5.1). |
+| O3 | Retired-key historical policy outside `development` | **APPROVED CONDITIONALLY** | Authenticated chronology and sufficiently fresh, independently authenticated trust history are both required. Unknown chronology means no trusted historical acceptance (§4.3). |
+| O4 | Compromise with unknown boundary | **CONFIRMED** | Reject all affected signatures as trusted evidence; no inference from `issued_at` (§4.4). |
+| O5 | Request-time loopback enforcement | **APPROVED** | Applies to every development-only verification request including embedded `build_app()`. Two independent checks (profile and network exposure); no trust in forwarding headers; trusted-proxy policy or refusal; never `TRUSTED` or `accepted` (§9.3.3). |
+| O6 | CLI `verify` behaviour | **APPROVED** | Exit codes 0/1/2/3 per §9.3.5. Both intentional changes approved. `serve` startup refusal stays 2. Process-level exit-code and stdout/stderr tests required; README and CHANGELOG updated. |
+| O7 | Export and support `build_app()` | **APPROVED** | Exported in `__all__` and documented. Library checks must not depend on the CLI wrapper. |
+| O8 | Trust-anchor custody | **HOLD** | The technical architecture is specified (§4.5). Custody, independent approval authority, rotation quorum, recovery and initial distribution remain pending owner designation. |
+| O9 | Timestamp authorities | **APPROVED: NO DEFAULT ROOTS** | No built-in trusted TSA or witness. Selecting an actual authority remains on HOLD. Examples must not establish trust in the example authority. |
+| O10 | Remove `valid` | **APPROVE DEPRECATION; DEFER REMOVAL** | Keep through the first v2 release with a warning. Remove only in a subsequent explicitly breaking release (§8.4). |
 
 ### Open protocol questions (must be resolved before Phase 3)
 
 | # | Question | Position in this draft |
 |---|---|---|
 | Q1 | How does an offline verifier know trust history is complete and not an earlier authentic snapshot? | §4.6: it cannot, without prior state or an authenticated refresh. The draft makes monotonic status transitions, a hash chain and durable head tracking mandatory, labels every result with `trust_store_as_of`, and refuses compromise-sensitive historical acceptance in `high-assurance` unless freshness is established. |
-| Q2 | Is replay protection local to a verifier or distributed? | §6.1: local by default, with an explicit `replay_scope`. Global single use requires a shared store with an atomic record-if-absent. The library will not claim it otherwise. |
+| Q2 | Is replay protection local to a verifier or distributed? | §6.1: local by default, with an explicit `replay_scope`. Global single use requires a shared store with an atomic record-if-absent. The library will not claim it otherwise. §6.2 additionally separates verification from consumption and defines the reserve/perform/commit coupling to the consequential operation as a Phase 3 design requirement. |
 
 ---
 
