@@ -302,6 +302,12 @@ and parameter-set pins; a plain `key_id` → PEM mapping enforces
 registration only. Steps 1, 2, 3, 7, and 8 are policy-side and live in
 the regulator's verifier code.
 
+A verified timestamp must not be presented as historical non-revocation
+proof: the v1 token covers the signed body only, so it does not bind the
+signature or the key, and a holder of a later-compromised key could sign a
+previously timestamped body. The target design is in
+[TRUST_SPEC.md](TRUST_SPEC.md) §4-§5.
+
 Known limits of the v1 format: the `timestamp` block is outside the signed
 body, so it is never signed evidence. An attached timestamp is
 `UNVERIFIED` unless a `tsa_verifier` validates it, and a verified
@@ -322,3 +328,4 @@ provided.
 | 2026-04-30 | v0.0.7: real encrypted concordance/calibration/disagreement primitives, verifier hardening (`verify_receipt` warns on missing trust store; CLI `--trusted-keys`/`--strict`). |
 | 2026-06-18 | v0.0.8: differential-privacy output perturbation with a signed `dp` disclosure block; `CallableKeyProvider` external key custody (KMS/HSM); experimental OpenFHE CKKS backend behind the backend registry. |
 | 2026-10-24 | Phase 1 trust hardening (unreleased): `/v1/verify` fails closed without a trust store; `trust_status` / `timestamp_status` outcomes; revocation and pins enforced through `verify_receipt`; unverified timestamps no longer reported valid. |
+| 2026-10-24 | Trust specification (docs/TRUST_SPEC.md) drafted: key lifecycle, time evidence, replay, verification-status semantics and entry-point requirements for a future report.v2. Specification only. |

@@ -88,6 +88,15 @@ when `trust_status` is `TRUSTED`. Note that `/v1/audit/{primitive}` signs
 with an ephemeral issuer key, so envelopes it produces can only ever be
 `SELF_SIGNED_ONLY` until a long-lived signer is wired in.
 
+**Entry points.** `regaudit-fhe serve` is the supported way to run the
+server. `build_app()` may be embedded, but the bind-host check for
+`--allow-self-signed` runs only in the CLI: an app from `build_app()` served
+directly (for example `uvicorn` on `0.0.0.0`) is not host-checked. It still
+fails closed without a trust store, refuses the development option under
+non-development profiles, and can never report `TRUSTED` for a self-signed
+envelope. Request-time enforcement is specified in
+[TRUST_SPEC.md](TRUST_SPEC.md) §9.3 and is not yet implemented.
+
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.
 

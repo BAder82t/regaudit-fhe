@@ -39,6 +39,13 @@
   (development only: refused under non-`development` profiles via
   `REGAUDIT_FHE_PROFILE`, and on non-loopback binds; never yields `TRUSTED`).
 
+### Documentation
+
+- `valid` is documented as not a provenance claim; a verified timestamp is
+  documented as not proof of non-revocation; the `build_app()` entry-point
+  contract is documented. The target design is in `docs/TRUST_SPEC.md`
+  (specification only).
+
 ### Unchanged
 
 - The v1 canonical signing format (`regaudit-fhe.report.v1`); existing reports

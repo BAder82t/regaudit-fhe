@@ -199,6 +199,17 @@ need to react differently to each failure reason.
 > a one-time `UserWarning` so integrators do not silently rely on the
 > weak path. `verify_envelope(...)` reports `trust_status` as `TRUSTED`,
 > `SELF_SIGNED_ONLY` or `INVALID`: branch on that, not on `valid`.
+>
+> **`valid` is not a provenance claim.** In the library, with no trust
+> material, `valid: true` means only that the hash and the embedded
+> signature are self-consistent. The HTTP endpoint instead returns
+> `valid: true` only for `TRUSTED`. Never treat `valid` alone as proof of who
+> produced a report. See [docs/TRUST_SPEC.md](docs/TRUST_SPEC.md) §8.
+>
+> **A verified timestamp is not proof of non-revocation.** In `report.v1`
+> the timestamp covers the signed body only (not the signature or key), and
+> sits outside the signature. It does not show the key was uncompromised at
+> that time. See [docs/TRUST_SPEC.md](docs/TRUST_SPEC.md) §5.4.
 > Pass a `TrustStore` (`trust_store=`) to enforce revocation and pins; a
 > plain `trusted_keys` mapping cannot express either. An attached
 > timestamp is `UNVERIFIED` unless you pass a `tsa_verifier`.
