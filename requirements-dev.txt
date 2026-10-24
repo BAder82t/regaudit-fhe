@@ -43,7 +43,7 @@ httpx==0.28.1
     # via regaudit-fhe (pyproject.toml)
 hypothesis==6.168.5
     # via regaudit-fhe (pyproject.toml)
-idna==3.13
+idna==3.20
     # via
     #   anyio
     #   httpx
