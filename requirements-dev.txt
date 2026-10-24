@@ -25,7 +25,7 @@ cffi==2.1.1
     # via cryptography
 click==8.3.3
     # via uvicorn
-coverage[toml]==7.14.0
+coverage[toml]==7.16.2
     # via pytest-cov
 cryptography==50.0.2
     # via regaudit-fhe (pyproject.toml)
