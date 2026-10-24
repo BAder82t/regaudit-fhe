@@ -41,6 +41,16 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_RATE_LIMIT_PER_MIN    - tokens per minute per key (default 60)
     REGAUDIT_FHE_REQUEST_TIMEOUT_S     - per-request timeout in seconds
     REGAUDIT_FHE_CORS_ORIGINS          - comma-separated allow-list
+    REGAUDIT_FHE_TRUST_STORE           - path to a TrustStore JSON; REQUIRED for /v1/verify
+    REGAUDIT_FHE_ALLOW_SELF_SIGNED     - "1" lets /v1/verify report SELF_SIGNED_ONLY
+                                         (development profile, loopback only)
+    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance
+    REGAUDIT_FHE_VERIFIER_ID           - this verifier's audience identifier
+    REGAUDIT_FHE_MAX_AGE_S             - reject reports older than this many seconds
+    REGAUDIT_FHE_REPLAY_DB             - sqlite path for the local persistent replay cache
+    REGAUDIT_FHE_REPLAY_MODE           - off (default) | check | record
+    REGAUDIT_FHE_TRUSTED_PROXIES       - comma-separated IPs/CIDRs allowed to vouch for forwarded
+                                         clients (development self-signed check only)
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -53,21 +63,23 @@ import hashlib
 import hmac
 import ipaddress
 import logging
+import math
 import os
 import platform
 import sys
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 try:
     from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
-    from pydantic import BaseModel
+    from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
 
     HAVE_FASTAPI = True
@@ -76,9 +88,31 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
+from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
-from .reports import AuditEnvelope, verify_receipt
+from .replay import ReplayCache, SqliteReplayCache
+from .report_v2 import EnvelopeFormatError, parse_envelope
 from .schemas import SchemaError, list_schemas, load_schema
+from .trust import TrustStore
+from .verification import (
+    PolicyError,
+    TimestampVerifier,
+    TrustHistory,
+    VerificationPolicy,
+    VerificationUnavailable,
+    verify,
+)
+
+__all__ = [
+    "PRIVACY_WARNING",
+    "Caller",
+    "ServerConfig",
+    "assert_safe_bind",
+    "build_app",
+    "check_dev_exposure",
+    "load_config_from_env",
+    "validate_trust_config",
+]
 
 PRIVACY_WARNING = (
     "regaudit-fhe HTTP server: NOT A PRIVACY BOUNDARY by itself. The "
@@ -107,6 +141,178 @@ class ServerConfig:
     rate_limit_per_min: int
     request_timeout_s: float
     cors_origins: Sequence[str]
+    # Issuer trust for /v1/verify. With no trust store the endpoint fails
+    # closed (503) unless ``allow_self_signed`` is set.
+    trust_store: TrustStore | None = None
+    # Development-only. Lets /v1/verify report SELF_SIGNED_ONLY when no trust
+    # store is configured. It can never produce a TRUSTED result or
+    # ``accepted: true``.
+    allow_self_signed: bool = False
+    profile: str = "development"
+    require_verified_timestamp: bool = False
+    # Caller-pinned timestamp verifier (see verification.TimestampVerifier).
+    # None means timestamps are reported UNVERIFIED; no authority is bundled.
+    timestamp_verifier: TimestampVerifier | None = None
+    verifier_id: str | None = None
+    max_age_s: float | None = None
+    allow_legacy_v1: bool | None = None
+    trust_history: TrustHistory | None = None
+    replay_cache: ReplayCache | None = None
+    replay_mode: str = "off"
+    # IPs / CIDRs allowed to vouch for a forwarded client address. Used only by
+    # the development self-signed exposure check.
+    trusted_proxies: tuple[str, ...] = ()
+
+    def verification_policy(self) -> VerificationPolicy:
+        """The single verification policy for this deployment (raises PolicyError)."""
+        return VerificationPolicy(
+            profile=self.profile,
+            trust_store=self.trust_store,
+            allow_self_signed=self.allow_self_signed,
+            allow_legacy_v1=self.allow_legacy_v1,
+            verifier_id=self.verifier_id,
+            max_age=_max_age_from_seconds(self.max_age_s),
+            timestamp_verifier=self.timestamp_verifier,
+            require_verified_timestamp=self.require_verified_timestamp,
+            trust_history=self.trust_history,
+            replay_cache=self.replay_cache,
+            replay_mode=self.replay_mode,
+        )
+
+
+def _max_age_from_seconds(seconds: float | None) -> timedelta | None:
+    if seconds is None:
+        return None
+    try:
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError
+        return timedelta(seconds=seconds)
+    except (ValueError, OverflowError) as exc:
+        raise PolicyError("max_age must be a positive, finite number of seconds") from exc
+
+
+def validate_trust_config(config: ServerConfig) -> None:
+    """Refuse configurations that would weaken issuer verification.
+
+    Raises :class:`~regaudit_fhe.verification.PolicyError` (a ``RuntimeError``).
+    The rules live in :class:`VerificationPolicy`, so the CLI, ``build_app()``
+    and any embedding apply exactly the same ones.
+    """
+    config.verification_policy()
+
+
+_FORWARDING_HEADERS = (
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "x-forwarded-server",
+    "x-real-ip",
+    "x-client-ip",
+    "true-client-ip",
+    "cf-connecting-ip",
+    "via",
+)
+
+
+def _is_loopback_host(host: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    mapped = getattr(addr, "ipv4_mapped", None)  # ::ffff:127.0.0.1 on older Pythons
+    return bool((mapped or addr).is_loopback)
+
+
+def _proxy_networks(entries: Sequence[str]) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for entry in entries:
+        try:
+            nets.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            return []  # a malformed trusted-proxy policy trusts nobody
+    return nets
+
+
+def _in_networks(host: str, nets: Sequence[Any]) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in net for net in nets if net.version == addr.version)
+
+
+def check_dev_exposure(
+    scope: Mapping[str, Any], headers: Mapping[str, str], trusted_proxies: Sequence[str] = ()
+) -> str | None:
+    """Return a refusal reason, or ``None`` if the request may use a
+    development-only verification option.
+
+    The server socket the request actually arrived on must be a loopback TCP
+    address, and the peer must be known. Unix sockets and unknown transports are
+    refused; this concerns the development option only, never normal trusted
+    verification. Client-supplied forwarding headers are never proof of loopback
+    origin: if any are present the request is refused unless an
+    explicit trusted-proxy policy names the immediate peer, in which case the
+    original client is the rightmost ``X-Forwarded-For`` entry that is not
+    itself a trusted proxy and must be loopback. A malformed policy trusts
+    nobody.
+    """
+    server = scope.get("server")
+    if not server or len(server) < 2 or server[1] is None:
+        # No server address, or a Unix socket (ASGI reports ``[path, None]``;
+        # uvicorn reports nothing at all). The transport origin cannot be
+        # authenticated well enough to establish the loopback restriction.
+        return "server socket is not an authenticated loopback TCP address"
+    host = server[0]
+    if not (isinstance(host, str) and _is_loopback_host(host)):
+        return "server socket is not loopback"
+    client = scope.get("client")
+    if not client or not client[0]:
+        return "peer address unknown"
+    present = [h for h in _FORWARDING_HEADERS if h in headers]
+    if not present:
+        if not _is_loopback_host(str(client[0])):
+            return "client is not loopback"
+        return None
+    nets = _proxy_networks(trusted_proxies)
+    if not nets:
+        return "forwarding headers present and no trusted-proxy policy is configured"
+    if not _in_networks(str(client[0]), nets):
+        return "forwarded request from an untrusted peer"
+    xff = ",".join(_header_lines(headers, "x-forwarded-for"))
+    if not xff:
+        return "cannot establish the original client without X-Forwarded-For"
+    origin: str | None = None
+    for hop in reversed([h.strip() for h in xff.split(",")]):
+        if not _is_loopback_host(hop) and not _valid_ip(hop):
+            return "malformed X-Forwarded-For"
+        if _in_networks(hop, nets):
+            continue
+        origin = hop
+        break
+    if origin is None or not _is_loopback_host(origin):
+        return "original client is not loopback"
+    return None
+
+
+def _header_lines(headers: Mapping[str, str], name: str) -> list[str]:
+    """Every line of a header (a proxy may append a line instead of merging, and
+    the client controls the earlier ones)."""
+    getlist = getattr(headers, "getlist", None)
+    if callable(getlist):
+        return [str(v) for v in getlist(name)]
+    value = headers.get(name)
+    return [value] if value else []
+
+
+def _valid_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_api_keys(raw: str) -> dict[str, frozenset]:
@@ -125,14 +331,27 @@ def _parse_api_keys(raw: str) -> dict[str, frozenset]:
     return out
 
 
-def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
-    """Refuse to start with ``dev_mode`` enabled on a non-loopback bind.
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
 
-    ``dev_mode`` disables bearer-token auth, so any non-loopback bind
+
+def assert_safe_bind(host: str, *, dev_mode: bool, allow_self_signed: bool = False) -> None:
+    """Refuse to start with a development-only option on a non-loopback bind.
+
+    ``dev_mode`` disables bearer-token auth and ``allow_self_signed`` lets
+    unauthenticated issuers through /v1/verify, so any non-loopback bind
     is treated as a misconfiguration. Raises :class:`RuntimeError`
     when the combination is unsafe so callers cannot accidentally
-    expose an unauthenticated audit endpoint to a network.
+    expose them to a network.
     """
+    if allow_self_signed and not _is_loopback(host):
+        raise RuntimeError(
+            f"--allow-self-signed refuses non-loopback bind: host={host!r}. "
+            "It is a development-only option."
+        )
     if not dev_mode:
         return
     try:
@@ -154,8 +373,31 @@ def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
         )
 
 
-def load_config_from_env() -> ServerConfig:
-    return ServerConfig(
+def _env_float(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise PolicyError(f"{name} must be a number of seconds") from exc
+    if not value > 0:
+        raise PolicyError(f"{name} must be positive")
+    return value
+
+
+def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
+    """Build a :class:`ServerConfig` from the environment.
+
+    A configured ``REGAUDIT_FHE_TRUST_STORE`` that is missing, unreadable or
+    malformed raises :class:`~regaudit_fhe.trust.TrustStoreError`: the server
+    never starts with a silently degraded verifier.
+    """
+    # An explicit path (the CLI flag) takes precedence, so a broken env value
+    # is not even read.
+    trust_path = (trust_store_path or os.environ.get("REGAUDIT_FHE_TRUST_STORE", "")).strip()
+    replay_db = os.environ.get("REGAUDIT_FHE_REPLAY_DB", "").strip()
+    config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
         max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20)),
@@ -166,7 +408,21 @@ def load_config_from_env() -> ServerConfig:
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
             if s.strip()
         ),
+        trust_store=TrustStore.from_json(trust_path) if trust_path else None,
+        allow_self_signed=os.environ.get("REGAUDIT_FHE_ALLOW_SELF_SIGNED", "0") == "1",
+        profile=os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip(),
+        verifier_id=os.environ.get("REGAUDIT_FHE_VERIFIER_ID", "").strip() or None,
+        max_age_s=_env_float("REGAUDIT_FHE_MAX_AGE_S"),
+        replay_cache=SqliteReplayCache(replay_db) if replay_db else None,
+        replay_mode=os.environ.get("REGAUDIT_FHE_REPLAY_MODE", "off").strip(),
+        trusted_proxies=tuple(
+            p.strip()
+            for p in os.environ.get("REGAUDIT_FHE_TRUSTED_PROXIES", "").split(",")
+            if p.strip()
+        ),
     )
+    validate_trust_config(config)
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -439,12 +695,6 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
     return caller
 
 
-if HAVE_FASTAPI:
-
-    class VerifyRequest(BaseModel):
-        envelope: dict[str, Any]
-
-
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -456,9 +706,20 @@ def build_app(
     logger: logging.Logger | None = None,
     salt: bytes | None = None,
 ) -> Any:
+    """Build the FastAPI application. A **supported embedding entry point**.
+
+    Every security check lives here or in the library (the shared
+    :class:`~regaudit_fhe.verification.VerificationPolicy`), never only in the
+    ``regaudit-fhe serve`` CLI wrapper: the policy is validated at build time,
+    ``/v1/verify`` fails closed without a trust store, and the development
+    self-signed check re-verifies profile and network exposure on every
+    request. What remains CLI-only is the *startup* bind-host check, because
+    only the CLI knows its bind address; see ``docs/DEPLOYMENT.md``.
+    """
     if not HAVE_FASTAPI:
         raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
     config = config or load_config_from_env()
+    policy = config.verification_policy()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
     auth_salt = salt if salt is not None else os.urandom(32)
@@ -587,21 +848,68 @@ def build_app(
     # ----- Verify (verify scope) ------------------------------------------
 
     @app.post("/v1/verify")
-    def verify(
-        req: VerifyRequest = Body(...), caller: Caller = Depends(authed_with(SCOPE_VERIFY))
+    async def verify_endpoint(
+        request: Request, caller: Caller = Depends(authed_with(SCOPE_VERIFY))
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
-        env = AuditEnvelope.from_dict(req.envelope)
-        valid = verify_receipt(env)
+        if config.trust_store is None:
+            # No trust material. Fail closed unless the development-only
+            # self-signed check is enabled, and even then only for a
+            # development profile reached over a loopback TCP socket. Both
+            # checks run on every request, whatever entry point built the app.
+            if not config.allow_self_signed:
+                raise HTTPException(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "issuer verification unavailable: no trust store configured "
+                    "(set REGAUDIT_FHE_TRUST_STORE)",
+                )
+            if config.profile != "development":
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "development option refused")
+            refusal = check_dev_exposure(request.scope, request.headers, config.trusted_proxies)
+            if refusal is not None:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    f"development self-signed verification refused: {refusal}",
+                )
+        # Read the body ourselves so the size limit also covers chunked uploads
+        # that carry no Content-Length, then parse it strictly.
+        received = bytearray()
+        async for chunk in request.stream():
+            received.extend(chunk)
+            if len(received) > config.max_body_bytes:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"request body exceeds limit {config.max_body_bytes} bytes",
+                )
+        try:
+            payload = loads_strict(bytes(received), max_bytes=config.max_body_bytes)
+            if not isinstance(payload, dict) or set(payload) != {"envelope"}:
+                raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
+            env = parse_envelope(payload["envelope"])
+        except (CanonicalError, EnvelopeFormatError) as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
+        try:
+            # verify() may block (sqlite replay store), so keep it off the event loop.
+            result = await run_in_threadpool(verify, env, policy)
+        except VerificationUnavailable as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
+            # Infrastructure failure, not a verdict on the report.
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "replay store unavailable; no verdict given"
+            )
         logger.info(
             "envelope_verified",
-            extra={"key_id": caller.key_id, "primitive": env.primitive, "valid": valid},
+            extra={
+                "key_id": caller.key_id,
+                "primitive": env.primitive,
+                "valid": result.accepted,
+                "trust_status": result.trust_status,
+                "format": result.format,
+                "reasons": list(result.reasons),
+            },
         )
-        return {
-            "valid": valid,
-            "primitive": env.primitive,
-            "issued_at": env.issued_at,
-            "regulations": env.regulations,
-        }
+        response: dict[str, Any] = result.to_dict()
+        return response
 
     return app

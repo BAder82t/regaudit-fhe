@@ -43,6 +43,10 @@ def main() -> int:
         rate_limit_per_min=600,
         request_timeout_s=10.0,
         cors_origins=(),
+        # Development only: the audit endpoint signs with an ephemeral issuer,
+        # so no trust store can register it. A real deployment sets
+        # REGAUDIT_FHE_TRUST_STORE and verifies envelopes from a known issuer.
+        allow_self_signed=True,
     )
     client = TestClient(build_app(config=cfg))
 
@@ -94,12 +98,15 @@ def main() -> int:
                     headers={"Authorization": "Bearer k-verifier"},
                     json={"envelope": fairness})
     body = r.json()
-    print(f"      status={r.status_code} valid={body['valid']} "
+    print(f"      status={r.status_code} trust_status={body['trust_status']} "
+          f"integrity_valid={body['integrity_valid']} "
           f"primitive={body['primitive']} regulations={body['regulations']}\n")
-    assert r.status_code == 200 and body["valid"] is True
+    # Self-signed issuer: integrity holds, but it is never reported as trusted.
+    assert r.status_code == 200 and body["integrity_valid"] is True
+    assert body["trust_status"] == "SELF_SIGNED_ONLY" and body["valid"] is False
 
     print("OK — full server/client round trip succeeded under bearer-token "
-          "auth, scope checks, and signed envelope verification.")
+          "auth, scope checks, and envelope integrity verification.")
     return 0
 
 

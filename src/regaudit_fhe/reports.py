@@ -55,8 +55,8 @@ import json
 import os
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from cryptography.exceptions import InvalidSignature as _CryptoInvalidSignature
@@ -66,8 +66,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-if TYPE_CHECKING:
-    from .trust import TrustStore
+from ._time import parse_rfc3339
+from .canonical import decode_canonical_b64
+from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
 LIB_VERSION: str = "0.0.8"
@@ -430,7 +431,13 @@ def verify_signature(public_key_pem: str, body: bytes, signature_b64: str) -> bo
     if not isinstance(pub, Ed25519PublicKey):
         return False
     try:
-        pub.verify(base64.b64decode(signature_b64), body)
+        # Canonical base64 only: the receipt text is outside the v1 signature, so a
+        # lenient decoder would let anyone vary it without changing the bytes.
+        signature = decode_canonical_b64(signature_b64, length=64)
+    except ValueError:
+        return False
+    try:
+        pub.verify(signature, body)
         return True
     except _CryptoInvalidSignature:
         return False
@@ -619,9 +626,38 @@ def envelope(
     )
 
 
+TRUST_TRUSTED = "TRUSTED"
+TRUST_SELF_SIGNED_ONLY = "SELF_SIGNED_ONLY"
+TRUST_INVALID = "INVALID"
+
+TS_ABSENT = "ABSENT"
+TS_UNVERIFIED = "UNVERIFIED"
+TS_VERIFIED = "VERIFIED"
+TS_FAILED = "FAILED"
+
+
 @dataclass
 class VerificationOutcome:
-    valid: bool
+    """Result of :func:`verify_envelope`.
+
+    ``trust_status`` is the field to branch on:
+
+    * ``TRUSTED`` — integrity holds AND the issuer key is registered in the
+      supplied trust material, not revoked, and matches any pin.
+    * ``SELF_SIGNED_ONLY`` — integrity holds but no trust material was
+      supplied, so the issuer is unauthenticated.
+    * ``INVALID`` — integrity, issuer, revocation, pin or timestamp policy
+      failed.
+
+    ``valid`` keeps its v1 meaning (integrity, plus issuer match when trust
+    material is supplied) so existing callers keep working. It does NOT imply
+    that the issuer is trusted when no trust material was supplied; use
+    ``trust_status == "TRUSTED"`` for that.
+    """
+
+    # Backing store of the deprecated ``valid`` property (use ``trust_status`` or
+    # ``regaudit_fhe.verify_report(...).accepted``). Excluded from repr/eq.
+    _valid: bool = field(repr=False, compare=False)
     sha256_valid: bool
     signature_valid: bool
     issuer_trusted: bool
@@ -629,10 +665,25 @@ class VerificationOutcome:
     issuer: str
     key_id: str
     parameter_set_hash: str
+    trust_status: str = TRUST_SELF_SIGNED_ONLY
+    timestamp_status: str = TS_ABSENT
+    revoked: bool = False
+    pin_ok: bool = True
+
+    @property
+    def valid(self) -> bool:
+        """Deprecated alias; branch on ``trust_status`` instead."""
+        warnings.warn(
+            "VerificationOutcome.valid is deprecated; branch on `trust_status` (or use "
+            "regaudit_fhe.verify_report(...).accepted). It is kept for compatibility.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._valid
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "valid": bool(self.valid),
+            "valid": bool(self._valid),
             "sha256_valid": bool(self.sha256_valid),
             "signature_valid": bool(self.signature_valid),
             "issuer_trusted": bool(self.issuer_trusted),
@@ -640,86 +691,165 @@ class VerificationOutcome:
             "issuer": self.issuer,
             "key_id": self.key_id,
             "parameter_set_hash": self.parameter_set_hash,
+            "trust_status": self.trust_status,
+            "timestamp_status": self.timestamp_status,
+            "revoked": bool(self.revoked),
+            "pin_ok": bool(self.pin_ok),
         }
+
+
+def _norm_pem(pem: str) -> str:
+    return pem.strip().replace("\r\n", "\n")
+
+
+def _timestamp_status(
+    env: AuditEnvelope,
+    body_bytes: bytes,
+    tsa_verifier: Callable[[bytes, bytes], bool] | None,
+) -> str:
+    if env.timestamp is None:
+        return TS_ABSENT
+    token_b64 = env.timestamp.get("token_b64")
+    if not token_b64:
+        return TS_FAILED
+    if tsa_verifier is None:
+        # A token is attached but nothing validated it. Never report this
+        # as VERIFIED: the timestamp block is also outside the v1 signed body.
+        return TS_UNVERIFIED
+    try:
+        token = decode_canonical_b64(token_b64)
+        return TS_VERIFIED if tsa_verifier(body_bytes, token) else TS_FAILED
+    except Exception:
+        return TS_FAILED
+
+
+def _v1_entry_scope_ok(entry: Any, env: AuditEnvelope) -> bool:
+    """Whether a v1 report is within the scope registered for its key."""
+    if entry is None:
+        return False
+    if entry.issuer is not None and env.issuer != entry.issuer:
+        return False
+    if entry.deployments is not None:  # v1 carries no deployment_id, so it cannot match
+        return False
+    if entry.primitives is not None and env.primitive not in entry.primitives:
+        return False
+    if entry.not_before is not None:
+        try:
+            if parse_rfc3339(env.issued_at) < entry.not_before:
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 def verify_envelope(
     env: AuditEnvelope,
     *,
-    trusted_keys: Mapping[str, str] | None = None,
+    trusted_keys: Mapping[str, str] | TrustStore | None = None,
+    trust_store: TrustStore | None = None,
     require_signature: bool = True,
     tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
+    require_verified_timestamp: bool = False,
 ) -> VerificationOutcome:
     """Verify an audit envelope.
 
-    ``trusted_keys`` is a ``key_id`` → PEM mapping. If ``None``, the
-    issuer-trust check is skipped — the verifier reports
-    ``issuer_trusted = True`` and the caller is responsible for
-    deciding whether the embedded public key is acceptable. Production
-    verifiers SHOULD always pass an explicit trust store.
+    Trust material is a :class:`~regaudit_fhe.trust.TrustStore` (preferred;
+    passed as ``trust_store`` or, for convenience, as ``trusted_keys``) or a
+    legacy ``key_id`` → PEM mapping. A plain mapping cannot express
+    revocation or pins, so only a ``TrustStore`` enforces them. When trust
+    material is supplied the signature is verified against the *registered*
+    key, never the key embedded in the envelope, and the result is
+    ``INVALID`` unless the issuer is registered, not revoked and matches any
+    pin.
 
-    ``tsa_verifier`` is an optional callable that takes
-    ``(body_bytes, token_bytes)`` and returns whether the RFC 3161
-    timestamp token verifies against the deployer's TSA root. If
-    ``None``, the presence of the timestamp field is reported but the
-    token itself is not validated; ``timestamp_valid`` is then set
-    only when no timestamp is attached.
+    With no trust material the envelope can only be ``SELF_SIGNED_ONLY``:
+    integrity is checked but the issuer is unauthenticated, and
+    ``issuer_trusted`` is ``False``.
+
+    ``tsa_verifier`` takes ``(body_bytes, token_bytes)`` and returns whether
+    the RFC 3161 token verifies against the deployer's TSA root. Without it
+    an attached timestamp is ``UNVERIFIED`` (``timestamp_valid`` is False).
+    ``require_verified_timestamp`` makes anything other than ``VERIFIED`` or
+    ``ABSENT`` fail the trust decision. A verified timestamp never overrides
+    revocation.
     """
+    store: TrustStore | None = trust_store
+    keys: Mapping[str, str] | None = None
+    if isinstance(trusted_keys, TrustStore):
+        store = store if store is not None else trusted_keys
+    elif trusted_keys is not None:
+        keys = trusted_keys
+    has_trust_material = store is not None or keys is not None
+
     body_bytes = canonical_json(env.signed_body())
     sha_ok = sha256_hex(body_bytes) == env.receipt.get("sha256")
 
-    sig_ok = False
-    issuer_ok = False
     sig_b64 = env.receipt.get("signature_b64")
-    pub_pem = env.receipt.get("public_key_pem")
+    pub_pem = env.receipt.get("public_key_pem") or ""
     key_id = env.receipt.get("key_id", "")
-    if sig_b64 and pub_pem:
+
+    revoked = False
+    pin_ok = True
+    registered_pem: str | None = None
+    if store is not None:
+        registered_pem = store.expected_pem(key_id)
+        revoked = store.is_revoked(key_id)
+        pinned = store.expected_parameter_set_hash(key_id)
+        pin_ok = pinned is None or pinned == env.parameter_set_hash
+    elif keys is not None:
+        registered_pem = keys.get(key_id)
+
+    issuer_ok = False
+    if has_trust_material and registered_pem is not None:
+        issuer_ok = _norm_pem(registered_pem) == _norm_pem(pub_pem) and not revoked and pin_ok
+        if issuer_ok and store is not None:
+            # An ``entries`` store also scopes a key: the signed issuer name,
+            # the primitive, the deployment (a v1 report names none) and the
+            # validity start. The shared engine enforces the same rules.
+            issuer_ok = _v1_entry_scope_ok(store.entry(key_id), env)
+
+    # Verify against the registered key when we have one; the embedded key is
+    # only authoritative when there is no trust material at all.
+    verify_pem = registered_pem if has_trust_material else pub_pem
+    sig_ok = False
+    sig_verified = False
+    if sig_b64 and verify_pem:
         try:
-            sig_ok = verify_signature(pub_pem, body_bytes, sig_b64)
+            sig_ok = verify_signature(verify_pem, body_bytes, sig_b64)
         except Exception:
             sig_ok = False
-    if not require_signature and not sig_b64:
+        sig_verified = sig_ok
+    if not require_signature and not sig_b64 and not has_trust_material:
+        # Unsigned envelopes are only tolerated when no issuer is being
+        # authenticated; with trust material a signature is always required.
         sig_ok = True
 
-    if trusted_keys is None:
-        issuer_ok = True
-    else:
-        expected = trusted_keys.get(env.receipt.get("key_id", ""))
-        if expected is None:
-            issuer_ok = False
-        else:
-            issuer_ok = expected.strip().replace("\r\n", "\n") == (pub_pem or "").strip().replace(
-                "\r\n", "\n"
-            )
+    ts_status = _timestamp_status(env, body_bytes, tsa_verifier)
+    ts_ok = ts_status in (TS_ABSENT, TS_VERIFIED)
+    ts_policy_ok = ts_ok if require_verified_timestamp else ts_status != TS_FAILED
 
-    if env.timestamp is None:
-        ts_ok = True
+    integrity_ok = sha_ok and sig_ok
+    if has_trust_material:
+        valid = integrity_ok and issuer_ok and ts_policy_ok
+        trusted = valid and sig_verified
+        trust_status = TRUST_TRUSTED if trusted else TRUST_INVALID
     else:
-        token_b64 = env.timestamp.get("token_b64")
-        if not token_b64:
-            ts_ok = False
-        elif tsa_verifier is None:
-            # Presence-only check: a token is attached, but its
-            # cryptographic binding to the deployer's TSA root is
-            # not verified. Pass a ``tsa_verifier`` to validate the
-            # token against an RFC 3161 chain.
-            ts_ok = True
-        else:
-            try:
-                ts_ok = bool(tsa_verifier(body_bytes, base64.b64decode(token_b64)))
-            except Exception:
-                ts_ok = False
+        valid = integrity_ok and ts_policy_ok
+        trust_status = TRUST_SELF_SIGNED_ONLY if valid else TRUST_INVALID
 
-    valid = sha_ok and sig_ok and issuer_ok and ts_ok
     return VerificationOutcome(
-        valid=valid,
+        _valid=valid,
         sha256_valid=sha_ok,
         signature_valid=sig_ok,
-        issuer_trusted=issuer_ok,
+        issuer_trusted=has_trust_material and issuer_ok,
         timestamp_valid=ts_ok,
         issuer=env.issuer,
         key_id=key_id,
         parameter_set_hash=env.parameter_set_hash,
+        trust_status=trust_status,
+        timestamp_status=ts_status,
+        revoked=revoked,
+        pin_ok=pin_ok,
     )
 
 
@@ -728,26 +858,29 @@ def verify_envelope_or_raise(
     *,
     trust_store: TrustStore | None = None,
     tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
+    require_verified_timestamp: bool = False,
 ) -> VerificationOutcome:
     """Verify an envelope and raise a typed exception on the first
     failure reason, ordered most-specific first.
 
     Use this in regulator-side code that wants to react differently to
     each failure mode (untrusted issuer, revoked issuer, parameter-set
-    mismatch, hash mismatch, bad signature) instead of a flat boolean.
-    Returns the underlying :class:`VerificationOutcome` on success.
+    mismatch, hash mismatch, bad signature, timestamp) instead of a flat
+    boolean. Returns the underlying :class:`VerificationOutcome` on success.
 
     A ``TrustStore`` is required: this function never silently accepts
     self-asserted issuers. Callers that genuinely want the legacy weak
     path should call :func:`verify_envelope` or :func:`verify_receipt`
-    directly.
+    directly. With ``require_verified_timestamp`` an attached timestamp that
+    no ``tsa_verifier`` validated raises ``TimestampUnverified``; a timestamp
+    that fails validation always raises ``TimestampInvalid``.
     """
     from .trust import (
         HashMismatch,
         InvalidSignature,
         RevokedIssuer,
         TimestampInvalid,
-        TrustStore,
+        TimestampUnverified,
         UntrustedIssuer,
         WrongParameterSet,
     )
@@ -775,7 +908,7 @@ def verify_envelope_or_raise(
 
     outcome = verify_envelope(
         env,
-        trusted_keys=trust_store.as_legacy_dict(),
+        trust_store=trust_store,
         require_signature=True,
         tsa_verifier=tsa_verifier,
     )
@@ -783,17 +916,25 @@ def verify_envelope_or_raise(
     if not outcome.sha256_valid:
         raise HashMismatch("SHA-256 receipt does not match canonical body")
     if not outcome.signature_valid:
-        raise InvalidSignature("Ed25519 signature does not verify against the embedded public key")
+        raise InvalidSignature(
+            "Ed25519 signature does not verify against the key registered in the trust store"
+        )
     if not outcome.issuer_trusted:
         # Reaching this branch means the trust store had the key_id but
         # the embedded PEM disagreed with the registered PEM.
         raise UntrustedIssuer(
-            f"key_id {key_id!r}: embedded public key does not match "
-            f"the public key registered in the trust store"
+            f"key_id {key_id!r}: the report is not authorised by the trust store (embedded "
+            f"key, issuer name, primitive, deployment or validity start does not match "
+            f"the registered entry)"
         )
-    if not outcome.timestamp_valid:
+    if outcome.timestamp_status == TS_FAILED:
         raise TimestampInvalid(
-            "RFC 3161 timestamp token did not verify against the deployer's TSA root"
+            "RFC 3161 timestamp token failed validation against the deployer's TSA root"
+        )
+    if require_verified_timestamp and outcome.timestamp_status == TS_UNVERIFIED:
+        raise TimestampUnverified(
+            "a timestamp is attached but no tsa_verifier validated it, and the "
+            "policy requires verified timestamp evidence"
         )
     return outcome
 
@@ -804,7 +945,8 @@ _VERIFY_RECEIPT_WEAK_WARNED = False
 def verify_receipt(
     env: AuditEnvelope,
     *,
-    trusted_keys: Mapping[str, str] | None = None,
+    trusted_keys: Mapping[str, str] | TrustStore | None = None,
+    trust_store: TrustStore | None = None,
     strict: bool = False,
 ) -> bool:
     """Return True iff the envelope verifies.
@@ -812,31 +954,46 @@ def verify_receipt(
     By default this checks the SHA-256 receipt and the embedded
     Ed25519 signature against the embedded public key. **It does not
     validate that the embedded public key belongs to a trusted
-    issuer** — that requires a ``trusted_keys`` map. The default
-    behaviour is preserved for backwards compatibility with v0.0.1
-    callers and the README quickstart.
+    issuer** — that requires trust material. The default behaviour is
+    preserved for backwards compatibility with v0.0.1 callers and the README
+    quickstart; use :func:`verify_envelope` and branch on ``trust_status``
+    when you need to tell self-signed from trusted.
 
-    Pass ``strict=True`` to require ``trusted_keys`` and reject any
-    envelope whose ``key_id`` is not in the trust store; this is the
-    recommended setting for regulator-side verifiers. Calling without
-    ``trusted_keys`` emits a one-time ``UserWarning`` so integrators
-    do not silently rely on hash-and-self-signature verification.
+    Trust material is a :class:`~regaudit_fhe.trust.TrustStore`
+    (``trust_store=``, or passed as ``trusted_keys``) which enforces
+    registration, revocation and parameter-set pins, or a legacy
+    ``key_id`` → PEM mapping, which enforces registration only.
+
+    Pass ``strict=True`` to require trust material and reject any
+    envelope whose ``key_id`` is not registered; this is the recommended
+    setting for regulator-side verifiers. Calling without trust material
+    emits a one-time ``UserWarning`` so integrators do not silently rely on
+    hash-and-self-signature verification.
     """
     global _VERIFY_RECEIPT_WEAK_WARNED
-    if strict and not trusted_keys:
+    # ``is not None``, not truthiness: an empty mapping is trust material that
+    # trusts nobody (e.g. a map that failed to load), never the self-signed path.
+    has_material = trust_store is not None or trusted_keys is not None
+    if strict and not has_material:
         return False
-    if not trusted_keys and not _VERIFY_RECEIPT_WEAK_WARNED:
+    if not has_material and not _VERIFY_RECEIPT_WEAK_WARNED:
         _VERIFY_RECEIPT_WEAK_WARNED = True
         warnings.warn(
-            "verify_receipt() called without trusted_keys: this verifies "
+            "verify_receipt() called without trust material: this verifies "
             "the embedded signature against the embedded public key only "
-            "and does NOT authenticate the issuer. Pass trusted_keys={key_id: "
-            "pem} (and strict=True for regulator-side verifiers) to bind the "
-            "envelope to an approved issuer.",
+            "and does NOT authenticate the issuer. Pass trust_store=TrustStore(...) "
+            "or trusted_keys={key_id: pem} (and strict=True for regulator-side "
+            "verifiers) to bind the envelope to an approved issuer.",
             UserWarning,
             stacklevel=2,
         )
-    return verify_envelope(env, trusted_keys=trusted_keys, require_signature=True).valid
+    outcome = verify_envelope(
+        env,
+        trusted_keys=trusted_keys,
+        trust_store=trust_store,
+        require_signature=True,
+    )
+    return bool(outcome._valid)
 
 
 def issue_receipt(payload: Mapping[str, Any]) -> dict[str, str]:

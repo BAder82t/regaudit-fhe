@@ -43,6 +43,14 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_RATE_LIMIT_PER_MIN`     | `60`          | Per-key tokens-per-minute for the in-process token bucket.              |
 | `REGAUDIT_FHE_REQUEST_TIMEOUT_S`      | `30`          | Per-request timeout. Exceeding returns 504.                             |
 | `REGAUDIT_FHE_CORS_ORIGINS`           | (empty)       | Comma-separated CORS allow-list. Empty = no cross-origin response.      |
+| `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
+| `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
+| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential` or `high-assurance`. Anything else aborts startup. |
+| `REGAUDIT_FHE_VERIFIER_ID`            | (empty)       | This verifier's audience identifier (required for `high-assurance`). |
+| `REGAUDIT_FHE_MAX_AGE_S`              | (empty)       | Refuse reports older than this many seconds. Must be positive and finite; required outside development. |
+| `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
+| `REGAUDIT_FHE_REPLAY_MODE`            | `off`         | `off`, `check` (look up only) or `record` (record at verification time). Required, with a persistent cache, outside development. |
+| `REGAUDIT_FHE_TRUSTED_PROXIES`        | (empty)       | IPs/CIDRs allowed to vouch for a forwarded client. Used only by the development self-signed exposure check. |
 
 ### Scopes
 
@@ -75,7 +83,40 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
 | POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope.|
-| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope.                       |
+| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured (unless the development-only self-signed check is enabled, which can never accept a report) or if the replay store is unavailable outside development. |
+
+`/v1/verify` fails closed: with no trust store it returns **503** rather
+than a verdict. Its response keeps `valid`, `primitive`, `issued_at` and
+`regulations`, and adds `trust_status` (`TRUSTED`, `SELF_SIGNED_ONLY` or
+`INVALID`), `integrity_valid` and `timestamp_status`. `valid` is true only
+when `trust_status` is `TRUSTED`. Note that `/v1/audit/{primitive}` signs
+with an ephemeral issuer key, so envelopes it produces can only ever be
+`SELF_SIGNED_ONLY` until a long-lived signer is wired in.
+
+**Entry points.** `regaudit-fhe serve` is the usual way to run the server and
+`build_app()` is a supported embedding entry point (it is in
+`regaudit_fhe.server.__all__`). The security checks do not depend on the CLI:
+`build_app()` validates the verification policy at build time, `/v1/verify`
+fails closed without a trust store, and the development self-signed check
+re-verifies on **every request** that the profile is `development`, that the
+server socket is a loopback TCP address, that the peer is known and loopback, and that no forwarding header is present unless a trusted-proxy policy
+vouches for it. Only the *startup* bind-host check remains CLI-only, since only
+the CLI knows its bind address. Limits: a header-less local reverse proxy cannot
+be told apart from a direct local client (do not enable the development option
+behind one). Unix sockets (for which uvicorn reports no server address) are refused
+for the development option only; normal trusted verification over a Unix socket is
+unaffected.
+
+**Replay detection is local.** `record` mode marks a report as seen in this
+verifier's store when it is verified. It is not coupled to any downstream
+operation, it is not a crash-safe exactly-once guarantee, and independent
+verifiers that do not share a store can each accept the same report once. With
+`record` mode on, any caller holding the `audit:verify` scope who has a valid
+report can consume its `audit_run_id` before the intended relying party does.
+`check` mode only looks up and never records. A stateless verification response
+reports `consumption: NOT_CHECKED`. Every replay-checked response also reports
+`replay_durable` (`false` for the in-memory cache, whose records are lost when the
+process exits).
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from . import dp, ecmd_jps, ecp_qssp, egf_imss, esc_cia, etk_fpa_hbc, ew1_cdsf, reports, schemas
 from ._slot import MAX_DEPTH, DepthBudgetExceeded, SlotVec
+from .canonical import CanonicalError
 from .dp import (
     DPError,
     DPSpec,
@@ -38,6 +39,8 @@ from .egf_imss import FairnessReport, fairness_circuit_d6, fairness_oracle
 from .esc_cia import CIndexReport, c_index_circuit_d6, c_index_oracle
 from .etk_fpa_hbc import ProvenanceReport, topk_provenance_circuit_d6, topk_provenance_oracle
 from .ew1_cdsf import DriftReport, cvm_oracle, w1_circuit_d6, w1_oracle
+from .replay import InMemoryReplayCache, ReplayStateError, SqliteReplayCache
+from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope
 from .reports import (
     REGULATION_MAP,
     AuditEnvelope,
@@ -61,6 +64,7 @@ from .schemas import (
     load_schema,
     validate,
     validate_envelope,
+    validate_envelope_v2,
     validate_input,
     validate_output,
 )
@@ -68,13 +72,24 @@ from .trust import (
     EnvelopeVerificationError,
     HashMismatch,
     InvalidSignature,
+    KeyEntry,
     RevokedIssuer,
     TimestampInvalid,
+    TimestampUnverified,
     TrustStore,
     TrustStoreError,
     UntrustedIssuer,
     WrongParameterSet,
 )
+from .verification import (
+    PolicyError,
+    TimestampEvidence,
+    TrustHistory,
+    VerificationPolicy,
+    VerificationResult,
+    VerificationUnavailable,
+)
+from .verification import verify as verify_report
 
 __version__ = "0.0.8"
 
@@ -91,32 +106,46 @@ __all__ = [
     "MAX_DEPTH",
     "REGULATION_MAP",
     "AuditEnvelope",
+    "AuditEnvelopeV2",
     "CIndexReport",
     "CallableKeyProvider",
+    "CanonicalError",
     "ConformalReport",
     "DPError",
     "DPSpec",
     "DepthBudgetExceeded",
     "DisagreementReport",
     "DriftReport",
+    "EnvelopeFormatError",
     "EnvelopeVerificationError",
     "FairnessReport",
     "HashMismatch",
+    "InMemoryReplayCache",
     "InvalidSignature",
+    "KeyEntry",
     "KeyProvider",
     "ParameterSet",
+    "PolicyError",
     "PrivacyAccountant",
     "ProvenanceReport",
+    "ReplayStateError",
     "RevokedIssuer",
     "SchemaError",
     "Signer",
     "SlotVec",
+    "SqliteReplayCache",
     "TimestampAuthority",
+    "TimestampEvidence",
     "TimestampInvalid",
+    "TimestampUnverified",
+    "TrustHistory",
     "TrustStore",
     "TrustStoreError",
     "UntrustedIssuer",
     "VerificationOutcome",
+    "VerificationPolicy",
+    "VerificationResult",
+    "VerificationUnavailable",
     "WrongParameterSet",
     "__version__",
     "audit_calibration",
@@ -140,6 +169,7 @@ __all__ = [
     "ecp_qssp",
     "egf_imss",
     "envelope",
+    "envelope_v2",
     "esc_cia",
     "etk_fpa_hbc",
     "ew1_cdsf",
@@ -147,6 +177,7 @@ __all__ = [
     "fairness_oracle",
     "list_schemas",
     "load_schema",
+    "parse_envelope",
     "privatize_report",
     "privatize_value",
     "reports",
@@ -155,11 +186,13 @@ __all__ = [
     "topk_provenance_oracle",
     "validate",
     "validate_envelope",
+    "validate_envelope_v2",
     "validate_input",
     "validate_output",
     "verify_envelope",
     "verify_envelope_or_raise",
     "verify_receipt",
+    "verify_report",
     "w1_circuit_d6",
     "w1_oracle",
 ]

@@ -1,0 +1,1725 @@
+{
+  "description": "Canonical regaudit-fhe.report.v2 vectors. TEST KEY ONLY - derived from a public constant; never trust it. Regenerate with tests/vectors/report_v2/generate.py.",
+  "domains": {
+    "sign": "72656761756469742d6668652f7265706f72742f76322f7369676e00"
+  },
+  "key": {
+    "issuer": "vector-issuer",
+    "key_id": "vector-key-1",
+    "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+    "seed_derivation": "sha256(b'regaudit-fhe/test-vector/ed25519-seed/1')"
+  },
+  "parse_refusals": [
+    {
+      "expect": "canonical:duplicate",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"breach\": true, \"count\": 4, \"disparity\": 0.25, \"nested\": {\"\\u00e9\": [1, 2.5, null, \"\\u00fc\"]}, \"tiny\": 1e-07}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1, \"issuer\": \"mallory\"}",
+      "name": "duplicate_top_level_key"
+    },
+    {
+      "expect": "canonical:duplicate",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"a\": 1, \"a\": 2}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1}",
+      "name": "duplicate_nested_key"
+    },
+    {
+      "expect": "canonical",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"x\": NaN}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1}",
+      "name": "nan_in_result"
+    },
+    {
+      "expect": "canonical",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"x\": 1e999}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1}",
+      "name": "overflowing_float"
+    },
+    {
+      "expect": "canonical",
+      "input_b64": "77u/eyJhbGdvcml0aG1fdmVyc2lvbiI6ICIwLjAuOCIsICJhdWRpZW5jZSI6IFsicmVndWxhdG9yLWEiLCAicmVndWxhdG9yLWIiXSwgImF1ZGl0X3J1bl9pZCI6ICIzZjJiMWM0ZS01YTZkLTRlN2YtODA5MS1hMmIzYzRkNWU2ZjciLCAiYmFja2VuZCI6ICJwbGFpbnRleHQiLCAiZGF0YXNldF9jb21taXRtZW50IjogeyJuYW1lIjogImRhdGFzZXQiLCAic2hhMjU2IjogImIyNzdmZDYyMzY3NmE1MjVjMjliOWViMTU1YWZjOGM5MDEwNjgxODE0Y2VhZmIyZDc2MjdmNDdiOWEyMzI1NzYifSwgImRlcGxveW1lbnRfaWQiOiAicHJvZC1ldS0xIiwgImRlcHRoX2J1ZGdldCI6IHsiY29uc3VtZWQiOiAyLCAiZGVjbGFyZWQiOiA2fSwgImRwIjogeyJlcHNpbG9uIjogMS4wLCAibWVjaGFuaXNtIjogImxhcGxhY2UifSwgImlucHV0X2NvbW1pdG1lbnRzIjogW3sibmFtZSI6ICJ5X3RydWUiLCAic2hhMjU2IjogImI5MzRiYWY4NGQ5NDc2NzZkMWMwZWY0NWRjMmJlYzU4YzVmZTNlNGNlYjYzZWYwZDdmYTUzNjA1N2RjMTdhNjcifV0sICJpc3N1ZWRfYXQiOiAiMjAyNi0xMC0wMVQxMjowMDowMCswMDowMCIsICJpc3N1ZXIiOiAidmVjdG9yLWlzc3VlciIsICJrZXlfaWQiOiAidmVjdG9yLWtleS0xIiwgIm1vZGVsX2NvbW1pdG1lbnQiOiB7Im5hbWUiOiAibW9kZWwiLCAic2hhMjU2IjogIjkzNzJjNDcwZWVhZGQ1ZWNkOWMzYzc0YzJiM2NiNjMzZjhlMmYyZmFkNzk5MjUwYTBmNzBkNjUyYjZiODI1ZTQifSwgInBhcmFtZXRlcl9zZXQiOiB7ImJhY2tlbmQiOiAicGxhaW50ZXh0IiwgImJhY2tlbmRfdmVyc2lvbiI6ICIiLCAiY29lZmZfbW9kX2JpdF9zaXplcyI6IFtdLCAibGlicmFyeV92ZXJzaW9uIjogIjAuMC44IiwgIm11bHRpcGxpY2F0aXZlX2RlcHRoIjogNiwgInBvbHlfbW9kdWx1c19kZWdyZWUiOiAwLCAic2NhbGluZ19mYWN0b3JfYml0cyI6IDAsICJzZWN1cml0eV9iaXRzIjogMTI4fSwgInBhcmFtZXRlcl9zZXRfaGFzaCI6ICI2Y2Y2NTU4ZTI5MDZhNTJhN2M5MjU5NWRlNGM2NzA0NzVkOTlkMDRiYjU2YjM5MzVkZDFjY2Q2ZjJhMjI1NWZkIiwgInByaW1pdGl2ZSI6ICJmYWlybmVzcyIsICJwdWJsaWNfa2V5X2ZpbmdlcnByaW50IjogImY1YTEyNGI0ZmY1YjMyNTNhYTIzYzkxN2Q0NjBjZmFlZDU3Y2VjMjhlY2M0YjdhNDNkNzI3ODU4MjhhYTIyNTYiLCAicmVjZWlwdCI6IHsicHVibGljX2tleV9wZW0iOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Db3dCUVlESzJWd0F5RUFnT3M4TGNCQ05ER3RJV0JOSjBieXdndlhvbFVGWit2dkhSb01PZ0E2Slk4PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iLCAic2hhMjU2IjogIjJkY2NkZGFlOGU5NmYzNWQxNWRhMzY2NWRlZDFhZWQ2ODVkNmUzZGI2NGMzMDUxYzg4OTAxMWJlN2RjNDc0MWIiLCAic2lnbmF0dXJlX2FsZyI6ICJFZDI1NTE5IiwgInNpZ25hdHVyZV9iNjQiOiAiZTRPMGg0SklUVVhFY1ZYanR4L0RvZ1Urb1Z1VEpBR1dkZzhsa0VISWVERWZnSXNSQ3lQbzZwUzl2S2hVM2RZYXN2K3R6TXJla2MyaHdiNDZONWZ5REE9PSJ9LCAicmVndWxhdGlvbnMiOiBbIk5ZQ19MTDE0NCIsICJFVV9BSV9BQ1RfQVJUMTAiXSwgInJlc3VsdCI6IHsiYnJlYWNoIjogdHJ1ZSwgImNvdW50IjogNCwgImRpc3Bhcml0eSI6IDAuMjUsICJuZXN0ZWQiOiB7Ilx1MDBlOSI6IFsxLCAyLjUsIG51bGwsICJcdTAwZmMiXX0sICJ0aW55IjogMWUtMDd9LCAic2NoZW1hIjogInJlZ2F1ZGl0LWZoZS5yZXBvcnQudjIiLCAic2NoZW1hX3ZlcnNpb24iOiAicmVnYXVkaXQtZmhlLnJlcG9ydC52MiIsICJ0aW1lc3RhbXBzIjogW3siaXNzdWVkX2F0IjogIjIwMjYtMTAtMDJUMDA6MDA6MDArMDA6MDAiLCAiaXNzdWVyIjogInZlY3Rvci10c2EiLCAidG9rZW5fYjY0IjogImRtVmpkRzl5TFhSdmEyVnUifV0sICJ0cnVzdF9wb2xpY3lfdmVyc2lvbiI6IDF9",
+      "name": "utf8_bom"
+    },
+    {
+      "expect": "canonical",
+      "input_b64": "eyJhbGdvcml0aG1fdmVyc2lvbiI6ICIwLjAuOCIsICJhdWRpZW5jZSI6IFsicmVndWxhdG9yLWEiLCAicmVndWxhdG9yLWIiXSwgImF1ZGl0X3J1bl9pZCI6ICIzZjJiMWM0ZS01YTZkLTRlN2YtODA5MS1hMmIzYzRkNWU2ZjciLCAiYmFja2VuZCI6ICJwbGFpbnRleHQiLCAiZGF0YXNldF9jb21taXRtZW50IjogeyJuYW1lIjogImRhdGFzZXQiLCAic2hhMjU2IjogImIyNzdmZDYyMzY3NmE1MjVjMjliOWViMTU1YWZjOGM5MDEwNjgxODE0Y2VhZmIyZDc2MjdmNDdiOWEyMzI1NzYifSwgImRlcGxveW1lbnRfaWQiOiAicHJvZC1ldS0xIiwgImRlcHRoX2J1ZGdldCI6IHsiY29uc3VtZWQiOiAyLCAiZGVjbGFyZWQiOiA2fSwgImRwIjogeyJlcHNpbG9uIjogMS4wLCAibWVjaGFuaXNtIjogImxhcGxhY2UifSwgImlucHV0X2NvbW1pdG1lbnRzIjogW3sibmFtZSI6ICJ5X3RydWUiLCAic2hhMjU2IjogImI5MzRiYWY4NGQ5NDc2NzZkMWMwZWY0NWRjMmJlYzU4YzVmZTNlNGNlYjYzZWYwZDdmYTUzNjA1N2RjMTdhNjcifV0sICJpc3N1ZWRfYXQiOiAiMjAyNi0xMC0wMVQxMjowMDowMCswMDowMCIsICJpc3N1ZXIiOiAidmVjdG9yLWlzc3VlciIsICJrZXlfaWQiOiAidmVjdG9yLWtleS0xIiwgIm1vZGVsX2NvbW1pdG1lbnQiOiB7Im5hbWUiOiAibW9kZWwiLCAic2hhMjU2IjogIjkzNzJjNDcwZWVhZGQ1ZWNkOWMzYzc0YzJiM2NiNjMzZjhlMmYyZmFkNzk5MjUwYTBmNzBkNjUyYjZiODI1ZTQifSwgInBhcmFtZXRlcl9zZXQiOiB7ImJhY2tlbmQiOiAicGxhaW50ZXh0IiwgImJhY2tlbmRfdmVyc2lvbiI6ICIiLCAiY29lZmZfbW9kX2JpdF9zaXplcyI6IFtdLCAibGlicmFyeV92ZXJzaW9uIjogIjAuMC44IiwgIm11bHRpcGxpY2F0aXZlX2RlcHRoIjogNiwgInBvbHlfbW9kdWx1c19kZWdyZWUiOiAwLCAic2NhbGluZ19mYWN0b3JfYml0cyI6IDAsICJzZWN1cml0eV9iaXRzIjogMTI4fSwgInBhcmFtZXRlcl9zZXRfaGFzaCI6ICI2Y2Y2NTU4ZTI5MDZhNTJhN2M5MjU5NWRlNGM2NzA0NzVkOTlkMDRiYjU2YjM5MzVkZDFjY2Q2ZjJhMjI1NWZkIiwgInByaW1pdGl2ZSI6ICJmYWlybmVzcyIsICJwdWJsaWNfa2V5X2ZpbmdlcnByaW50IjogImY1YTEyNGI0ZmY1YjMyNTNhYTIzYzkxN2Q0NjBjZmFlZDU3Y2VjMjhlY2M0YjdhNDNkNzI3ODU4MjhhYTIyNTYiLCAicmVjZWlwdCI6IHsicHVibGljX2tleV9wZW0iOiAiLS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS1cbk1Db3dCUVlESzJWd0F5RUFnT3M4TGNCQ05ER3RJV0JOSjBieXdndlhvbFVGWit2dkhSb01PZ0E2Slk4PVxuLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tXG4iLCAic2hhMjU2IjogIjJkY2NkZGFlOGU5NmYzNWQxNWRhMzY2NWRlZDFhZWQ2ODVkNmUzZGI2NGMzMDUxYzg4OTAxMWJlN2RjNDc0MWIiLCAic2lnbmF0dXJlX2FsZyI6ICJFZDI1NTE5IiwgInNpZ25hdHVyZV9iNjQiOiAiZTRPMGg0SklUVVhFY1ZYanR4L0RvZ1Urb1Z1VEpBR1dkZzhsa0VISWVERWZnSXNSQ3lQbzZwUzl2S2hVM2RZYXN2K3R6TXJla2MyaHdiNDZONWZ5REE9PSJ9LCAicmVndWxhdGlvbnMiOiBbIk5ZQ19MTDE0NCIsICJFVV9BSV9BQ1RfQVJUMTAiXSwgInJlc3VsdCI6IHsiYnJlYWNoIjogdHJ1ZSwgImNvdW50IjogNCwgImRpc3Bhcml0eSI6IDAuMjUsICJuZXN0ZWQiOiB7Ilx1MDBlOSI6IFsxLCAyLjUsIG51bGwsICJcdTAwZmMiXX0sICJ0aW55IjogMWUtMDd9LCAic2NoZW1hIjogInJlZ2F1ZGl0LWZoZS5yZXBvcnQudjIiLCAic2NoZW1hX3ZlcnNpb24iOiAicmVnYXVkaXQtZmhlLnJlcG9ydC52MiIsICJ0aW1lc3RhbXBzIjogW3siaXNzdWVkX2F0IjogIjIwMjYtMTAtMDJUMDA6MDA6MDArMDA6MDAiLCAiaXNzdWVyIjogInZlY3Rvci10c2EiLCAidG9rZW5fYjY0IjogImRtVmpkRzl5TFhSdmEyVnUifV0sICJ0cnVzdF9wb2xpY3lfdmVyc2lvbiI6IDF9/w==",
+      "name": "invalid_utf8"
+    },
+    {
+      "expect": "canonical",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"x\": \"\\ud800\"}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1}",
+      "name": "lone_surrogate_escape"
+    },
+    {
+      "expect": "canonical",
+      "input_text": "{\"algorithm_version\": \"0.0.8\", \"audience\": [\"regulator-a\", \"regulator-b\"], \"audit_run_id\": \"3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7\", \"backend\": \"plaintext\", \"dataset_commitment\": {\"name\": \"dataset\", \"sha256\": \"b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576\"}, \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 2, \"declared\": 6}, \"dp\": {\"epsilon\": 1.0, \"mechanism\": \"laplace\"}, \"input_commitments\": [{\"name\": \"y_true\", \"sha256\": \"b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67\"}], \"issued_at\": \"2026-10-01T12:00:00+00:00\", \"issuer\": \"vector-issuer\", \"key_id\": \"vector-key-1\", \"model_commitment\": {\"name\": \"model\", \"sha256\": \"9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4\"}, \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.0.8\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\"], \"result\": {\"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"timestamps\": [{\"issued_at\": \"2026-10-02T00:00:00+00:00\", \"issuer\": \"vector-tsa\", \"token_b64\": \"dmVjdG9yLXRva2Vu\"}], \"trust_policy_version\": 1}",
+      "name": "excessive_nesting"
+    },
+    {
+      "expect": "format:UNKNOWN_FIELD",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "extra": 1,
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "unknown_top_level_field"
+    },
+    {
+      "expect": "format:UNKNOWN_FIELD",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "key_id": "vector-key-1",
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "receipt_carries_key_id"
+    },
+    {
+      "expect": "format:MISSING_FIELD",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "missing_key_id"
+    },
+    {
+      "expect": "format:BAD_VALUE",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3F2B1C4E-5A6D-4E7F-8091-A2B3C4D5E6F7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "uppercase_uuid"
+    },
+    {
+      "expect": "format:BAD_VALUE",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "naive_issued_at"
+    },
+    {
+      "expect": "format:BAD_VALUE",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "empty_audience"
+    },
+    {
+      "expect": "format:BAD_SCHEMA",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v9",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "unknown_schema"
+    },
+    {
+      "expect": "format:BAD_VALUE",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDP=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "noncanonical_signature_base64"
+    },
+    {
+      "expect": "format:MISSING_FIELD",
+      "input_object": {
+        "algorithm_version": "0.0.8",
+        "backend": "plaintext",
+        "primitive": "fairness",
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2"
+      },
+      "name": "truncated_v2_missing_signed_identity"
+    }
+  ],
+  "positive": [
+    {
+      "canonical_signed_body_hex": "7b22616c676f726974686d5f76657273696f6e223a22302e302e38222c2261756469656e6365223a5b22726567756c61746f722d61222c22726567756c61746f722d62225d2c2261756469745f72756e5f6964223a2233663262316334652d356136642d346537662d383039312d613262336334643565366637222c226261636b656e64223a22706c61696e74657874222c22646174617365745f636f6d6d69746d656e74223a7b226e616d65223a2264617461736574222c22736861323536223a2262323737666436323336373661353235633239623965623135356166633863393031303638313831346365616662326437363237663437623961323332353736227d2c226465706c6f796d656e745f6964223a2270726f642d65752d31222c2264657074685f627564676574223a7b22636f6e73756d6564223a322c226465636c61726564223a367d2c226470223a7b22657073696c6f6e223a312e302c226d656368616e69736d223a226c61706c616365227d2c22696e7075745f636f6d6d69746d656e7473223a5b7b226e616d65223a22795f74727565222c22736861323536223a2262393334626166383464393437363736643163306566343564633262656335386335666533653463656236336566306437666135333630353764633137613637227d5d2c226973737565645f6174223a22323032362d31302d30315431323a30303a30302b30303a3030222c22697373756572223a22766563746f722d697373756572222c226b65795f6964223a22766563746f722d6b65792d31222c226d6f64656c5f636f6d6d69746d656e74223a7b226e616d65223a226d6f64656c222c22736861323536223a2239333732633437306565616464356563643963336337346332623363623633336638653266326661643739393235306130663730643635326236623832356534227d2c22706172616d657465725f736574223a7b226261636b656e64223a22706c61696e74657874222c226261636b656e645f76657273696f6e223a22222c22636f6566665f6d6f645f6269745f73697a6573223a5b5d2c226c6962726172795f76657273696f6e223a22302e302e38222c226d756c7469706c696361746976655f6465707468223a362c22706f6c795f6d6f64756c75735f646567726565223a302c227363616c696e675f666163746f725f62697473223a302c2273656375726974795f62697473223a3132387d2c22706172616d657465725f7365745f68617368223a2236636636353538653239303661353261376339323539356465346336373034373564393964303462623536623339333564643163636436663261323235356664222c227072696d6974697665223a22666169726e657373222c227075626c69635f6b65795f66696e6765727072696e74223a2266356131323462346666356233323533616132336339313764343630636661656435376365633238656363346237613433643732373835383238616132323536222c22726567756c6174696f6e73223a5b224e59435f4c4c313434222c2245555f41495f4143545f4152543130225d2c22726573756c74223a7b22627265616368223a747275652c22636f756e74223a342c22646973706172697479223a302e32352c226e6573746564223a7b22c3a9223a5b312c322e352c6e756c6c2c22c3bc225d7d2c2274696e79223a31652d30377d2c22736368656d61223a2272656761756469742d6668652e7265706f72742e7632222c22736368656d615f76657273696f6e223a2272656761756469742d6668652e7265706f72742e7632222c2274727573745f706f6c6963795f76657273696f6e223a317d",
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "name": "full",
+      "sealed_digest_hex": "fcadd05ebbc4f1db772f713b25e148457766363b9094851fe9e954c5572d3a69",
+      "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA==",
+      "signing_input_sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b"
+    },
+    {
+      "canonical_signed_body_hex": "7b22616c676f726974686d5f76657273696f6e223a22302e302e38222c2261756469745f72756e5f6964223a2233663262316334652d356136642d346537662d383039312d613262336334643565366637222c226261636b656e64223a22706c61696e74657874222c226465706c6f796d656e745f6964223a2270726f642d65752d31222c2264657074685f627564676574223a7b22636f6e73756d6564223a322c226465636c61726564223a367d2c22696e7075745f636f6d6d69746d656e7473223a5b5d2c226973737565645f6174223a22323032362d31302d30315431323a30303a30302b30303a3030222c22697373756572223a22766563746f722d697373756572222c226b65795f6964223a22766563746f722d6b65792d31222c22706172616d657465725f736574223a7b226261636b656e64223a22706c61696e74657874222c226261636b656e645f76657273696f6e223a22222c22636f6566665f6d6f645f6269745f73697a6573223a5b5d2c226c6962726172795f76657273696f6e223a22302e302e38222c226d756c7469706c696361746976655f6465707468223a362c22706f6c795f6d6f64756c75735f646567726565223a302c227363616c696e675f666163746f725f62697473223a302c2273656375726974795f62697473223a3132387d2c22706172616d657465725f7365745f68617368223a2236636636353538653239303661353261376339323539356465346336373034373564393964303462623536623339333564643163636436663261323235356664222c227072696d6974697665223a22666169726e657373222c227075626c69635f6b65795f66696e6765727072696e74223a2266356131323462346666356233323533616132336339313764343630636661656435376365633238656363346237613433643732373835383238616132323536222c22726567756c6174696f6e73223a5b224e59435f4c4c313434225d2c22726573756c74223a7b22627265616368223a66616c73652c22646973706172697479223a302e32357d2c22736368656d61223a2272656761756469742d6668652e7265706f72742e7632222c22736368656d615f76657273696f6e223a2272656761756469742d6668652e7265706f72742e7632222c2274727573745f706f6c6963795f76657273696f6e223a317d",
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "input_commitments": [],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "26af001ffb0d9b3b361710c8ee7c15b79a80e4999dc1d49597875ac2974e3470",
+          "signature_alg": "Ed25519",
+          "signature_b64": "lVI6L7umrjvtZK8XiJF21Y37a0WAzaAg2TN1kh4QV90Iokm7m6L0BiKRLgodATnLtMPKNPgGqfmtLKIx1Cb8Ag=="
+        },
+        "regulations": [
+          "NYC_LL144"
+        ],
+        "result": {
+          "breach": false,
+          "disparity": 0.25
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "name": "minimal",
+      "sealed_digest_hex": "6b59597b1f62714012afbe4d6c81e6a8345170189209f04810ab2094acc38f44",
+      "signature_b64": "lVI6L7umrjvtZK8XiJF21Y37a0WAzaAg2TN1kh4QV90Iokm7m6L0BiKRLgodATnLtMPKNPgGqfmtLKIx1Cb8Ag==",
+      "signing_input_sha256": "26af001ffb0d9b3b361710c8ee7c15b79a80e4999dc1d49597875ac2974e3470"
+    }
+  ],
+  "verify_refusals": [
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.0,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "expect_reason": "HASH_MISMATCH",
+      "name": "tampered_result"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-z"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "expect_reason": "HASH_MISMATCH",
+      "name": "tampered_audience"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "other-key",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "expect_reason": "ISSUER_UNKNOWN",
+      "name": "swapped_key_id"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "ZrJZNAPVdGnimq1/SgR88rn35+zhWlb/dIY+7POg/xGhWQhevvuSHK9RUKqmL5hMnDZC5pqspqijWEB/RlzfBw=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "expect_reason": "SIGNATURE_INVALID",
+      "name": "signature_without_domain_separation"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA08RnLO13YMTbJ9yek9KiOzpcEEG/QYpC/JRolowN4IQ=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "0Gj7B72hyeN0ydOHH6kbhC7XuXZ1Bi0EoyBILcr8iRZttAgauTx9vb9jZzNKr2MPkDRQmrGEp4akENMpYprKBg=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "expect_reason": "SIGNATURE_INVALID",
+      "name": "signed_by_a_different_key"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "3d5851a903030139c612917c0ab406ba32c6a7b8196542ac5d180889f850f6d7",
+          "signature_alg": "Ed25519",
+          "signature_b64": "J6zJiolinEX4f7wZG/juGRVdN32CWcRD2hjtVd7Y9YXF3ulPijiUeut10Z3kQLC+7F3wZ7W56hieHnE9nQK+Dg=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "expect_reason": "FINGERPRINT_MISMATCH",
+      "name": "wrong_signed_fingerprint"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "someone-else",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "d150842dcf571fdbb8ce53251d8604812e596fa29e11a191641feb9122778869",
+          "signature_alg": "Ed25519",
+          "signature_b64": "M9jBI0bpH8zAgtttcjCGT5ofXH6n6lwKM1RsZJIZjsLvu9AZYMFE4oJaqPjcHTppz4icmqcRMQIJvYbWYsuHCQ=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "expect_reason": "ISSUER_MISMATCH",
+      "name": "wrong_signed_issuer"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-us-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "f9245a576d73e40b84cce55f2f1db309c81a3780e2d14ff49d2ebc26067aac04",
+          "signature_alg": "Ed25519",
+          "signature_b64": "EuooJ0ezP70wGfgAH8/SfgVVZxO7Gjg1mW9eONfC471ttBZCN4kxbXNNMU1RnTQPifXyGgtzhbDb4G+xp0FoBg=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "trust_policy_version": 1
+      },
+      "expect_reason": "DEPLOYMENT_NOT_ALLOWED",
+      "name": "deployment_outside_registered_scope",
+      "trust_override": {
+        "deployments": [
+          "prod-eu-1"
+        ]
+      }
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v1",
+        "schema_version": "regaudit-fhe.report.v1",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "dmVjdG9yLXRva2Vu"
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "expect_reason": "HASH_MISMATCH",
+      "name": "v2_relabelled_as_v1"
+    },
+    {
+      "envelope": {
+        "algorithm_version": "0.0.8",
+        "audience": [
+          "regulator-a",
+          "regulator-b"
+        ],
+        "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        "backend": "plaintext",
+        "dataset_commitment": {
+          "name": "dataset",
+          "sha256": "b277fd623676a525c29b9eb155afc8c9010681814ceafb2d7627f47b9a232576"
+        },
+        "deployment_id": "prod-eu-1",
+        "depth_budget": {
+          "consumed": 2,
+          "declared": 6
+        },
+        "dp": {
+          "epsilon": 1.0,
+          "mechanism": "laplace"
+        },
+        "input_commitments": [
+          {
+            "name": "y_true",
+            "sha256": "b934baf84d947676d1c0ef45dc2bec58c5fe3e4ceb63ef0d7fa536057dc17a67"
+          }
+        ],
+        "issued_at": "2026-10-01T12:00:00+00:00",
+        "issuer": "vector-issuer",
+        "key_id": "vector-key-1",
+        "model_commitment": {
+          "name": "model",
+          "sha256": "9372c470eeadd5ecd9c3c74c2b3cb633f8e2f2fad799250a0f70d652b6b825e4"
+        },
+        "parameter_set": {
+          "backend": "plaintext",
+          "backend_version": "",
+          "coeff_mod_bit_sizes": [],
+          "library_version": "0.0.8",
+          "multiplicative_depth": 6,
+          "poly_modulus_degree": 0,
+          "scaling_factor_bits": 0,
+          "security_bits": 128
+        },
+        "parameter_set_hash": "6cf6558e2906a52a7c92595de4c670475d99d04bb56b3935dd1ccd6f2a2255fd",
+        "primitive": "fairness",
+        "public_key_fingerprint": "f5a124b4ff5b3253aa23c917d460cfaed57cec28ecc4b7a43d72785828aa2256",
+        "receipt": {
+          "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOs8LcBCNDGtIWBNJ0bywgvXolUFZ+vvHRoMOgA6JY8=\n-----END PUBLIC KEY-----\n",
+          "sha256": "2dccddae8e96f35d15da3665ded1aed685d6e3db64c3051c889011be7dc4741b",
+          "signature_alg": "Ed25519",
+          "signature_b64": "e4O0h4JITUXEcVXjtx/DogU+oVuTJAGWdg8lkEHIeDEfgIsRCyPo6pS9vKhU3dYasv+tzMrekc2hwb46N5fyDA=="
+        },
+        "regulations": [
+          "NYC_LL144",
+          "EU_AI_ACT_ART10"
+        ],
+        "result": {
+          "breach": true,
+          "count": 4,
+          "disparity": 0.25,
+          "nested": {
+            "\u00e9": [
+              1,
+              2.5,
+              null,
+              "\u00fc"
+            ]
+          },
+          "tiny": 1e-07
+        },
+        "schema": "regaudit-fhe.report.v2",
+        "schema_version": "regaudit-fhe.report.v2",
+        "timestamps": [
+          {
+            "issued_at": "2026-10-02T00:00:00+00:00",
+            "issuer": "vector-tsa",
+            "token_b64": "b2s6a1lZex9icUASr75NbIHmqDRRcBiSCfBIEKsglKzDj0Q="
+          }
+        ],
+        "trust_policy_version": 1
+      },
+      "expect_reason": "TIMESTAMP_FAILED",
+      "name": "timestamp_token_over_a_different_artifact",
+      "pinned_timestamp_verifier": true
+    }
+  ]
+}

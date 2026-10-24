@@ -10,6 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from regaudit_fhe.server import ServerConfig, build_app
+from tests._asgi import client_for
 
 
 def _dev_config(**overrides) -> ServerConfig:
@@ -27,7 +28,10 @@ def _dev_config(**overrides) -> ServerConfig:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(build_app(config=_dev_config()))
+    # allow_self_signed: the audit endpoint signs with an ephemeral issuer
+    # that no trust store can register, so /v1/verify can only report
+    # SELF_SIGNED_ONLY here. Trusted verification is covered in test_server_trust.
+    return client_for(build_app(config=_dev_config(allow_self_signed=True)))
 
 
 def test_healthz(client: TestClient) -> None:
@@ -59,7 +63,7 @@ def test_schema_unknown_primitive(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_audit_and_verify_roundtrip(client: TestClient) -> None:
+def test_audit_then_verify_roundtrip_is_self_signed_only(client: TestClient) -> None:
     payload = {
         "y_true": [1, 0, 1, 1, 0, 1, 0, 0],
         "y_pred": [1, 0, 1, 0, 0, 1, 1, 0],
@@ -75,7 +79,10 @@ def test_audit_and_verify_roundtrip(client: TestClient) -> None:
 
     v = client.post("/v1/verify", json={"envelope": env})
     assert v.status_code == 200
-    assert v.json()["valid"] is True
+    body = v.json()
+    assert body["integrity_valid"] is True
+    assert body["trust_status"] == "SELF_SIGNED_ONLY"
+    assert body["valid"] is False  # an unauthenticated issuer is never "valid"
 
 
 def test_drift_endpoint(client: TestClient) -> None:

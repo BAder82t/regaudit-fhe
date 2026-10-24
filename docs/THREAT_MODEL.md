@@ -295,9 +295,42 @@ envelope:
      reproduce, the canonical hash of the regulator's copy matches
      `input_commitments[i].sha256`.
 
-`regaudit_fhe.verify_envelope(env, trusted_keys=...)` does steps 4–6
-and returns a structured outcome covering all of them. Steps 1, 2, 3,
-7, and 8 are policy-side and live in the regulator's verifier code.
+`regaudit_fhe.verify_envelope(env, trust_store=...)` does steps 4–6
+and returns a structured outcome whose `trust_status` is `TRUSTED`,
+`SELF_SIGNED_ONLY` or `INVALID`. Only a `TrustStore` enforces revocation
+and parameter-set pins; a plain `key_id` → PEM mapping enforces
+registration only. Steps 1, 2, 3, 7, and 8 are policy-side and live in
+the regulator's verifier code.
+
+A verified timestamp must not be presented as historical non-revocation
+proof: the v1 token covers the signed body only, so it does not bind the
+signature or the key, and a holder of a later-compromised key could sign a
+previously timestamped body. The target design is in
+[TRUST_SPEC.md](TRUST_SPEC.md) §4-§5.
+
+**Phase 3A contract decisions (candidate trust core).** `RECORDED_LOCAL` is a local
+record made at verification time: it is not global replay protection, not
+exactly-once execution and not proof the authorised operation completed, and
+`replay_durable` discloses whether it survives a restart. `report.v1` is refused
+under `confidential` (it has no signed `audit_run_id`, so it cannot satisfy the
+mandatory replay check). A required timestamp needs authenticated evidence; an
+absent timestamp never satisfies it. Retirement and compromise boundaries are
+**strict**: the latest possible signing time (`genTime + accuracy`) must be earlier
+than the boundary, and equality is refused. For the development self-signed option
+only, Unix sockets and unknown transports are refused (normal verification is
+unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted and
+`3` when it is supplied but unusable. None of this establishes that the trust
+history is complete; the O8 freshness requirement stays in force.
+
+Known limits of the v1 format: the `timestamp` block is outside the signed
+body, so it is never signed evidence. An attached timestamp is
+`UNVERIFIED` unless a `tsa_verifier` validates it, and a verified
+timestamp never overrides revocation. Revocation is a flat set with no
+validity window, and `issued_at` is signer-asserted, so a revoked key's
+earlier reports cannot be told apart from later forgeries without
+independent timestamp or witness evidence. For `report.v1` replay protection is
+not provided (v1 has no signed run identifier); `report.v2` adds local replay
+detection only (see the Phase 3A paragraph above).
 
 ---
 
@@ -309,3 +342,6 @@ and returns a structured outcome covering all of them. Steps 1, 2, 3,
 | 2026-04-26 | Added Ed25519 signing, parameter_set_hash, input_commitments, optional timestamp authority (v0.0.2). |
 | 2026-04-30 | v0.0.7: real encrypted concordance/calibration/disagreement primitives, verifier hardening (`verify_receipt` warns on missing trust store; CLI `--trusted-keys`/`--strict`). |
 | 2026-06-18 | v0.0.8: differential-privacy output perturbation with a signed `dp` disclosure block; `CallableKeyProvider` external key custody (KMS/HSM); experimental OpenFHE CKKS backend behind the backend registry. |
+| 2026-10-24 | Phase 1 trust hardening (unreleased): `/v1/verify` fails closed without a trust store; `trust_status` / `timestamp_status` outcomes; revocation and pins enforced through `verify_receipt`; unverified timestamps no longer reported valid. |
+| 2026-10-24 | Trust specification (docs/TRUST_SPEC.md) drafted: key lifecycle, time evidence, replay, verification-status semantics and entry-point requirements for a future report.v2. Specification only. |
+| 2026-10-24 | Phase 3A candidate: `report.v2` with a signed security identity, strict canonicalisation, a shared verification engine (key lifecycle, chronology, local replay), CLI exit codes 0/1/2/3 and per-request development-option checks. Not production readiness; O8 and O9 remain open. |

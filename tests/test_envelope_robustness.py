@@ -202,14 +202,14 @@ def test_parameter_set_hash_mismatch_against_pinned_value():
 # --------------------------------------------------------------------------
 
 
-def test_unknown_issuer_rejected_when_trusted_keys_supplied():
+def test_unregistered_issuer_rejected_when_trusted_keys_supplied():
     env = _sample_envelope()
     out = rf.verify_envelope(env, trusted_keys={"some-other-key": "pem"})
     assert out.issuer_trusted is False
     assert out.valid is False
 
 
-def test_known_issuer_accepted_when_trusted_keys_supplied():
+def test_registered_issuer_accepted_when_trusted_keys_supplied():
     signer = rf.Signer.generate(issuer="acme", key_id="acme-2026-01")
     y = np.array([1.0, 0.0, 1.0, 0.0])
     env = rf.envelope("fairness", rf.audit_fairness(y, y, y, 1.0 - y), signer=signer)

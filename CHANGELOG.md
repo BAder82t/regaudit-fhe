@@ -1,0 +1,229 @@
+# Changelog
+
+## Unreleased — Phase 3A: `report.v2` trust core
+
+Candidate trust-core implementation of the approved parts of
+`docs/TRUST_SPEC.md`. **Not production readiness.** Trust-anchor distribution
+(O8), any timestamp authority (O9), shared replay infrastructure and
+high-assurance historical acceptance are deliberately not implemented.
+
+### Contract decisions applied after owner review
+
+- **`RECORDED_LOCAL`** is a defined consumption state (never global replay
+  protection, exactly-once execution or proof the operation completed). Every
+  replay-checked result discloses `replay_durable` (`false` for the in-memory
+  cache, which is lost on restart; `true` for the sqlite cache).
+- **Retirement boundary is now strict**, like compromise: a timestamp whose
+  latest possible time (`genTime + accuracy`) equals `retired_at` is refused,
+  as is a signer-asserted `issued_at` equal to it (development only). This
+  tightens the earlier candidate, which accepted equality for retirement. A
+  valid timestamp still does not establish that trust history is complete (O8).
+- **Unix sockets** are refused for the development self-signed option only
+  (uvicorn reports no server address for them); normal trusted verification over
+  a Unix socket is unaffected. The development option now also requires a known
+  loopback peer.
+- **`regaudit-fhe verify --trusted-keys`**: omitted is a usage error (`2`);
+  supplied, even as an empty value, but unusable is infrastructure failure (`3`).
+- `report.v1` is refused under `confidential` / `high-assurance` for now.
+- A required timestamp is satisfied only by authenticated evidence.
+- **Directly constructed `TrustStore(...)`** is held to the loaders' rules: Ed25519
+  keys only and no key under two ids (previously only the loaders checked).
+- **Canonical base64 on the `report.v1` path too:** a v1 signature or timestamp
+  token that is not canonical base64 (trailing bits, whitespace, stray characters)
+  no longer verifies.
+- A replay store that fails **while verifying**, outside the development profile,
+  is infrastructure failure (`verify` exit `3`, HTTP `503`), not a policy refusal.
+
+### Added
+
+- **`regaudit-fhe.report.v2`** (`envelope_v2`, `AuditEnvelopeV2`, `parse_envelope`,
+  `docs`/JSON Schema `envelope.v2`). The signed body carries `issuer`, `key_id`,
+  `public_key_fingerprint`, `deployment_id`, `audit_run_id`, optional `audience`
+  and optional `model_commitment` / `dataset_commitment`, under a
+  **domain-separated** Ed25519 signature. Unknown fields are refused everywhere.
+  Timestamps are a list outside the signed body and bind the **sealed digest**
+  (signed body + signature + key identity).
+- **Strict canonical JSON policy** (`regaudit_fhe.canonical`): duplicate keys,
+  `NaN`/`Infinity`, overflowing numbers, BOM, invalid UTF-8, lone surrogates,
+  non-string keys, excessive depth and oversized input are refused. `report.v1`
+  keeps its original lenient canonical bytes.
+- **Shared verification engine** (`VerificationPolicy`, `verify_report`,
+  `VerificationResult`): one policy for the library, CLI, HTTP server and
+  `build_app()`. Results expose `trust_status`, `accepted`, `integrity_valid`,
+  `issuer_trusted`, `key_status`, `chronology`, `signed_not_after`,
+  `timestamp_status`, `reasons`, `blocking_reasons`, `replay_scope`,
+  `consumption` and `trust_history`. `accepted` is the authoritative decision.
+- **Key lifecycle** in a locally provisioned trust store (`entries` form):
+  `active` / `retired` / `compromised`, validity bounds, deployment and
+  primitive scope, parameter-set pin. One public key may be registered under one
+  `key_id` only; keys must be Ed25519.
+- **Chronology rules**: retired and compromised keys are accepted historically
+  only with authenticated chronology (a caller-pinned `TimestampVerifier` over
+  the sealed digest) **and** a fresh, authenticated `TrustHistory`. No mechanism
+  in this release authenticates a trust history, so by default these reports are
+  refused. An unknown compromise boundary refuses everything the key signed.
+- **Local replay detection** (`InMemoryReplayCache`, `SqliteReplayCache`), with
+  honest scope labels and `RECORDED_LOCAL`. Fails closed when full or broken
+  outside the development profile. See the limits below.
+- `regaudit-fhe verify` options: `--allow-self-signed`, `--profile`,
+  `--verifier-id`, `--max-age-seconds`, `--replay-db`, `--replay-mode`,
+  `--refuse-legacy-v1`.
+- `build_app` is documented as a supported embedding entry point and listed in
+  `regaudit_fhe.server.__all__`.
+- Canonical test vectors with golden values (`tests/vectors/report_v2/`) and
+  `scripts/mutation_check_phase3a.py`.
+
+### Changed (breaking, deliberate)
+
+- **`regaudit-fhe verify` exit codes**: `0` accepted, `1` refused by policy
+  (including `SELF_SIGNED_ONLY`), `2` invalid input, usage or incompatible options
+  (e.g. `--allow-self-signed` with a non-development profile, or a production
+  profile without its required options), `3` a specified trust or replay resource
+  that is unavailable or unusable. Two behaviours change:
+  a consistent self-signed report used to exit `0` and now exits `1`; an
+  unreadable or malformed `--trusted-keys` file used to exit `2` and now exits
+  `3`. Running without `--trusted-keys` and without `--allow-self-signed` is a
+  usage error (`2`). `serve` keeps `2` for "refusing to start".
+- `regaudit-fhe verify` output gains the authoritative fields above and keeps
+  `valid` (now an alias of `accepted`) and `trusted_issuer`.
+- **`require_verified_timestamp` now requires a `VERIFIED` timestamp** (an absent
+  timestamp no longer satisfies it) and needs a pinned `timestamp_verifier`.
+  `report.v1` timestamps cover the body only, so they can never be `VERIFIED`.
+- `ServerConfig.tsa_verifier` (Phase 1 candidate, unreleased) is replaced by
+  `timestamp_verifier` with the v2 interface.
+- `/v1/verify` reads the request body itself: strict JSON, exactly
+  `{"envelope": ...}`, the size limit applies to chunked uploads too, 422 for any
+  malformed input, and verification runs off the event loop.
+- **`valid` is deprecated** on `VerificationOutcome` and `VerificationResult`
+  (a `DeprecationWarning`), preserved through the first v2 release, with removal
+  deferred to a later, explicitly breaking release.
+- A trust store may no longer register the same public key under two `key_id`s,
+  and every key must parse as Ed25519. Phase 1 helpers treat any non-`active`
+  entry as revoked.
+- **Removed/moved names:** `regaudit_fhe.server.PROFILES` now lives in
+  `regaudit_fhe.verification` (importing it from `server` raises `ImportError`),
+  and the `server.VerifyRequest` model is gone.
+- **Stricter `/v1/verify` body:** exactly `{"envelope": ...}`; any extra key is a
+  422, and the OpenAPI request model is no longer generated.
+- **Non-development profiles are enforced when the app is built.**
+  `confidential` and `high-assurance` now require a trust store, `max_age`, a
+  persistent replay cache and a replay mode (and `high-assurance` a
+  `verifier_id`); a deployment configured with less now fails at `build_app()` /
+  startup with `PolicyError` instead of running with weaker checks.
+- **`report.v1` is refused under `confidential` and `high-assurance`**
+  (`REPLAY_ID_MISSING`): replay checking is mandatory there and a v1 report has no
+  `audit_run_id`. (`docs/TRUST_SPEC.md` §7 and §6 can be read differently; see
+  Appendix C.2.)
+- `TrustStore` is now immutable after construction (its mappings are read-only
+  views and `revoked` a `frozenset`), copies what it is given, and refuses a
+  direct construction whose `keys`/`revoked`/`parameter_set_pins` disagree with
+  its `entries`.
+- Development-only self-signed verification now also requires, on every
+  request, a loopback TCP server socket **and** a known loopback client (Unix
+  sockets are refused for this option), and refuses any forwarding header unless an explicit trusted-proxy policy vouches for it.
+
+### Security hardening found by independent review during this phase
+
+Same key under two ids bypassing a compromised status; non-canonical base64
+changing the sealed digest; loose RFC 3339 timestamps; replay-store input
+guards; X-Forwarded-For parsing across multiple header lines; IPv4-mapped
+loopback; replay retention that could be shorter than report freshness;
+chronology reported for unauthenticated issuers; blocking replay I/O on the
+event loop; non-finite `--max-age-seconds`; unbounded trust-store and report
+files.
+
+### Remaining limitations
+
+- No trust-anchor distribution or anchor-signed bundles (**O8**): an
+  *authenticated* `TrustHistory` cannot be produced by this library, so
+  historical acceptance of retired/compromised keys is refused unless a caller
+  injects one. `high-assurance` never accepts historical keys.
+- No timestamp authority or default roots (**O9**); only a caller-pinned
+  verifier interface.
+- Replay detection is **local** only. `RECORDED_LOCAL` means "recorded in this
+  verifier's store at verification time"; it is not coupled to any downstream
+  operation and is not a crash-safe exactly-once guarantee. Any caller holding
+  `audit:verify` can consume an `audit_run_id` first when `record` mode is on.
+  Independent verifiers without a shared store can each accept a report once.
+- `report.v2` is produced by the library API only; `regaudit-fhe audit` and
+  `/v1/audit/*` still emit `report.v1` signed by an ephemeral key.
+- Float formatting follows Python's `repr`; a non-Python verifier needs RFC 8785
+  (or byte-identical formatting) before claiming v2 compatibility.
+- A header-less local reverse proxy cannot be distinguished from a direct local
+  client, so the development self-signed option must not be enabled behind one.
+  Under uvicorn a Unix-socket request reports no server address; the development
+  option refuses it by decision (normal verification is unaffected).
+- `BodySizeLimitMiddleware` still checks `Content-Length` only for the other
+  endpoints (only `/v1/verify` now bounds chunked uploads).
+- Phase 3A does not address the larger confidential-computation limitations
+  (evaluator/decryption-key separation, OpenFHE behavioural verification,
+  differential-privacy enforcement).
+
+## Unreleased — Phase 1 trust hardening (partly superseded by Phase 3A above)
+
+### Changed (deliberate, security-motivated default changes)
+
+- **`POST /v1/verify` now fails closed.** Without a configured trust store
+  (`REGAUDIT_FHE_TRUST_STORE` / `regaudit-fhe serve --trust-store`) it returns
+  503 instead of verifying the envelope against its own embedded key. A
+  previously accepted self-signed report is now refused by this endpoint. This
+  is an intentional correction, not a regression.
+- `/v1/verify` responses keep `valid`, `primitive`, `issued_at` and
+  `regulations` and add `trust_status`, `integrity_valid` and
+  `timestamp_status`. `valid` is true only when `trust_status` is `TRUSTED`.
+- A trust store that is configured but missing, unreadable or malformed aborts
+  server startup (`TrustStoreError`); it never falls back to self-verification.
+- `verify_envelope` / `verify_receipt` verify the signature against the
+  *registered* key when trust material is supplied, never the embedded one.
+- `VerificationOutcome.issuer_trusted` is now `False` when no trust material
+  was supplied (it used to be `True`). `valid` keeps its v1 integrity meaning
+  for callers without trust material.
+- An attached timestamp with no `tsa_verifier` is reported `UNVERIFIED` and
+  `timestamp_valid` is `False` (it used to be `True`).
+- `verify_receipt(trusted_keys={})` now fails closed (an empty mapping is trust
+  material that trusts nobody) instead of taking the self-signed path.
+- `/v1/verify` answers 422 for a malformed envelope body instead of 500.
+
+### Added
+
+- `VerificationOutcome.trust_status` (`TRUSTED` / `SELF_SIGNED_ONLY` /
+  `INVALID`), `timestamp_status` (`ABSENT` / `UNVERIFIED` / `VERIFIED` /
+  `FAILED`), `revoked`, `pin_ok`.
+- `verify_envelope(..., trust_store=, require_verified_timestamp=)` and
+  `verify_receipt(..., trust_store=)`; a `TrustStore` passed as `trusted_keys`
+  now keeps its revocation set and parameter-set pins.
+- `verify_envelope_or_raise(..., require_verified_timestamp=)` and the
+  `TimestampUnverified` exception.
+- `regaudit-fhe serve --trust-store PATH` and `--allow-self-signed`
+  (development only: refused under non-`development` profiles via
+  `REGAUDIT_FHE_PROFILE`, and on non-loopback binds; never yields `TRUSTED`).
+
+### Documentation
+
+- `valid` is documented as not a provenance claim; a verified timestamp is
+  documented as not proof of non-revocation; the `build_app()` entry-point
+  contract is documented. The target design is in `docs/TRUST_SPEC.md`
+  (specification only).
+
+### Unchanged
+
+- The v1 canonical signing format (`regaudit-fhe.report.v1`); existing reports
+  still parse and verify cryptographically. (Phase 1 added no `report.v2` fields;
+  Phase 3A, above, introduces `report.v2` without changing v1.)
+- The `timestamp` block remains outside the signed body.
+
+### Remaining trust limitations
+
+- At Phase 1 there was no replay protection, freshness window or audit-run
+  binding; Phase 3A adds a freshness window, a signed `audit_run_id` and *local*
+  replay detection for `report.v2` only (see above).
+- Revocation has no time semantics; `issued_at` is signer-asserted.
+- `/v1/audit/*` signs with an ephemeral issuer key, so its envelopes can only
+  verify as `SELF_SIGNED_ONLY`.
+- `verify_receipt` with a plain `trusted_keys` mapping cannot enforce
+  revocation or pins; use a `TrustStore`.
+- `--allow-self-signed` bind-host enforcement lives in the `serve` CLI. An app
+  from `build_app()` served directly (e.g. `uvicorn` on `0.0.0.0`) is not
+  host-checked; it still can never report `TRUSTED`.
+- A timestamp with no `tsa_verifier` leaves the trust decision unchanged unless
+  `require_verified_timestamp` is set (the server default is off).
