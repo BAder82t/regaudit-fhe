@@ -1,6 +1,135 @@
 # Changelog
 
-## Unreleased — Phase 1 trust hardening
+## Unreleased — Phase 3A: `report.v2` trust core
+
+Candidate trust-core implementation of the approved parts of
+`docs/TRUST_SPEC.md`. **Not production readiness.** Trust-anchor distribution
+(O8), any timestamp authority (O9), shared replay infrastructure and
+high-assurance historical acceptance are deliberately not implemented.
+
+### Added
+
+- **`regaudit-fhe.report.v2`** (`envelope_v2`, `AuditEnvelopeV2`, `parse_envelope`,
+  `docs`/JSON Schema `envelope.v2`). The signed body carries `issuer`, `key_id`,
+  `public_key_fingerprint`, `deployment_id`, `audit_run_id`, optional `audience`
+  and optional `model_commitment` / `dataset_commitment`, under a
+  **domain-separated** Ed25519 signature. Unknown fields are refused everywhere.
+  Timestamps are a list outside the signed body and bind the **sealed digest**
+  (signed body + signature + key identity).
+- **Strict canonical JSON policy** (`regaudit_fhe.canonical`): duplicate keys,
+  `NaN`/`Infinity`, overflowing numbers, BOM, invalid UTF-8, lone surrogates,
+  non-string keys, excessive depth and oversized input are refused. `report.v1`
+  keeps its original lenient canonical bytes.
+- **Shared verification engine** (`VerificationPolicy`, `verify_report`,
+  `VerificationResult`): one policy for the library, CLI, HTTP server and
+  `build_app()`. Results expose `trust_status`, `accepted`, `integrity_valid`,
+  `issuer_trusted`, `key_status`, `chronology`, `signed_not_after`,
+  `timestamp_status`, `reasons`, `blocking_reasons`, `replay_scope`,
+  `consumption` and `trust_history`. `accepted` is the authoritative decision.
+- **Key lifecycle** in a locally provisioned trust store (`entries` form):
+  `active` / `retired` / `compromised`, validity bounds, deployment and
+  primitive scope, parameter-set pin. One public key may be registered under one
+  `key_id` only; keys must be Ed25519.
+- **Chronology rules**: retired and compromised keys are accepted historically
+  only with authenticated chronology (a caller-pinned `TimestampVerifier` over
+  the sealed digest) **and** a fresh, authenticated `TrustHistory`. No mechanism
+  in this release authenticates a trust history, so by default these reports are
+  refused. An unknown compromise boundary refuses everything the key signed.
+- **Local replay detection** (`InMemoryReplayCache`, `SqliteReplayCache`), with
+  honest scope labels and `RECORDED_LOCAL`. Fails closed when full or broken
+  outside the development profile. See the limits below.
+- `regaudit-fhe verify` options: `--allow-self-signed`, `--profile`,
+  `--verifier-id`, `--max-age-seconds`, `--replay-db`, `--replay-mode`,
+  `--refuse-legacy-v1`.
+- `build_app` is documented as a supported embedding entry point and listed in
+  `regaudit_fhe.server.__all__`.
+- Canonical test vectors with golden values (`tests/vectors/report_v2/`) and
+  `scripts/mutation_check_phase3a.py`.
+
+### Changed (breaking, deliberate)
+
+- **`regaudit-fhe verify` exit codes**: `0` accepted, `1` refused by policy
+  (including `SELF_SIGNED_ONLY`), `2` invalid input or usage, `3` verification
+  infrastructure unavailable or invalid. Two behaviours change:
+  a consistent self-signed report used to exit `0` and now exits `1`; an
+  unreadable or malformed `--trusted-keys` file used to exit `2` and now exits
+  `3`. Running without `--trusted-keys` and without `--allow-self-signed` is a
+  usage error (`2`). `serve` keeps `2` for "refusing to start".
+- `regaudit-fhe verify` output gains the authoritative fields above and keeps
+  `valid` (now an alias of `accepted`) and `trusted_issuer`.
+- **`require_verified_timestamp` now requires a `VERIFIED` timestamp** (an absent
+  timestamp no longer satisfies it) and needs a pinned `timestamp_verifier`.
+  `report.v1` timestamps cover the body only, so they can never be `VERIFIED`.
+- `ServerConfig.tsa_verifier` (Phase 1 candidate, unreleased) is replaced by
+  `timestamp_verifier` with the v2 interface.
+- `/v1/verify` reads the request body itself: strict JSON, exactly
+  `{"envelope": ...}`, the size limit applies to chunked uploads too, 422 for any
+  malformed input, and verification runs off the event loop.
+- **`valid` is deprecated** on `VerificationOutcome` and `VerificationResult`
+  (a `DeprecationWarning`), preserved through the first v2 release, with removal
+  deferred to a later, explicitly breaking release.
+- A trust store may no longer register the same public key under two `key_id`s,
+  and every key must parse as Ed25519. Phase 1 helpers treat any non-`active`
+  entry as revoked.
+- **Removed/moved names:** `regaudit_fhe.server.PROFILES` now lives in
+  `regaudit_fhe.verification` (importing it from `server` raises `ImportError`),
+  and the `server.VerifyRequest` model is gone.
+- **Stricter `/v1/verify` body:** exactly `{"envelope": ...}`; any extra key is a
+  422, and the OpenAPI request model is no longer generated.
+- **Non-development profiles are enforced when the app is built.**
+  `confidential` and `high-assurance` now require a trust store, `max_age`, a
+  persistent replay cache and a replay mode (and `high-assurance` a
+  `verifier_id`); a deployment configured with less now fails at `build_app()` /
+  startup with `PolicyError` instead of running with weaker checks.
+- **`report.v1` is refused under `confidential` and `high-assurance`**
+  (`REPLAY_ID_MISSING`): replay checking is mandatory there and a v1 report has no
+  `audit_run_id`. (`docs/TRUST_SPEC.md` §7 and §6 can be read differently; see
+  Appendix C.2.)
+- `TrustStore` is now immutable after construction (its mappings are read-only
+  views and `revoked` a `frozenset`), copies what it is given, and refuses a
+  direct construction whose `keys`/`revoked`/`parameter_set_pins` disagree with
+  its `entries`.
+- Development-only self-signed verification now also requires, on every
+  request, a loopback/Unix server socket **and** a loopback client, and refuses
+  any forwarding header unless an explicit trusted-proxy policy vouches for it.
+
+### Security hardening found by independent review during this phase
+
+Same key under two ids bypassing a compromised status; non-canonical base64
+changing the sealed digest; loose RFC 3339 timestamps; replay-store input
+guards; X-Forwarded-For parsing across multiple header lines; IPv4-mapped
+loopback; replay retention that could be shorter than report freshness;
+chronology reported for unauthenticated issuers; blocking replay I/O on the
+event loop; non-finite `--max-age-seconds`; unbounded trust-store and report
+files.
+
+### Remaining limitations
+
+- No trust-anchor distribution or anchor-signed bundles (**O8**): an
+  *authenticated* `TrustHistory` cannot be produced by this library, so
+  historical acceptance of retired/compromised keys is refused unless a caller
+  injects one. `high-assurance` never accepts historical keys.
+- No timestamp authority or default roots (**O9**); only a caller-pinned
+  verifier interface.
+- Replay detection is **local** only. `RECORDED_LOCAL` means "recorded in this
+  verifier's store at verification time"; it is not coupled to any downstream
+  operation and is not a crash-safe exactly-once guarantee. Any caller holding
+  `audit:verify` can consume an `audit_run_id` first when `record` mode is on.
+  Independent verifiers without a shared store can each accept a report once.
+- `report.v2` is produced by the library API only; `regaudit-fhe audit` and
+  `/v1/audit/*` still emit `report.v1` signed by an ephemeral key.
+- Float formatting follows Python's `repr`; a non-Python verifier needs RFC 8785
+  (or byte-identical formatting) before claiming v2 compatibility.
+- A header-less local reverse proxy cannot be distinguished from a direct local
+  client, so the development self-signed option must not be enabled behind one.
+  Under uvicorn a Unix-socket request reports no server address and is refused.
+- `BodySizeLimitMiddleware` still checks `Content-Length` only for the other
+  endpoints (only `/v1/verify` now bounds chunked uploads).
+- Phase 3A does not address the larger confidential-computation limitations
+  (evaluator/decryption-key separation, OpenFHE behavioural verification,
+  differential-privacy enforcement).
+
+## Unreleased — Phase 1 trust hardening (partly superseded by Phase 3A above)
 
 ### Changed (deliberate, security-motivated default changes)
 
@@ -49,12 +178,15 @@
 ### Unchanged
 
 - The v1 canonical signing format (`regaudit-fhe.report.v1`); existing reports
-  still parse and verify cryptographically. No `report.v2` fields are added.
+  still parse and verify cryptographically. (Phase 1 added no `report.v2` fields;
+  Phase 3A, above, introduces `report.v2` without changing v1.)
 - The `timestamp` block remains outside the signed body.
 
 ### Remaining trust limitations
 
-- No replay protection, freshness window or audit-run binding.
+- At Phase 1 there was no replay protection, freshness window or audit-run
+  binding; Phase 3A adds a freshness window, a signed `audit_run_id` and *local*
+  replay detection for `report.v2` only (see above).
 - Revocation has no time semantics; `issued_at` is signer-asserted.
 - `/v1/audit/*` signs with an ephemeral issuer key, so its envelopes can only
   verify as `SELF_SIGNED_ONLY`.

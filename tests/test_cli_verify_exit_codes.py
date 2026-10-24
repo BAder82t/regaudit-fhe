@@ -327,3 +327,17 @@ def test_exit_2_for_an_oversized_report_file(tmp_path, signer):
     big.write_text('{"x": "' + "a" * (5 * 1024 * 1024) + '"}')
     p = run("-i", str(big), "--trusted-keys", _store_file(tmp_path, signer))
     assert p.returncode == 2 and p.stdout == "" and "Traceback" not in p.stderr
+
+
+def test_oversized_report_is_never_read_into_memory(tmp_path, monkeypatch):
+    from regaudit_fhe import cli
+
+    big = tmp_path / "big-report.json"
+    big.write_text("x" * (5 * 1024 * 1024))
+
+    def must_not_read(self):
+        raise AssertionError("an oversized report was read")
+
+    monkeypatch.setattr(Path, "read_bytes", must_not_read)
+    with pytest.raises(OSError, match="limit"):
+        cli._read_report(str(big))

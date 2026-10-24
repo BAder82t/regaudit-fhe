@@ -46,6 +46,11 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
 | `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
 | `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential` or `high-assurance`. Anything else aborts startup. |
+| `REGAUDIT_FHE_VERIFIER_ID`            | (empty)       | This verifier's audience identifier (required for `high-assurance`). |
+| `REGAUDIT_FHE_MAX_AGE_S`              | (empty)       | Refuse reports older than this many seconds. Must be positive and finite; required outside development. |
+| `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
+| `REGAUDIT_FHE_REPLAY_MODE`            | `off`         | `off`, `check` (look up only) or `record` (record at verification time). Required, with a persistent cache, outside development. |
+| `REGAUDIT_FHE_TRUSTED_PROXIES`        | (empty)       | IPs/CIDRs allowed to vouch for a forwarded client. Used only by the development self-signed exposure check. |
 
 ### Scopes
 
@@ -88,14 +93,28 @@ when `trust_status` is `TRUSTED`. Note that `/v1/audit/{primitive}` signs
 with an ephemeral issuer key, so envelopes it produces can only ever be
 `SELF_SIGNED_ONLY` until a long-lived signer is wired in.
 
-**Entry points.** `regaudit-fhe serve` is the supported way to run the
-server. `build_app()` may be embedded, but the bind-host check for
-`--allow-self-signed` runs only in the CLI: an app from `build_app()` served
-directly (for example `uvicorn` on `0.0.0.0`) is not host-checked. It still
-fails closed without a trust store, refuses the development option under
-non-development profiles, and can never report `TRUSTED` for a self-signed
-envelope. Request-time enforcement is specified in
-[TRUST_SPEC.md](TRUST_SPEC.md) §9.3 and is not yet implemented.
+**Entry points.** `regaudit-fhe serve` is the usual way to run the server and
+`build_app()` is a supported embedding entry point (it is in
+`regaudit_fhe.server.__all__`). The security checks do not depend on the CLI:
+`build_app()` validates the verification policy at build time, `/v1/verify`
+fails closed without a trust store, and the development self-signed check
+re-verifies on **every request** that the profile is `development`, that the
+server socket is loopback or a Unix socket, that a directly connected client is
+loopback, and that no forwarding header is present unless a trusted-proxy policy
+vouches for it. Only the *startup* bind-host check remains CLI-only, since only
+the CLI knows its bind address. Limits: a header-less local reverse proxy cannot
+be told apart from a direct local client (do not enable the development option
+behind one), and under uvicorn a Unix-socket request reports no server address
+and is refused.
+
+**Replay detection is local.** `record` mode marks a report as seen in this
+verifier's store when it is verified. It is not coupled to any downstream
+operation, it is not a crash-safe exactly-once guarantee, and independent
+verifiers that do not share a store can each accept the same report once. With
+`record` mode on, any caller holding the `audit:verify` scope who has a valid
+report can consume its `audit_run_id` before the intended relying party does.
+`check` mode only looks up and never records. A stateless verification response
+reports `consumption: NOT_CHECKED`.
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.

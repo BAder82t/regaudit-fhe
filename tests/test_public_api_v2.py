@@ -78,3 +78,15 @@ def test_verify_receipt_still_returns_a_plain_bool_without_warning():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert rf.verify_receipt(env, trusted_keys={"k1": signer.public_key_pem()}, strict=True)
+
+
+def test_dataclass_introspection_of_the_legacy_outcome_does_not_warn():
+    import dataclasses
+
+    env, signer = _signed()
+    outcome = rf.verify_envelope(env, trusted_keys={"k1": signer.public_key_pem()})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dataclasses.asdict(outcome)
+        dataclasses.replace(outcome)
+        [f.name for f in dataclasses.fields(outcome)]

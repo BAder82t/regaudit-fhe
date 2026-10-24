@@ -233,3 +233,101 @@ def test_trust_store_file_size_and_nesting_are_bounded(tmp_path: Path):
     big.write_text('{"entries": {"k": "' + "a" * (5 * 1024 * 1024) + '"}}')
     with pytest.raises(TrustStoreError, match="size"):
         TrustStore.from_json(big)
+
+
+# ---------------------------------------------------------------------------
+# Final security review: the older library functions must honour entry scope
+# ---------------------------------------------------------------------------
+
+
+def _v1_env(signer):
+    return rf.envelope(
+        "fairness",
+        rf.audit_fairness(
+            np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, 1.0])
+        ),
+        signer=signer,
+    )
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"issuer": "someone-else"},
+        {"primitives": ["drift"]},
+        {"deployments": ["prod-eu-1"]},  # a v1 report carries no deployment_id
+        {"not_before": "2099-01-01T00:00:00Z"},
+    ],
+    ids=["issuer", "primitive", "deployment", "not_before"],
+)
+def test_legacy_api_honours_entry_scope(over):
+    s = _signer()
+    env = _v1_env(s)
+    ok = _store(s)
+    assert rf.verify_envelope(env, trust_store=ok).trust_status == "TRUSTED"  # control
+    assert rf.verify_receipt(env, trust_store=ok, strict=True) is True
+    assert rf.verify_envelope_or_raise(env, trust_store=ok).trust_status == "TRUSTED"
+    scoped = _store(s, **over)
+    out = rf.verify_envelope(env, trust_store=scoped)
+    assert out.trust_status == "INVALID" and out.issuer_trusted is False
+    assert rf.verify_receipt(env, trust_store=scoped, strict=True) is False
+    with pytest.raises(rf.UntrustedIssuer):
+        rf.verify_envelope_or_raise(env, trust_store=scoped)
+
+
+def test_legacy_api_agrees_with_the_engine_on_scoped_entries():
+    from regaudit_fhe.verification import VerificationPolicy, verify
+
+    s = _signer()
+    env = _v1_env(s)
+    for over in (
+        {},
+        {"issuer": "someone-else"},
+        {"primitives": ["drift"]},
+        {"not_before": "2099-01-01T00:00:00Z"},
+        {"status": "retired", "retired_at": "2020-01-01T00:00:00Z"},
+        {"status": "compromised"},
+    ):
+        store = _store(s, **over)
+        legacy = rf.verify_envelope(env, trust_store=store).trust_status == "TRUSTED"
+        engine = verify(env, VerificationPolicy(trust_store=store)).accepted
+        assert legacy == engine, over
+
+
+def test_trust_store_is_immutable_after_construction():
+    s = _signer()
+    store = _store(s)
+    with pytest.raises(TypeError):
+        store.keys["new"] = "x"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        store.entries["new"] = None  # type: ignore[index]
+    with pytest.raises(TypeError):
+        store.parameter_set_pins["k"] = "x"  # type: ignore[index]
+    assert isinstance(store.revoked, frozenset)
+    legacy = TrustStore.from_dict({"keys": {s.key_id: s.public_key_pem()}, "revoked": [s.key_id]})
+    assert isinstance(legacy.revoked, frozenset)
+    with pytest.raises(TypeError):
+        legacy.keys["new"] = "x"  # type: ignore[index]
+
+
+def test_directly_constructed_stores_are_copied_and_consistency_checked():
+    s = _signer()
+    entry = _store(s).entry(s.key_id)
+    assert entry is not None
+    mutable_keys = {s.key_id: entry.public_key_pem}
+    store = TrustStore(keys=mutable_keys, revoked=set(), parameter_set_pins={})  # type: ignore[arg-type]
+    mutable_keys["intruder"] = "x"  # mutating the caller's dict must not reach the store
+    assert not store.is_known("intruder")
+    # entries and the legacy views must agree, or the engine and the older API would diverge
+    with pytest.raises(TrustStoreError, match="inconsistent"):
+        TrustStore(keys={"other": entry.public_key_pem}, entries={s.key_id: entry})
+    with pytest.raises(TrustStoreError, match="inconsistent"):
+        TrustStore(
+            keys={s.key_id: entry.public_key_pem},
+            entries={s.key_id: entry},
+            revoked=frozenset({s.key_id}),
+        )
+    assert (
+        TrustStore(keys={s.key_id: entry.public_key_pem}, entries={s.key_id: entry}).entry(s.key_id)
+        == entry
+    )  # control: a consistent direct construction works

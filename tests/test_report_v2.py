@@ -500,3 +500,43 @@ def test_strict_rfc3339_accepts_valid_forms(good):
 def test_with_timestamp_requires_an_aware_datetime():
     with pytest.raises(ValueError, match="aware"):
         _env().with_timestamp(issuer="t", token=b"x", issued_at=datetime(2026, 1, 1))
+
+
+# ---------------------------------------------------------------------------
+# Python-version independence of timestamp parsing (3.10 accepts only 3 or 6
+# fractional digits in fromisoformat, so the fraction is normalised first)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "microsecond"),
+    [
+        ("2026-01-01T00:00:00Z", 0),
+        ("2026-01-01T00:00:00.5Z", 500000),
+        ("2026-01-01T00:00:00.12+00:00", 120000),
+        ("2026-01-01T00:00:00.123Z", 123000),
+        ("2026-01-01T00:00:00.1234+01:00", 123400),
+        ("2026-01-01T00:00:00.123456Z", 123456),
+    ],
+)
+def test_rfc3339_fractions_of_any_length_up_to_six_digits(text, microsecond):
+    from regaudit_fhe._time import parse_rfc3339
+
+    assert parse_rfc3339(text).microsecond == microsecond
+
+
+def test_rfc3339_hands_fromisoformat_only_six_digit_fractions(monkeypatch):
+    import regaudit_fhe._time as t
+
+    seen: list[str] = []
+    real = t.datetime
+
+    class Spy:
+        @staticmethod
+        def fromisoformat(text: str):
+            seen.append(text)
+            return real.fromisoformat(text)
+
+    monkeypatch.setattr(t, "datetime", Spy)
+    t.parse_rfc3339("2026-01-01T00:00:00.5Z")
+    assert seen == ["2026-01-01T00:00:00.500000+00:00"]

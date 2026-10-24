@@ -19,6 +19,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from ._keys import spki_fingerprint
@@ -241,6 +242,32 @@ class TrustStore:
     # Operator-asserted snapshot time. In Phase 3A the store is a local file
     # with no authenticated provenance, so this is informational only.
     as_of: datetime | None = None
+
+    def __post_init__(self) -> None:
+        # Copy and freeze: a caller must not be able to change trust material
+        # after construction, nor through the dict they passed in.
+        object.__setattr__(self, "keys", MappingProxyType(dict(self.keys)))
+        object.__setattr__(self, "revoked", frozenset(self.revoked))
+        object.__setattr__(
+            self, "parameter_set_pins", MappingProxyType(dict(self.parameter_set_pins))
+        )
+        object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+        if self.entries:
+            # The legacy views feed the older API and the entries feed the engine;
+            # they must describe the same store or the two would disagree.
+            expected_keys = {k: e.public_key_pem for k, e in self.entries.items()}
+            expected_revoked = frozenset(k for k, e in self.entries.items() if e.status != "active")
+            expected_pins = {
+                k: e.parameter_set_pin for k, e in self.entries.items() if e.parameter_set_pin
+            }
+            if (
+                dict(self.keys) != expected_keys
+                or self.revoked != expected_revoked
+                or dict(self.parameter_set_pins) != expected_pins
+            ):
+                raise TrustStoreError(
+                    "trust-store keys/revoked/parameter_set_pins are inconsistent with entries"
+                )
 
     # ----- Loaders --------------------------------------------------------
 

@@ -949,3 +949,33 @@ def test_chronology_is_not_reported_for_an_unauthenticated_issuer():
     assert r.chronology == "NONE" and r.signed_not_after is None
     ok = verify(attach(_v2(s)), _policy(_store(s), timestamp_verifier=verifier))
     assert ok.chronology == "AUTHENTICATED" and ok.signed_not_after is not None  # control
+
+
+def test_unparseable_issued_at_blocks_on_its_own_even_when_correctly_signed():
+    """Isolates the rule: the signature is valid, so only the malformed time can refuse."""
+    import base64
+
+    from regaudit_fhe.reports import canonical_json, sha256_hex
+
+    s = _signer()
+    v1 = rf.envelope("fairness", _report(), signer=s)
+    v1.issued_at = "garbage"
+    body = canonical_json(v1.signed_body())
+    v1.receipt["sha256"] = sha256_hex(body)
+    v1.receipt["signature_b64"] = base64.b64encode(s.sign(body)).decode()
+    p = _policy(_store(s), now=lambda: datetime.now(UTC))
+    r = verify(v1, p)
+    assert r.integrity_valid and r.issuer_trusted  # nothing else is wrong with it
+    assert r.trust_status == "INVALID" and "MALFORMED_ENVELOPE" in r.blocking_reasons
+
+
+def test_blocking_reasons_are_a_subset_of_reasons_and_explain_a_refusal():
+    s = _signer()
+    ok = verify(_v2(s), _policy(_store(s)))
+    assert ok.accepted and ok.blocking_reasons == ()
+    bad = verify(_v2(_signer("zz")), _policy(_store(s)))
+    assert bad.blocking_reasons and set(bad.blocking_reasons) <= set(bad.reasons)
+    v1 = rf.envelope("fairness", _report(), signer=s)
+    accepted_v1 = verify(v1, _policy(_store(s)))
+    assert accepted_v1.accepted and "LEGACY_V1_FORMAT" in accepted_v1.reasons
+    assert "LEGACY_V1_FORMAT" not in accepted_v1.blocking_reasons  # informational, not a refusal

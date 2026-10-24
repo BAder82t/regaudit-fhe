@@ -66,6 +66,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+from ._time import parse_rfc3339
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
@@ -647,9 +648,9 @@ class VerificationOutcome:
     ``trust_status == "TRUSTED"`` for that.
     """
 
-    # Deprecated: use ``trust_status`` (or ``verification.verify(...).accepted``).
-    # Reading it warns; it is excluded from repr/eq so those never warn.
-    valid: bool = field(repr=False, compare=False)
+    # Backing store of the deprecated ``valid`` property (use ``trust_status`` or
+    # ``regaudit_fhe.verify_report(...).accepted``). Excluded from repr/eq.
+    _valid: bool = field(repr=False, compare=False)
     sha256_valid: bool
     signature_valid: bool
     issuer_trusted: bool
@@ -662,19 +663,20 @@ class VerificationOutcome:
     revoked: bool = False
     pin_ok: bool = True
 
-    def __getattribute__(self, name: str) -> Any:
-        if name == "valid":
-            warnings.warn(
-                "VerificationOutcome.valid is deprecated; branch on `trust_status` (or use "
-                "regaudit_fhe.verify_report(...).accepted). It is kept for compatibility.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return object.__getattribute__(self, name)
+    @property
+    def valid(self) -> bool:
+        """Deprecated alias; branch on ``trust_status`` instead."""
+        warnings.warn(
+            "VerificationOutcome.valid is deprecated; branch on `trust_status` (or use "
+            "regaudit_fhe.verify_report(...).accepted). It is kept for compatibility.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._valid
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "valid": bool(object.__getattribute__(self, "valid")),
+            "valid": bool(self._valid),
             "sha256_valid": bool(self.sha256_valid),
             "signature_valid": bool(self.signature_valid),
             "issuer_trusted": bool(self.issuer_trusted),
@@ -711,6 +713,25 @@ def _timestamp_status(
         return TS_VERIFIED if tsa_verifier(body_bytes, base64.b64decode(token_b64)) else TS_FAILED
     except Exception:
         return TS_FAILED
+
+
+def _v1_entry_scope_ok(entry: Any, env: AuditEnvelope) -> bool:
+    """Whether a v1 report is within the scope registered for its key."""
+    if entry is None:
+        return False
+    if entry.issuer is not None and env.issuer != entry.issuer:
+        return False
+    if entry.deployments is not None:  # v1 carries no deployment_id, so it cannot match
+        return False
+    if entry.primitives is not None and env.primitive not in entry.primitives:
+        return False
+    if entry.not_before is not None:
+        try:
+            if parse_rfc3339(env.issued_at) < entry.not_before:
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 def verify_envelope(
@@ -773,6 +794,11 @@ def verify_envelope(
     issuer_ok = False
     if has_trust_material and registered_pem is not None:
         issuer_ok = _norm_pem(registered_pem) == _norm_pem(pub_pem) and not revoked and pin_ok
+        if issuer_ok and store is not None:
+            # An ``entries`` store also scopes a key: the signed issuer name,
+            # the primitive, the deployment (a v1 report names none) and the
+            # validity start. The shared engine enforces the same rules.
+            issuer_ok = _v1_entry_scope_ok(store.entry(key_id), env)
 
     # Verify against the registered key when we have one; the embedded key is
     # only authoritative when there is no trust material at all.
@@ -804,7 +830,7 @@ def verify_envelope(
         trust_status = TRUST_SELF_SIGNED_ONLY if valid else TRUST_INVALID
 
     return VerificationOutcome(
-        valid=valid,
+        _valid=valid,
         sha256_valid=sha_ok,
         signature_valid=sig_ok,
         issuer_trusted=has_trust_material and issuer_ok,
@@ -889,8 +915,9 @@ def verify_envelope_or_raise(
         # Reaching this branch means the trust store had the key_id but
         # the embedded PEM disagreed with the registered PEM.
         raise UntrustedIssuer(
-            f"key_id {key_id!r}: embedded public key does not match "
-            f"the public key registered in the trust store"
+            f"key_id {key_id!r}: the report is not authorised by the trust store (embedded "
+            f"key, issuer name, primitive, deployment or validity start does not match "
+            f"the registered entry)"
         )
     if outcome.timestamp_status == TS_FAILED:
         raise TimestampInvalid(
@@ -958,8 +985,7 @@ def verify_receipt(
         trust_store=trust_store,
         require_signature=True,
     )
-    # Internal read: not the deprecated public attribute access.
-    return bool(object.__getattribute__(outcome, "valid"))
+    return bool(outcome._valid)
 
 
 def issue_receipt(payload: Mapping[str, Any]) -> dict[str, str]:

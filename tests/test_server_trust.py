@@ -320,8 +320,9 @@ def test_exposure_trusted_proxy_policy():
     proxies = ("10.0.0.0/24",)
     peer = ("10.0.0.7", 4000)
     ok = {"x-forwarded-for": "127.0.0.1"}
-    # no policy: any forwarding header refuses
-    assert check_dev_exposure(_scope(client=peer), ok, ()) is not None
+    # no policy: any forwarding header refuses, and says why
+    reason = check_dev_exposure(_scope(client=peer), ok, ())
+    assert reason is not None and "trusted-proxy policy" in reason
     # trusted peer, loopback origin: allowed (control)
     assert check_dev_exposure(_scope(client=peer), ok, proxies) is None
     # untrusted peer cannot vouch for anything
@@ -494,36 +495,40 @@ def test_every_x_forwarded_for_line_is_considered():
 
 
 def test_slow_verification_does_not_block_the_event_loop(signer, monkeypatch):
+    """Deterministic: the slow verifier waits for a release that only the event
+    loop can grant (after serving /healthz). If verification ran on the loop,
+    the release could never happen and the wait would time out."""
     import asyncio
-    import time
+    import threading
 
     import httpx
 
     import regaudit_fhe.server as server_mod
 
     real = server_mod.verify
+    released = threading.Event()
+    outcome: dict[str, bool] = {}
 
     def slow(env, policy):
-        time.sleep(0.6)
+        outcome["released_in_time"] = released.wait(timeout=5.0)
         return real(env, policy)
 
     monkeypatch.setattr(server_mod, "verify", slow)
     app = build_app(config=_config(trust_store=_store(signer)))
     body = {"envelope": _v2_env(signer).to_dict()}
 
-    async def scenario() -> float:
+    async def scenario() -> None:
         transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 1))
         async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as c:
-            start = time.perf_counter()
             slow_call = asyncio.create_task(c.post("/v1/verify", json=body))
-            await asyncio.sleep(0.1)  # if the loop is blocked this alone takes >= 0.6s
-            health = await c.get("/healthz")
-            elapsed = time.perf_counter() - start
+            await asyncio.sleep(0.05)
+            health = await c.get("/healthz")  # needs a free event loop
             assert health.status_code == 200
+            released.set()
             assert (await slow_call).status_code == 200
-            return elapsed
 
-    assert asyncio.run(scenario()) < 0.4
+    asyncio.run(scenario())
+    assert outcome["released_in_time"] is True
 
 
 def test_max_age_zero_or_non_finite_is_a_configuration_error_not_no_limit(signer):
@@ -532,3 +537,9 @@ def test_max_age_zero_or_non_finite_is_a_configuration_error_not_no_limit(signer
     for bad in (0.0, -5.0, float("nan"), float("inf"), 1e300):
         with pytest.raises(RuntimeError, match="max_age"):
             build_app(config=_config(trust_store=store, max_age_s=bad))
+
+
+def test_server_module_exports_are_stable_and_the_old_model_is_gone():
+    import regaudit_fhe.server as server
+
+    assert hasattr(server, "build_app") and not hasattr(server, "VerifyRequest")

@@ -5,7 +5,7 @@
 | **Status** | Technical decisions O1-O7 and O10 approved by the project owner (§13). **O8 (trust-anchor custody) and the choice of any timestamp authority remain on HOLD.** Specification only: nothing in this document is implemented. |
 | **Applies to** | `regaudit-fhe.report.v1` (as shipped, plus Phase 1 hardening) and the proposed `report.v2` |
 | **Baseline** | Phase 1 candidate `83adc80bcef00e32fe5b63fc358ec8dce11af744` (tree `9c23f4818133330ea3a9603eab51fe1f96cd18fd`) |
-| **Gate** | `report.v2` implementation (Phase 3) is on HOLD. §11 splits it into a core that does not depend on O8 and controls that do. High-assurance trust-store verification MUST NOT be implemented or advertised until the O8 organisational dependencies are satisfied. |
+| **Gate** | Phase 3A (the approved core) is implemented as a candidate; see Appendix C. The rest of Phase 3 is on HOLD. §11 splits it into a core that does not depend on O8 and controls that do. High-assurance trust-store verification MUST NOT be implemented or advertised until the O8 organisational dependencies are satisfied. |
 
 Key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 
@@ -780,3 +780,89 @@ the prior behaviour was exploitable.
 equivalent mutant. Mutation evidence shows the tests are sensitive to the
 trust logic. It is not independent security assurance; the two reviews were
 internal subagent reviews and are not an external audit.
+
+## Appendix C. Phase 3A implementation notes
+
+Phase 3A implements the approved core. This appendix records every place where
+the implementation fixed a detail the specification left open, or differs from
+its wording, so a reviewer can accept or reject each one explicitly. Nothing here
+changes an owner ruling.
+
+### C.1 Implemented, held and out of scope
+
+| Item | Phase 3A |
+|---|---|
+| Signed v2 identity (O1), sealed digest (O2), domain separation | implemented |
+| Retired/compromised key states, fail-closed chronology (O3, O4) | implemented against a **locally provisioned** store |
+| Request-time development-option checks (O5), `build_app` supported (O7) | implemented |
+| CLI exit codes 0/1/2/3 (O6), `valid` deprecation (O10) | implemented |
+| Local replay detection (`LOCAL_PROCESS`, `LOCAL_PERSISTENT`) | implemented, explicitly local |
+| Trust-anchor custody, anchor-signed bundles, durable monotonic history (O8) | **not implemented** |
+| Any timestamp authority or default root (O9) | **not implemented**; only a caller-pinned verifier interface |
+| `high-assurance` historical acceptance, shared replay store, reserve/commit | **not implemented** |
+
+Consequence of the O8 hold: nothing in the library produces an *authenticated*
+`TrustHistory`, so historical acceptance (§4.3, §4.4 authenticated paths) is
+refused unless a caller injects one. That is the intended fail-closed behaviour,
+not an omission.
+
+### C.2 Details the specification left open
+
+1. **Consumption label.** Phase 3A records at verification time, which is not
+   "after the operation completed". Rather than reuse `CONSUMED`, the result
+   reports `RECORDED_LOCAL`. `RESERVED` and `CONSUMED` are not produced.
+   *Spec ambiguity to resolve:* add `RECORDED_LOCAL` to the §6.2 table, or keep
+   `CONSUMED` reserved for the reserve/perform/commit protocol.
+2. **Reason codes added** beyond §8.3: `FINGERPRINT_MISMATCH`,
+   `SIGNED_AFTER_RETIREMENT`, `SIGNED_AFTER_COMPROMISE`, `KEY_NOT_YET_VALID`,
+   `REPORT_FROM_FUTURE`, `MALFORMED_ENVELOPE`, `REPLAY_ID_MISSING`. The result also
+   carries `blocking_reasons`, the subset that caused a refusal, so an informational
+   label such as `LEGACY_V1_FORMAT` is not mistaken for one.
+3. **`require_verified_timestamp`** means a `VERIFIED` timestamp is required; an
+   absent timestamp does not satisfy it. (The Phase 1 candidate let an absent
+   timestamp pass.) It needs a pinned verifier; none is bundled.
+4. **v1 timestamps** are reported `UNVERIFIED` and never yield chronology,
+   because the v1 token covers the body only (finding F2).
+5. **Several timestamp tokens.** One verified token suffices; a junk token that
+   anyone could attach does not invalidate a good one. If tokens are present, a
+   verifier is configured and none verifies, the status is `FAILED` and the report
+   is refused.
+6. **Accuracy.** A token's `genTime + accuracy` is used as the latest possible
+   signing time: retirement requires `<= retired_at`, compromise requires `<
+   compromised_from` (strict). `signed_not_after` reports `genTime`.
+7. **Chronology for unauthenticated issuers.** When the issuer is not
+   authenticated, `chronology` is reported as `NONE` and `signed_not_after` is null.
+8. **`trust_history`** is reported as `UNPROVEN`, `STALE` or `FRESH`; only an
+   authenticated, recent `TrustHistory` supplied by the caller can be `FRESH`.
+9. **No trust material.** The library raises `VerificationUnavailable` unless the
+   development self-signed check is enabled. The HTTP server maps this to 503, the
+   CLI to exit 2 (missing flag, a usage error) or 3 (unreadable infrastructure).
+10. **Replay retention** is `max_age + 2 x clock_skew`. When replay checking is on
+    without an explicit `max_age`, a 30-day maximum age is implied so a report
+    cannot outlive the cache's memory of it.
+11. **Strict canonical policy** details fixed by `regaudit_fhe.canonical`: depth
+    64, 4 MiB input, no non-string keys; the receipt `signature_b64` must be
+    canonical base64 and decode to exactly 64 bytes; timestamps are strict RFC 3339
+    with a UTC offset and at most 6 fractional digits.
+12. **Trust store.** One public key may appear under one `key_id` only; keys must
+    be Ed25519; `issuer` is required in the `entries` form; `as_of` is
+    operator-asserted and informational. Phase 1 helpers treat any non-`active`
+    entry as revoked because they cannot evaluate chronology.
+
+13. **`report.v1` under `confidential` / `high-assurance`.** §6 requires a replay
+    cache in those profiles and §7 says v1 is "allowed, labelled" in `confidential`.
+    A v1 report has no `audit_run_id` and cannot be replay-checked, so Phase 3A
+    refuses it there (`REPLAY_ID_MISSING`). *Spec ambiguity to resolve:* either
+    v1 is exempt from the replay requirement in `confidential`, or §7's table
+    should say v1 is refused where replay checking is mandatory.
+
+### C.3 Known gaps carried forward
+
+* `regaudit-fhe audit` and `/v1/audit/*` still emit `report.v1` signed by an
+  ephemeral key; `report.v2` is built through the library API only.
+* The development self-signed check cannot detect a header-less local reverse
+  proxy and refuses Unix sockets under uvicorn (which reports no server address).
+* `BodySizeLimitMiddleware` checks `Content-Length` only; only `/v1/verify`
+  bounds chunked uploads.
+* JSON number formatting is Python's `repr`; RFC 8785 is needed before a
+  non-Python verifier is supported.

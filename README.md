@@ -186,6 +186,11 @@ except rf.InvalidSignature:       # Ed25519 verify failed
 # All five subclass rf.EnvelopeVerificationError.
 ```
 
+> For trust stores in the new `entries` form (key status, validity, issuer /
+> deployment / primitive scope) and for `report.v2`, prefer `rf.verify_report` with a
+> `VerificationPolicy`; the older functions below enforce the same key scope for
+> `report.v1` but return the legacy `VerificationOutcome`.
+
 `verify_envelope_or_raise` returns the underlying `VerificationOutcome`
 on success. Use it instead of the legacy bool-return path whenever you
 need to react differently to each failure reason.
@@ -219,6 +224,30 @@ need to react differently to each failure reason.
 > otherwise. `serve --allow-self-signed` is a development-only escape
 > hatch that can report `SELF_SIGNED_ONLY` but never `TRUSTED`.
 
+### `report.v2` (candidate)
+
+`report.v2` signs the issuer, key id, key fingerprint, deployment, audit-run id,
+audience and model/dataset commitments, under a domain-separated signature. It
+is created through the library API and verified with one shared policy:
+
+```python
+env = rf.envelope_v2("fairness", report, signer=signer, deployment_id="prod-eu-1",
+                     audience=["regulator-a"])
+policy = rf.VerificationPolicy(trust_store=rf.TrustStore.from_json("trust.json"),
+                               verifier_id="regulator-a")
+result = rf.verify_report(rf.parse_envelope(text), policy)
+if result.accepted:      # the authoritative decision; `valid` is deprecated
+    ...
+```
+
+The trust store's `entries` form records each key's status (`active`, `retired`,
+`compromised`), validity bounds and scope. Retired or compromised keys are
+accepted historically only with authenticated chronology *and* an authenticated
+trust history; **this release cannot authenticate a trust history, so such
+reports are refused by default.** This is a candidate trust core, not production
+readiness: there is no trust-anchor distribution, no bundled timestamp
+authority, and replay detection is local only.
+
 ### Same flow, command line
 
 ```bash
@@ -231,10 +260,23 @@ regaudit-fhe audit fairness -i input.json -o envelope.json
 regaudit-fhe verify -i envelope.json --trusted-keys trust_store.json --strict
 ```
 
-The regulator command exits 0 on success, 1 on a typed verification
-failure (with a JSON body naming the `reason`), and 2 on bad CLI input.
-`--strict` without `--trusted-keys` is a hard error: the strict path
-demands an explicit trust store.
+`regaudit-fhe verify` exits **0 only when the report is accepted** under the
+configured policy:
+
+| Exit | Meaning |
+| ---- | ------- |
+| `0` | accepted (`trust_status: TRUSTED`) |
+| `1` | well-formed report refused by policy, including `SELF_SIGNED_ONLY`, a revoked/compromised issuer, a stale or replayed report (the JSON names the `reason`) |
+| `2` | invalid input or usage, including running with neither `--trusted-keys` nor `--allow-self-signed` |
+| `3` | verification infrastructure unavailable or invalid (unreadable/malformed trust store, unusable replay store, unsafe profile settings) |
+
+`--allow-self-signed` is a development-only integrity check: it can report
+`SELF_SIGNED_ONLY` but never accepts a report, and is refused outside the
+development profile. See [docs/TRUST_SPEC.md](docs/TRUST_SPEC.md).
+
+> **Changed in the Phase 3A candidate:** a consistent self-signed report used to
+> exit `0` and now exits `1`; an unreadable or malformed `--trusted-keys` file
+> used to exit `2` and now exits `3`.
 
 `regaudit-fhe audit <primitive> --schema` prints the JSON shape that
 each primitive expects.

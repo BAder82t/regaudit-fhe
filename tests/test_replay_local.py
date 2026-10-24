@@ -142,3 +142,34 @@ def test_sqlite_constructor_does_not_leak_connections(tmp_path: Path):
         for _ in range(20):
             SqliteReplayCache(tmp_path / "leak.db")
         gc.collect()
+
+
+def test_memory_cache_is_race_free_even_with_a_wide_check_then_set_window():
+    """Stall every thread right after it learns the id is absent, so a missing
+    lock cannot hide behind the GIL's scheduling."""
+    import time
+
+    class StallingDict(dict):
+        def __contains__(self, key):
+            answer = super().__contains__(key)
+            time.sleep(0.003)
+            return answer
+
+    cache = InMemoryReplayCache()
+    cache._entries = StallingDict()
+    results: list[bool] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(12)
+
+    def worker():
+        barrier.wait()
+        won = cache.record("k", "same", now=NOW, retain=RETAIN)
+        with lock:
+            results.append(won)
+
+    threads = [threading.Thread(target=worker) for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count(True) == 1
