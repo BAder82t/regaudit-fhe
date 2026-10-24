@@ -61,8 +61,11 @@ def test_trust_store_accepts_legacy_flat_mapping():
 
 def test_trust_store_accepts_full_payload(tmp_path: Path):
     env, pem = _make_envelope()
+    # Two *distinct* keys: registering one key under two key_ids is refused
+    # (a revoked key must not be re-registered under another id).
+    _, pem2 = _make_envelope(key_id="k2")
     payload = {
-        "keys": {"k1": pem, "k2": pem},
+        "keys": {"k1": pem, "k2": pem2},
         "revoked": ["k2"],
         "parameter_set_pins": {"k1": env.parameter_set_hash},
     }
