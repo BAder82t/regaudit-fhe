@@ -195,9 +195,18 @@ need to react differently to each failure reason.
 > canonical body and that the Ed25519 signature verifies against the
 > embedded public key. That proves the bytes have not changed in
 > transit — it does **not** prove the envelope was produced by an
-> auditor the regulator approved. Calling without `trusted_keys` emits
+> auditor the regulator approved. Calling without trust material emits
 > a one-time `UserWarning` so integrators do not silently rely on the
-> weak path.
+> weak path. `verify_envelope(...)` reports `trust_status` as `TRUSTED`,
+> `SELF_SIGNED_ONLY` or `INVALID`: branch on that, not on `valid`.
+> Pass a `TrustStore` (`trust_store=`) to enforce revocation and pins; a
+> plain `trusted_keys` mapping cannot express either. An attached
+> timestamp is `UNVERIFIED` unless you pass a `tsa_verifier`.
+>
+> The HTTP `/v1/verify` endpoint **fails closed**: it needs
+> `REGAUDIT_FHE_TRUST_STORE` (or `serve --trust-store`) and returns 503
+> otherwise. `serve --allow-self-signed` is a development-only escape
+> hatch that can report `SELF_SIGNED_ONLY` but never `TRUSTED`.
 
 ### Same flow, command line
 

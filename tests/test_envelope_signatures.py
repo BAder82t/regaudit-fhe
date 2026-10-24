@@ -61,13 +61,15 @@ def test_canonical_json_is_byte_stable() -> None:
     assert a.startswith(b'{"a"')
 
 
-def test_signed_envelope_verifies() -> None:
+def test_self_signed_envelope_passes_integrity_but_issuer_is_unauthenticated() -> None:
     signer = rf.Signer.generate(issuer="acme.example")
     env = rf.envelope("fairness", _sample_report(), signer=signer)
     out = rf.verify_envelope(env)
-    assert out.valid is True
+    assert out.valid is True  # integrity only (v1 contract)
     assert out.signature_valid is True
     assert out.sha256_valid is True
+    assert out.issuer_trusted is False
+    assert out.trust_status == "SELF_SIGNED_ONLY"
 
 
 def test_tamper_in_result_fails_verification() -> None:
@@ -105,7 +107,7 @@ def test_signature_swap_fails_verification() -> None:
     assert out.signature_valid is False
 
 
-def test_trusted_key_pinning_rejects_unknown_issuer() -> None:
+def test_trust_material_rejects_unregistered_issuer() -> None:
     signer = rf.Signer.generate(issuer="A", key_id="acme-2026-01")
     env = rf.envelope("fairness", _sample_report(), signer=signer)
     out = rf.verify_envelope(env, trusted_keys={"other-key": "pem"})
@@ -113,11 +115,12 @@ def test_trusted_key_pinning_rejects_unknown_issuer() -> None:
     assert out.valid is False
 
 
-def test_trusted_key_pinning_accepts_known_issuer() -> None:
+def test_trust_material_accepts_registered_issuer() -> None:
     signer = rf.Signer.generate(issuer="A", key_id="acme-2026-01")
     env = rf.envelope("fairness", _sample_report(), signer=signer)
     out = rf.verify_envelope(env, trusted_keys={"acme-2026-01": signer.public_key_pem()})
     assert out.issuer_trusted is True
+    assert out.trust_status == "TRUSTED"
     assert out.valid is True
 
 
@@ -131,7 +134,10 @@ def test_input_commitments_record_all_inputs() -> None:
     assert digest["sha256"] == matches["sha256"]
 
 
-def test_optional_timestamp_block_is_signed() -> None:
+def test_optional_timestamp_block_is_attached_but_not_signed_or_verified() -> None:
+    """A timestamp block is attached outside the v1 signed body, and without a
+    ``tsa_verifier`` it is reported UNVERIFIED, never as validated evidence."""
+
     def fake_tsa(body: bytes) -> bytes:
         return b"FAKE-TSA-RESPONSE-" + body[:8]
 
@@ -142,9 +148,14 @@ def test_optional_timestamp_block_is_signed() -> None:
     assert env.timestamp["issuer"] == "https://tsa.example"
     decoded = base64.b64decode(env.timestamp["token_b64"])
     assert decoded.startswith(b"FAKE-TSA-RESPONSE-")
+    assert "timestamp" not in env.signed_body()
     out = rf.verify_envelope(env)
-    assert out.valid is True
-    assert out.timestamp_valid is True
+    assert out.valid is True  # integrity only
+    assert out.timestamp_status == "UNVERIFIED"
+    assert out.timestamp_valid is False
+    verified = rf.verify_envelope(env, tsa_verifier=lambda body, token: token == decoded)
+    assert verified.timestamp_status == "VERIFIED"
+    assert verified.timestamp_valid is True
 
 
 def test_envelope_round_trips_through_json() -> None:

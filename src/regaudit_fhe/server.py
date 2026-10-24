@@ -41,6 +41,10 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_RATE_LIMIT_PER_MIN    - tokens per minute per key (default 60)
     REGAUDIT_FHE_REQUEST_TIMEOUT_S     - per-request timeout in seconds
     REGAUDIT_FHE_CORS_ORIGINS          - comma-separated allow-list
+    REGAUDIT_FHE_TRUST_STORE           - path to a TrustStore JSON; REQUIRED for /v1/verify
+    REGAUDIT_FHE_ALLOW_SELF_SIGNED     - "1" lets /v1/verify report SELF_SIGNED_ONLY
+                                         (development profile, loopback only)
+    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -77,8 +81,9 @@ except Exception:
 
 from . import __version__ as LIB_VERSION
 from .cli import SCHEMAS, _audit_dispatch
-from .reports import AuditEnvelope, verify_receipt
+from .reports import AuditEnvelope, verify_envelope
 from .schemas import SchemaError, list_schemas, load_schema
+from .trust import TrustStore
 
 PRIVACY_WARNING = (
     "regaudit-fhe HTTP server: NOT A PRIVACY BOUNDARY by itself. The "
@@ -107,6 +112,33 @@ class ServerConfig:
     rate_limit_per_min: int
     request_timeout_s: float
     cors_origins: Sequence[str]
+    # Issuer trust for /v1/verify. With no trust store the endpoint fails
+    # closed (503) unless ``allow_self_signed`` is set.
+    trust_store: TrustStore | None = None
+    # Development-only. Lets /v1/verify report SELF_SIGNED_ONLY when no trust
+    # store is configured. It can never produce a TRUSTED result.
+    allow_self_signed: bool = False
+    profile: str = "development"
+    require_verified_timestamp: bool = False
+    tsa_verifier: Callable[[bytes, bytes], bool] | None = None
+
+
+PROFILES = ("development", "confidential", "high-assurance")
+
+
+def validate_trust_config(config: ServerConfig) -> None:
+    """Refuse configurations that would weaken issuer verification.
+
+    Raises :class:`RuntimeError`. The development escape hatch is refused
+    outright under the production profiles rather than merely discouraged.
+    """
+    if config.profile not in PROFILES:
+        raise RuntimeError(f"unknown profile {config.profile!r}; expected one of {PROFILES}")
+    if config.allow_self_signed and config.profile != "development":
+        raise RuntimeError(
+            f"--allow-self-signed / REGAUDIT_FHE_ALLOW_SELF_SIGNED is a development-only "
+            f"option and is refused under the {config.profile!r} profile"
+        )
 
 
 def _parse_api_keys(raw: str) -> dict[str, frozenset]:
@@ -125,14 +157,27 @@ def _parse_api_keys(raw: str) -> dict[str, frozenset]:
     return out
 
 
-def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
-    """Refuse to start with ``dev_mode`` enabled on a non-loopback bind.
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
 
-    ``dev_mode`` disables bearer-token auth, so any non-loopback bind
+
+def assert_safe_bind(host: str, *, dev_mode: bool, allow_self_signed: bool = False) -> None:
+    """Refuse to start with a development-only option on a non-loopback bind.
+
+    ``dev_mode`` disables bearer-token auth and ``allow_self_signed`` lets
+    unauthenticated issuers through /v1/verify, so any non-loopback bind
     is treated as a misconfiguration. Raises :class:`RuntimeError`
     when the combination is unsafe so callers cannot accidentally
-    expose an unauthenticated audit endpoint to a network.
+    expose them to a network.
     """
+    if allow_self_signed and not _is_loopback(host):
+        raise RuntimeError(
+            f"--allow-self-signed refuses non-loopback bind: host={host!r}. "
+            "It is a development-only option."
+        )
     if not dev_mode:
         return
     try:
@@ -154,8 +199,17 @@ def assert_safe_bind(host: str, *, dev_mode: bool) -> None:
         )
 
 
-def load_config_from_env() -> ServerConfig:
-    return ServerConfig(
+def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
+    """Build a :class:`ServerConfig` from the environment.
+
+    A configured ``REGAUDIT_FHE_TRUST_STORE`` that is missing, unreadable or
+    malformed raises :class:`~regaudit_fhe.trust.TrustStoreError`: the server
+    never starts with a silently degraded verifier.
+    """
+    # An explicit path (the CLI flag) takes precedence, so a broken env value
+    # is not even read.
+    trust_path = (trust_store_path or os.environ.get("REGAUDIT_FHE_TRUST_STORE", "")).strip()
+    config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
         max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20)),
@@ -166,7 +220,12 @@ def load_config_from_env() -> ServerConfig:
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
             if s.strip()
         ),
+        trust_store=TrustStore.from_json(trust_path) if trust_path else None,
+        allow_self_signed=os.environ.get("REGAUDIT_FHE_ALLOW_SELF_SIGNED", "0") == "1",
+        profile=os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip(),
     )
+    validate_trust_config(config)
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +518,7 @@ def build_app(
     if not HAVE_FASTAPI:
         raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
     config = config or load_config_from_env()
+    validate_trust_config(config)
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
     auth_salt = salt if salt is not None else os.urandom(32)
@@ -591,14 +651,41 @@ def build_app(
         req: VerifyRequest = Body(...), caller: Caller = Depends(authed_with(SCOPE_VERIFY))
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
-        env = AuditEnvelope.from_dict(req.envelope)
-        valid = verify_receipt(env)
+        # Fail closed: without a trust store the issuer cannot be authenticated.
+        # The development escape hatch downgrades to SELF_SIGNED_ONLY; it never
+        # yields TRUSTED and never reports ``valid`` true.
+        if config.trust_store is None and not config.allow_self_signed:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "issuer verification unavailable: no trust store configured "
+                "(set REGAUDIT_FHE_TRUST_STORE)",
+            )
+        try:
+            env = AuditEnvelope.from_dict(req.envelope)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
+        outcome = verify_envelope(
+            env,
+            trust_store=config.trust_store,
+            tsa_verifier=config.tsa_verifier,
+            require_verified_timestamp=config.require_verified_timestamp,
+        )
+        valid = outcome.trust_status == "TRUSTED"
+        integrity_valid = outcome.sha256_valid and outcome.signature_valid
         logger.info(
             "envelope_verified",
-            extra={"key_id": caller.key_id, "primitive": env.primitive, "valid": valid},
+            extra={
+                "key_id": caller.key_id,
+                "primitive": env.primitive,
+                "valid": valid,
+                "trust_status": outcome.trust_status,
+            },
         )
         return {
             "valid": valid,
+            "trust_status": outcome.trust_status,
+            "integrity_valid": integrity_valid,
+            "timestamp_status": outcome.timestamp_status,
             "primitive": env.primitive,
             "issued_at": env.issued_at,
             "regulations": env.regulations,

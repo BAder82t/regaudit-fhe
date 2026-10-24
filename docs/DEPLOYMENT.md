@@ -43,6 +43,9 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_RATE_LIMIT_PER_MIN`     | `60`          | Per-key tokens-per-minute for the in-process token bucket.              |
 | `REGAUDIT_FHE_REQUEST_TIMEOUT_S`      | `30`          | Per-request timeout. Exceeding returns 504.                             |
 | `REGAUDIT_FHE_CORS_ORIGINS`           | (empty)       | Comma-separated CORS allow-list. Empty = no cross-origin response.      |
+| `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
+| `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
+| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential` or `high-assurance`. Anything else aborts startup. |
 
 ### Scopes
 
@@ -75,7 +78,15 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
 | POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope.|
-| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope.                       |
+| POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured. |
+
+`/v1/verify` fails closed: with no trust store it returns **503** rather
+than a verdict. Its response keeps `valid`, `primitive`, `issued_at` and
+`regulations`, and adds `trust_status` (`TRUSTED`, `SELF_SIGNED_ONLY` or
+`INVALID`), `integrity_valid` and `timestamp_status`. `valid` is true only
+when `trust_status` is `TRUSTED`. Note that `/v1/audit/{primitive}` signs
+with an ephemeral issuer key, so envelopes it produces can only ever be
+`SELF_SIGNED_ONLY` until a long-lived signer is wired in.
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.

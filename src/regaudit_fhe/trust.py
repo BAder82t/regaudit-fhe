@@ -58,9 +58,13 @@ class WrongParameterSet(EnvelopeVerificationError):
 
 
 class TimestampInvalid(EnvelopeVerificationError):
-    """The RFC 3161 timestamp token did not verify against the
-    deployer's TSA root (only raised when a ``tsa_verifier`` was
-    supplied)."""
+    """The RFC 3161 timestamp token failed validation: the supplied
+    ``tsa_verifier`` rejected it or raised, or the token is missing."""
+
+
+class TimestampUnverified(EnvelopeVerificationError):
+    """A timestamp is attached but no ``tsa_verifier`` was configured, and
+    the verification policy requires verified timestamp evidence."""
 
 
 # ---------------------------------------------------------------------------
@@ -146,11 +150,16 @@ class TrustStore:
     @classmethod
     def from_json(cls, path: str | Path) -> TrustStore:
         """Load a TrustStore from a JSON file."""
-        body = Path(path).read_text(encoding="utf-8")
+        try:
+            body = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
             raise TrustStoreError(f"trust-store {str(path)!r} is not valid JSON: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise TrustStoreError(f"trust-store {str(path)!r} must be a JSON object")
         return cls.from_dict(payload)
 
     # ----- Queries --------------------------------------------------------

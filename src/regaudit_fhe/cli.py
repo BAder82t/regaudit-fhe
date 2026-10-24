@@ -175,11 +175,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             "  pip install regaudit-fhe[server]\n"
         )
         return 2
-    from .server import assert_safe_bind, build_app, load_config_from_env
+    import dataclasses
 
-    config = load_config_from_env()
+    from .server import assert_safe_bind, build_app, load_config_from_env, validate_trust_config
+
     try:
-        assert_safe_bind(args.host, dev_mode=config.dev_mode)
+        config = load_config_from_env(trust_store_path=args.trust_store)
+        if args.allow_self_signed:
+            config = dataclasses.replace(config, allow_self_signed=True)
+        validate_trust_config(config)
+    except (TrustStoreError, RuntimeError) as exc:
+        sys.stderr.write(f"refusing to start: {exc}\n")
+        return 2
+    try:
+        assert_safe_bind(
+            args.host, dev_mode=config.dev_mode, allow_self_signed=config.allow_self_signed
+        )
     except RuntimeError as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
@@ -201,7 +212,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     if trust_store is not None:
         try:
-            verify_envelope_or_raise(env, trust_store=trust_store)
+            outcome = verify_envelope_or_raise(env, trust_store=trust_store)
         except EnvelopeVerificationError as exc:
             print(
                 json.dumps(
@@ -212,7 +223,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                         "primitive": env.primitive,
                         "issued_at": env.issued_at,
                         "regulations": env.regulations,
-                        "trusted_issuer": True,
+                        "trust_status": "INVALID",
+                        "trusted_issuer": False,
                     },
                     indent=2,
                 )
@@ -225,6 +237,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                     "primitive": env.primitive,
                     "issued_at": env.issued_at,
                     "regulations": env.regulations,
+                    "trust_status": outcome.trust_status,
+                    "timestamp_status": outcome.timestamp_status,
                     "trusted_issuer": True,
                 },
                 indent=2,
@@ -244,6 +258,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                 "primitive": env.primitive,
                 "issued_at": env.issued_at,
                 "regulations": env.regulations,
+                "trust_status": "SELF_SIGNED_ONLY" if ok else "INVALID",
                 "trusted_issuer": False,
             },
             indent=2,
@@ -287,6 +302,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", "-p", type=int, default=8080)
+    serve.add_argument(
+        "--trust-store",
+        help="TrustStore JSON used by /v1/verify (overrides REGAUDIT_FHE_TRUST_STORE). "
+        "Without one, /v1/verify fails closed.",
+    )
+    serve.add_argument(
+        "--allow-self-signed",
+        action="store_true",
+        help="DEVELOPMENT ONLY. Let /v1/verify report SELF_SIGNED_ONLY when no trust "
+        "store is set. Never yields TRUSTED; refused outside the development "
+        "profile and on non-loopback binds.",
+    )
     serve.set_defaults(func=_cmd_serve)
 
     schema = sub.add_parser("schema", help="Dump a bundled JSON Schema by name.")
