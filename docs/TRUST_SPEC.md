@@ -171,17 +171,67 @@ set conservatively by the incident owner.
 * Verification MUST NOT infer "signed before revocation" from the revocation
   event being recent, nor from the report being old.
 
-### 4.5 Integrity and freshness of the trust store itself
+### 4.5 Trust anchor and the trust store
 
-Revocation data is itself attacker-targeted (A4). In `confidential` and
-`high-assurance` profiles the trust store MUST be:
+Revocation data is itself attacker-targeted (A4). A signed trust-store bundle
+**does not authenticate itself**: the verifier must already hold an
+independent **trust anchor**.
 
-* **authenticated**: a bundle signed by a verifier-pinned trust anchor (or
-  delivered over an authenticated channel the operator controls);
-* **rollback-resistant**: a monotonic `sequence` number; the verifier refuses
-  to accept a lower sequence than it has seen;
-* **fresh**: `issued_at` and `next_update`; if `next_update` has passed, the
-  verifier fails closed with `TRUST_STORE_STALE`.
+Requirements (owner constraints, status: design basis, distribution process
+undecided, see O8):
+
+* The anchor is a deployment-scoped public key or key fingerprint,
+  **provisioned out of band** and kept **outside** the downloadable bundle.
+* An anchor delivered inside the same bundle, trust-on-first-use, or a bare
+  HTTPS download MUST NOT be accepted as the anchor.
+* Anchor rotation MUST be authenticated (a statement signed by the outgoing
+  anchor naming the incoming one, or full re-provisioning), and MUST NOT be
+  accepted from the bundle channel alone.
+* The anchor itself MUST be revocable by re-provisioning.
+* If the configured anchor is absent, unreadable or inconsistent with the
+  bundle, verification fails closed with `TRUST_ANCHOR_MISSING`. No fallback.
+
+In `confidential` and `high-assurance` profiles the bundle MUST be signed by
+the anchor, and carry `sequence`, `issued_at`, `next_update` and
+`prev_bundle_hash`. If `next_update` has passed, the verifier fails closed
+with `TRUST_STORE_STALE`.
+
+### 4.6 Offline verification and trust-history completeness
+
+**Problem.** A signature on a bundle proves authenticity, not completeness. An
+attacker (A4) can present an earlier *authentic* snapshot that omits a later
+compromise declaration. Material supplied with an envelope cannot prove its
+own completeness.
+
+**Rules.**
+
+1. Trust history is never taken from the envelope or from the channel that
+   delivers the artifact being verified. It comes only from the verifier's
+   provisioned, anchor-authenticated store.
+2. Bundles form a hash chain (`prev_bundle_hash`). A verifier with durable
+   state records the highest accepted `(sequence, bundle_hash)` and refuses a
+   lower sequence (`TRUST_STORE_ROLLBACK`) or the same sequence with a
+   different hash (`TRUST_STORE_FORK`).
+3. Status transitions are **monotonic**: `active -> retired -> compromised`,
+   and `compromised_from` may only move *earlier*. A successor bundle that
+   loosens any restriction is refused. A rollback therefore cannot be
+   disguised as an update.
+4. A verifier with **no prior state** (first use, or an ephemeral offline
+   verifier) cannot detect that a bundle is an old snapshot. The specification
+   makes no claim it cannot support:
+   * every result carries `trust_store_as_of` (bundle `issued_at`) and
+     `trust_store_sequence`;
+   * a compromise-sensitive acceptance is qualified "as of that bundle", and is
+     only claimed when the verifier's own trusted clock shows the bundle is
+     within the profile's maximum age;
+   * `high-assurance` MUST refuse compromise-sensitive historical acceptance
+     unless freshness is established through an authenticated refresh or a
+     second independent witness of the bundle head;
+   * otherwise the result carries `TRUST_STORE_FRESHNESS_UNPROVEN` and is not
+     `TRUSTED` for historical reports.
+
+**Non-guarantee.** Offline, without prior state or a fresh authenticated
+channel, the verifier cannot know that no later compromise was declared.
 
 ---
 
@@ -274,6 +324,38 @@ in-memory implementation; **a multi-replica verifier needs a shared store, and
 the library cannot enforce global uniqueness on its own.** This limit MUST be
 documented, not hidden.
 
+### 6.1 Replay-state authority
+
+Uniqueness is only as strong as the state that records it. The result MUST
+state which guarantee applied (`replay_scope`).
+
+| `replay_scope` | Guarantee |
+|---|---|
+| `NONE` | no uniqueness claim |
+| `LOCAL_PROCESS` | single use within one process lifetime; **a restart clears it** |
+| `LOCAL_PERSISTENT` | single use for one verifier instance across restarts |
+| `SHARED` | single use across verifiers that share the store, **provided** the store offers an atomic record-if-absent |
+
+Independent verifiers without a shared store can each accept the same report
+once. The library MUST NOT claim global single-use enforcement for them.
+
+Requirements for `confidential` and `high-assurance`:
+
+* **Persistence.** The cache is durable. An in-memory cache is allowed only
+  under `development`.
+* **Retention.** Entries live at least `max_age + clock_skew`; they MUST NOT be
+  evicted early. If capacity is exhausted the verifier fails closed
+  (`REPLAY_STATE_UNAVAILABLE`); it MUST NOT evict to make room.
+* **Failure.** If the cache is unreachable or errors, verification fails closed
+  with `REPLAY_STATE_UNAVAILABLE`. `development` MAY fail open and MUST say so
+  in `reasons`.
+* **Concurrency.** Record-if-absent is atomic. Of two concurrent verifications
+  of the same `(key_id, audit_run_id)` exactly one is accepted.
+* **No poisoning.** An identifier is recorded only after the envelope passed
+  integrity and issuer checks. Otherwise anyone could burn a legitimate
+  `audit_run_id` by submitting a forgery that reuses it.
+* **Clock.** Expiry uses the verifier's clock, never the envelope's.
+
 Required by profile:
 
 | Profile | `max_age` | `audience` | replay cache | challenge |
@@ -318,6 +400,8 @@ original canonical signing format. v2 MUST NOT alter that format.
 | `signed_not_after` | RFC 3339 or null | Upper bound on signing time from authenticated evidence. |
 | `timestamp_status` | `ABSENT` \| `UNVERIFIED` \| `VERIFIED` \| `FAILED` | As in Phase 1. |
 | `policy_id` | string | Identifier and version of the policy evaluated. |
+| `trust_store_as_of`, `trust_store_sequence` | RFC 3339, int | Which trust-store snapshot the decision used (§4.6). |
+| `replay_scope` | enum | Which uniqueness guarantee applied (§6.1). |
 | `accepted` | bool | The policy's final decision. |
 | `reasons` | list of stable codes | Machine-readable causes (table below). |
 | `valid` | bool | **Deprecated.** In v2 mode it equals `accepted`. |
@@ -341,8 +425,9 @@ report is distinguishable from a forgery.
 `KEY_RETIRED_NO_CHRONOLOGY`, `CHRONOLOGY_UNAUTHENTICATED`, `PIN_MISMATCH`,
 `DEPLOYMENT_NOT_ALLOWED`, `PRIMITIVE_NOT_ALLOWED`, `AUDIENCE_MISMATCH`,
 `REPORT_TOO_OLD`, `REPLAY_DETECTED`, `TIMESTAMP_FAILED`,
-`TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`, `LEGACY_V1_FORMAT`,
-`SELF_SIGNED_NO_TRUST_MATERIAL`.
+`TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`, `TRUST_STORE_ROLLBACK`,
+`TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`, `TRUST_ANCHOR_MISSING`,
+`REPLAY_STATE_UNAVAILABLE`, `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
 
 Codes are stable API; new codes may be added, existing codes MUST NOT change
 meaning.
@@ -393,10 +478,29 @@ one function, called by every entry point.
    additional early failure.
 4. Trusted verification requires trust material; absent or invalid material
    fails closed with no fallback.
-5. The CLI `verify` exits 0 only for `TRUSTED`/`accepted`. A self-signed
-   report requires an explicit `--allow-self-signed`, prints
-   `SELF_SIGNED_ONLY` and exits with a distinct non-zero code (proposed: 3).
-   This changes today's CLI behaviour (F8) and needs owner approval.
+5. The CLI `verify` exits 0 **only** when the report is accepted under the
+   selected policy. It never exits 0 merely because a self-signed report is
+   internally consistent.
+
+   | Outcome | Exit |
+   |---|---|
+   | Accepted under the configured trust policy | `0` |
+   | Well-formed report refused by policy (`SELF_SIGNED_ONLY`, revoked, compromised, stale, replayed, ...) | `1` |
+   | Invalid input, malformed report, or usage error | `2` |
+   | Required verification infrastructure unavailable or invalidly configured (trust store or anchor missing, unreadable, malformed, inconsistent; replay state unavailable) | `3` |
+
+   An explicit development-only integrity check (`--allow-self-signed`) MAY
+   print `integrity_valid: true` and `trust_status: SELF_SIGNED_ONLY`, but
+   exits `1`, never `0`.
+
+   **Reconciliation with existing allocations.** Today `verify` uses `0`
+   (success), `1` (typed verification failure) and `2` (bad CLI input), as
+   documented in the README; `3` is unused. Two present behaviours change:
+   (a) a self-consistent self-signed report currently exits `0` and will exit
+   `1`; (b) an unreadable or malformed `--trusted-keys` file currently exits
+   `2` and will exit `3`. `--strict` without trust material stays `2` (a
+   usage error). `serve` keeps `2` for "refusing to start". Both changes need
+   a changelog entry and a README update.
 
 ### 9.4 Profiles
 
@@ -457,18 +561,29 @@ Each rule gets a positive control and a refused case.
 
 ## 13. Decisions needed from the project owner
 
-| # | Decision | Recommendation |
+"Owner status" records the reviewer's responses so far. It is not an approval
+of any item whose wording the reviewer has not yet seen confirmed against this
+table.
+
+| # | Decision | Recommendation | Owner status |
+|---|---|---|---|
+| O1 | Move `key_id` and the key fingerprint into the signed body in v2 | Yes (F1) | Direction approved ("signed issuer and deployment identity"); the verifier must compare signed identity with its independently configured trust policy. Exact wording pending confirmation. |
+| O2 | Make the timestamp digest cover the signature (the sealed digest) | Yes (F2); document that v1 tokens do not meet it | Direction approved: the token must bind a canonical digest of the complete signed artifact, including signature and key identity. Pending confirmation. |
+| O3 | Default historical policy for retired keys outside `development` | Authenticated chronology | Pending |
+| O4 | Compromise default when the boundary is unknown | Reject all (D3) | Approved fail-closed: affected signatures are not trusted evidence; no inference from `issued_at`. |
+| O5 | Request-time loopback enforcement for development options | Yes (§9.3.3) | Pending |
+| O6 | CLI `verify` behaviour change | Yes, with a changelog entry; exit codes per §9.3.5 | Approved in principle; exit-code contract is a proposal pending reconciliation with existing allocations (see §9.3.5). |
+| O7 | Export `build_app` in `__all__` and document it as a supported embedding entry point | Yes | Pending |
+| O8 | Trust-store bundle signing scheme and trust-anchor distribution | Provisioned deployment-scoped anchor outside the bundle (§4.5); custody and distribution are an organisational decision | **HOLD**: no trust-distribution architecture approved. No TOFU, HTTPS-alone, or in-bundle anchor. |
+| O9 | Which TSA/witness roots to ship examples for | None. Allow an explicitly configured, pinned timestamp verifier; ship no automatically trusted authority | **HOLD** on selecting any authority. Examples must not establish trust in the example authority. |
+| O10 | Remove `valid` from the library API (timing) | After the first v2 release; deprecation warning first (§8.4) | Direction approved: `accepted` is the authoritative decision and ambiguous `valid` is deprecated. Removal timing pending. |
+
+### Open protocol questions (must be resolved before Phase 3)
+
+| # | Question | Position in this draft |
 |---|---|---|
-| O1 | Move `key_id` and fingerprint into the signed body in v2 | Yes (F1) |
-| O2 | Make the timestamp digest cover the signature (sealed digest) | Yes (F2); document that v1 tokens do not meet it |
-| O3 | Default historical policy for retired keys outside `development` | Authenticated chronology |
-| O4 | Compromise default when boundary unknown | Reject all (D3) |
-| O5 | Request-time loopback enforcement for development options | Yes (§9.3.3) |
-| O6 | CLI `verify` behaviour change (exit codes) | Yes, with a changelog entry |
-| O7 | Export `build_app` in `__all__` and document it as supported | Yes |
-| O8 | Trust-store bundle signing scheme and trust anchor distribution | Open: needs a decision on the anchor (offline root key vs. transparency log) |
-| O9 | Which TSA/witness roots to ship examples for | Open |
-| O10 | Remove `valid` from the library API (timing) | After first v2 release (§8.4) |
+| Q1 | How does an offline verifier know trust history is complete and not an earlier authentic snapshot? | §4.6: it cannot, without prior state or an authenticated refresh. The draft makes monotonic status transitions, a hash chain and durable head tracking mandatory, labels every result with `trust_store_as_of`, and refuses compromise-sensitive historical acceptance in `high-assurance` unless freshness is established. |
+| Q2 | Is replay protection local to a verifier or distributed? | §6.1: local by default, with an explicit `replay_scope`. Global single use requires a shared store with an atomic record-if-absent. The library will not claim it otherwise. |
 
 ---
 
