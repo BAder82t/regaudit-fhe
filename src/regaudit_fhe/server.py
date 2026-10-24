@@ -628,8 +628,16 @@ def _extract_bearer(request: Request) -> str | None:
     return None
 
 
-def _hash_token(token: str, salt: bytes) -> bytes:
-    return hashlib.sha256(salt + token.encode("utf-8")).digest()
+def _hash_token(token: str, key: bytes) -> bytes:
+    """Keyed digest of a bearer token, for constant-time comparison only.
+
+    HMAC-SHA256 under a per-process random key. The result is never stored or
+    sent anywhere: it exists so that comparing a request's token with the
+    configured ones does not depend on their lengths or contents. A slow
+    password hash is not appropriate for high-entropy API tokens checked on
+    every request.
+    """
+    return hmac.new(key, token.encode("utf-8"), hashlib.sha256).digest()
 
 
 def _freeze_api_keys(
@@ -782,7 +790,13 @@ def build_app(
             error = None
         except Exception as exc:
             ready = False
-            error = str(exc)
+            # Never return exception text to an unauthenticated probe: it can carry
+            # file-system paths. The detail goes to the server log instead.
+            error = "schema bundle unavailable"
+            logger.warning(
+                "readyz_schema_unavailable",
+                extra={"error_type": type(exc).__name__, "error": str(exc)},
+            )
         return {
             "ready": ready,
             "error": error,

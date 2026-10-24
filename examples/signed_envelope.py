@@ -64,19 +64,21 @@ def main() -> int:
 
     print("[3/4] Verifying the freshly built envelope...")
     outcome = rf.verify_envelope(env)
-    print(f"      valid:            {outcome.valid}")
+    # No trust store was supplied, so the issuer is unauthenticated: the envelope is
+    # intact (hash and signature agree) but can only be SELF_SIGNED_ONLY.
+    print(f"      trust_status:     {outcome.trust_status}")
     print(f"      sha256_valid:     {outcome.sha256_valid}")
-    print(f"      signature_valid:  {outcome.signature_valid}")
-    print(f"      issuer_trusted:   {outcome.issuer_trusted}\n")
-    assert outcome.valid
+    print(f"      signature_valid:  {outcome.signature_valid}\n")
+    assert outcome.sha256_valid and outcome.signature_valid
+    assert outcome.trust_status == "SELF_SIGNED_ONLY"
 
     print("[4/4] Tampering with the result and re-verifying...")
     env.result["demographic_parity_diff"] = 999.0
     bad = rf.verify_envelope(env)
-    print(f"      after tamper — valid: {bad.valid}")
+    print(f"      after tamper — trust_status: {bad.trust_status}")
     print(f"                     sha256_valid:    {bad.sha256_valid}")
     print(f"                     signature_valid: {bad.signature_valid}")
-    assert bad.valid is False
+    assert bad.trust_status == "INVALID"
     print("\nOK — fresh envelope verified, tampered envelope rejected.")
     return 0
 
