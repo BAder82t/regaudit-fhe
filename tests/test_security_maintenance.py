@@ -80,6 +80,7 @@ def test_the_module_no_longer_mutates_a_global_for_the_warning():
 # API-token hashing (CodeQL py/weak-sensitive-data-hashing)
 # ---------------------------------------------------------------------------
 
+pytest.importorskip("fastapi")  # server.py needs the [server] extra to import
 server = pytest.importorskip("regaudit_fhe.server")
 
 
