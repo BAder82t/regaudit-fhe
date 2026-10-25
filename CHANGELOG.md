@@ -1,6 +1,37 @@
 # Changelog
 
-## Unreleased — post-merge security maintenance
+## 0.1.0 — release candidate (NOT PUBLISHED)
+
+Everything under the "0.1.0 —" headings below ships in this release. **0.1.0 is a Pre-Alpha release
+with deliberate, behaviour-changing security defaults; read "Changed (breaking, deliberate)" in the
+Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading from 0.0.x.**
+
+### Fixed
+
+- **The JSON schemas are now included in the wheel and the sdist.** Every earlier release (0.0.2 to
+  0.0.8) shipped without `schemas/*.schema.json`, so after a clean install `regaudit-fhe audit …`,
+  `regaudit-fhe schema …` and any `load_schema` / `validate_*` call raised `FileNotFoundError`.
+  The suite did not notice because it ran from a checkout where the loader found the files through
+  its working-directory and repository-root fallbacks.
+- **The schema loader reads only the installed package's `schemas/` directory.** It no longer falls
+  back to `./schemas` or a repository-root `schemas/`. Callers who relied on a `schemas/` directory
+  next to the working directory must stop; that directory could previously decide which schema
+  validated a payload.
+
+### Tests
+
+- `tests/test_installed_distribution.py` builds the sdist and wheel (and a wheel from the sdist),
+  checks all 14 schemas are present, unpacks the wheel and runs it from a directory outside the
+  repository (v1 and v2 sign/verify, schema validation). It also checks that the top-level
+  `schemas/` copy (used by the Dockerfile) stays byte-identical to the packaged one. It needs
+  `setuptools>=70.1`, which is now in the `dev` extra.
+
+### Release notes
+
+- `requirements-dev.txt` is a legacy convenience file, not an authoritative lockfile (see
+  `docs/SUPPLY_CHAIN.md`).
+
+## 0.1.0 — post-merge security maintenance
 
 Follow-up to the security-maintenance change, from a retrospective (AI-assisted, static)
 review. No change to the authentication design, the trust schema or any dependency.
@@ -27,7 +58,7 @@ review. No change to the authentication design, the trust schema or any dependen
   The `_OnceFlag` and examples tests in `tests/test_security_maintenance.py` run in a
   `[dev]`-only environment (previously a module-level skip silently dropped them).
 
-## Unreleased — security maintenance (CodeQL findings)
+## 0.1.0 — security maintenance (CodeQL findings)
 
 Confined to confirmed code-scanning findings; independent of any Phase 3B work and of
 the trust schema. The full inventory and evidence are in
@@ -58,7 +89,7 @@ the trust schema. The full inventory and evidence are in
   `openfhe_fairness_roundtrip.py`) print and assert `trust_status` / `sha256_valid` /
   `signature_valid` instead of the deprecated `valid` and the boolean `issuer_trusted`.
 
-## Unreleased — Phase 3A: `report.v2` trust core
+## 0.1.0 — Phase 3A: `report.v2` trust core
 
 Candidate trust-core implementation of the approved parts of
 `docs/TRUST_SPEC.md`. **Not production readiness.** Trust-anchor distribution
@@ -217,7 +248,7 @@ files.
   (evaluator/decryption-key separation, OpenFHE behavioural verification,
   differential-privacy enforcement).
 
-## Unreleased — Phase 1 trust hardening (partly superseded by Phase 3A above)
+## 0.1.0 — Phase 1 trust hardening (partly superseded by Phase 3A above)
 
 ### Changed (deliberate, security-motivated default changes)
 

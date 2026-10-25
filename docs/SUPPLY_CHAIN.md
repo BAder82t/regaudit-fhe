@@ -14,7 +14,7 @@ attestation surface.
 | Dependency updates         | GitHub Dependabot, weekly                                 | `.github/dependabot.yml`                          |
 | Vulnerability scanning     | `pip-audit --strict --vulnerability-service osv` in CI    | `.github/workflows/ci.yml`, `publish.yml`         |
 | SBOM (CycloneDX 1.6 JSON)  | `cyclonedx-py environment` in CI + on every release       | `.github/workflows/ci.yml`, `publish.yml`         |
-| Pinned dev environment     | `requirements-dev.txt` (pip-tools)                        | repository root                                   |
+| Dev environment pins (legacy, **not authoritative**) | `requirements-dev.txt` (pip-tools, partial; see below) | repository root                          |
 | OIDC PyPI publish          | `pypa/gh-action-pypi-publish@release/v1` (Trusted Publisher) | `.github/workflows/publish.yml`               |
 | Sigstore build attestation | `attestations: true` in publish action                    | `.github/workflows/publish.yml`                   |
 | Release-asset checksums    | `sha256sum dist/*` uploaded as a release asset            | `.github/workflows/publish.yml`                   |
@@ -75,18 +75,22 @@ attached to the matching GitHub Release page.
 
 ---
 
-## Pinned development environment
+## Pinned development environment (legacy, not authoritative)
 
-`requirements-dev.txt` is the lockfile a contributor (or CI runner)
-uses to reproduce the development environment that generated the
-release artefacts. Refresh the lock with::
+`requirements-dev.txt` is **not** a complete or authoritative lockfile and nothing in CI, the Dockerfile
+or the release pipeline installs from it: CI and `publish.yml` run `pip install -e ".[dev,server,fhe]"`
+(unpinned extras), and the Dockerfile runs `pip install ".[server]"`. It was generated once with
 
-    pip install pip-tools
     pip-compile --extra=dev --extra=server --output-file=requirements-dev.txt pyproject.toml
 
-Production users should pin the wheel in their own application's
-lockfile; `requirements-dev.txt` is a development convenience, not
-a published runtime contract.
+and has not been regenerated since: it lacks packages that the `dev` extra now lists (for example
+`bandit`, `pdoc` and `setuptools`) and Dependabot updates individual pins in it. Treat it as a
+contributor convenience only. Do not cite it as evidence that a release was built from pinned
+dependencies. The point-in-time evidence for a release is the qualification record that lists the
+resolved versions and the `pip-audit` result (see `docs/rc/`). Regenerating it, or deleting it and
+removing this section, is a maintainer decision that was not made as part of the 0.1.0 candidate.
+
+Production users should pin the wheel in their own application's lockfile.
 
 ---
 
