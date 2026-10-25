@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — security maintenance (CodeQL findings)
+
+Confined to confirmed code-scanning findings; independent of any Phase 3B work and of
+the trust schema. The full inventory and evidence are in
+[docs/CODEQL_TRIAGE.md](docs/CODEQL_TRIAGE.md).
+
+### Security
+
+- **`/readyz` no longer returns exception text.** A failed schema load used to put
+  `str(exc)` (which can contain file-system paths) in the response to an unauthenticated
+  probe. It now reports `schema bundle unavailable`; the detail is written to the server
+  log (`readyz_schema_unavailable`, fields `error_type` and `error`).
+- **API bearer-token comparison uses HMAC-SHA256** keyed by the per-process random secret,
+  instead of `SHA-256(salt + token)`. The digest is only ever used for a constant-time
+  comparison; the comparison logic is unchanged.
+  **Migration:** none is needed. The digests are computed at start-up from the configured
+  keys, kept only in process memory, and never stored or transmitted, and the key is
+  `os.urandom(32)` per process. The one derived value that leaves the process is the
+  opaque 12-character `key_id` in logs and rate-limit buckets; its value changes with
+  this release (it already changed on every restart). An embedder that pins a fixed
+  `salt=` in `build_app` will see its `key_id` values change once.
+- **The one-time "no trust material" warning from `verify_receipt` is now exactly-once.**
+  A bare module-level flag mutated through `global` is replaced by a lock-guarded
+  once-flag. The previous race was benign (at worst a duplicate warning).
+
+### Changed
+
+- The examples (`signed_envelope.py`, `regulator_verify_signature.py`,
+  `openfhe_fairness_roundtrip.py`) print and assert `trust_status` / `sha256_valid` /
+  `signature_valid` instead of the deprecated `valid` and the boolean `issuer_trusted`.
+
 ## Unreleased — Phase 3A: `report.v2` trust core
 
 Candidate trust-core implementation of the approved parts of

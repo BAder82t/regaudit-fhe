@@ -118,7 +118,7 @@ def main() -> int:
     print(f"threshold breached: {str(enc.threshold_breached).lower()}")
     print("─" * 58)
 
-    assert out.valid, "envelope failed verification"
+    assert out.sha256_valid and out.signature_valid, "envelope failed verification"
     for fld in ("demographic_parity_diff", "equal_opportunity_diff",
                 "predictive_parity_diff"):
         diff = abs(getattr(plain, fld) - getattr(enc, fld))

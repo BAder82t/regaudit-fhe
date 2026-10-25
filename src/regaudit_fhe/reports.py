@@ -53,6 +53,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import threading
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -939,7 +940,32 @@ def verify_envelope_or_raise(
     return outcome
 
 
-_VERIFY_RECEIPT_WEAK_WARNED = False
+class _OnceFlag:
+    """A thread-safe "first caller wins" flag.
+
+    Replaces a module-level boolean mutated through ``global``: the check and the
+    set happen under one lock, so a warning guarded by it fires exactly once even
+    when many threads reach it together, and tests can ``reset()`` it.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._done = False
+
+    def first(self) -> bool:
+        """True for exactly one caller until :meth:`reset`."""
+        with self._lock:
+            if self._done:
+                return False
+            self._done = True
+            return True
+
+    def reset(self) -> None:
+        with self._lock:
+            self._done = False
+
+
+_WEAK_WARNING = _OnceFlag()
 
 
 def verify_receipt(
@@ -970,14 +996,12 @@ def verify_receipt(
     emits a one-time ``UserWarning`` so integrators do not silently rely on
     hash-and-self-signature verification.
     """
-    global _VERIFY_RECEIPT_WEAK_WARNED
     # ``is not None``, not truthiness: an empty mapping is trust material that
     # trusts nobody (e.g. a map that failed to load), never the self-signed path.
     has_material = trust_store is not None or trusted_keys is not None
     if strict and not has_material:
         return False
-    if not has_material and not _VERIFY_RECEIPT_WEAK_WARNED:
-        _VERIFY_RECEIPT_WEAK_WARNED = True
+    if not has_material and _WEAK_WARNING.first():
         warnings.warn(
             "verify_receipt() called without trust material: this verifies "
             "the embedded signature against the embedded public key only "

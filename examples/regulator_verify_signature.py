@@ -76,11 +76,11 @@ def main() -> int:
     print(f"            schema_valid:       True")
     print(f"            sha256_valid:       {out.sha256_valid}")
     print(f"            signature_valid:    {out.signature_valid}")
-    print(f"            issuer_trusted:     {out.issuer_trusted}")
+    print(f"            trust_status:       {out.trust_status}")
     print(f"            parameter_set_ok:   {param_ok}")
     print(f"            timestamp_valid:    {out.timestamp_valid}\n")
 
-    if out.valid and param_ok:
+    if out.trust_status == "TRUSTED" and param_ok:
         print("[Regulator] ACCEPT — envelope passes every binding check.\n")
     else:
         print("[Regulator] REJECT — envelope failed verification.\n")
@@ -92,10 +92,9 @@ def main() -> int:
                                    key_id="vendor-2026-q2")
     parsed.receipt["public_key_pem"] = impostor.public_key_pem()
     bad = rf.verify_envelope(parsed, trusted_keys=trusted_keys)
-    print(f"            valid: {bad.valid} "
-          f"signature_valid: {bad.signature_valid} "
-          f"issuer_trusted: {bad.issuer_trusted}\n")
-    assert bad.valid is False
+    print(f"            trust_status: {bad.trust_status} "
+          f"signature_valid: {bad.signature_valid}\n")
+    assert bad.trust_status == "INVALID"
     print("            REJECT — embedded public key does not match "
           "the trusted-keys store entry for vendor-2026-q2.")
 
