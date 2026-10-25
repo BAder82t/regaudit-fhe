@@ -1,0 +1,284 @@
+"""The built distributions must contain the runtime JSON Schemas, and an *installed* copy must work.
+
+Regression for a packaging defect: the wheel and the sdist shipped without ``schemas/*.schema.json``
+(they are data files, not Python modules), so an installed package could not validate any payload.
+The ordinary suite never noticed because it runs from a source checkout, where the files exist.
+
+These tests therefore build the distributions from a private copy of the packaging inputs, unpack the
+wheel into a temporary directory, and exercise it in a subprocess whose working directory is outside
+the repository. The subprocess asserts that ``regaudit_fhe`` was imported from the unpacked wheel, not
+from the source tree.
+
+They need the ``setuptools`` build backend. If the running interpreter has none (a fresh Python 3.12+
+venv does not), a throwaway venv with ``setuptools`` is created, which needs network access. If neither is
+possible the tests are skipped locally; under ``CI`` they fail instead, so the guard cannot silently
+disappear.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import textwrap
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from regaudit_fhe.schemas import DIRECTIONS, PRIMITIVES, list_schemas
+
+ROOT = Path(__file__).resolve().parents[1]
+PKG_SCHEMAS = ROOT / "src" / "regaudit_fhe" / "schemas"
+COPY_ITEMS = (
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    "LICENSE-COMMERCIAL.md",
+    "MANIFEST.in",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "src",
+)
+
+
+def _expected_schema_files() -> set[str]:
+    names = {"envelope.schema.json", "envelope.v2.schema.json"}
+    names |= {f"{p}.{d}.schema.json" for p in PRIMITIVES for d in DIRECTIONS}
+    return names
+
+
+def _have_backend(python: str) -> bool:
+    probe = "import setuptools, setuptools.build_meta; from setuptools.command import bdist_wheel"
+    return (
+        subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [python, "-c", probe], capture_output=True, check=False
+        ).returncode
+        == 0
+    )
+
+
+def _give_up(message: str):
+    if os.environ.get("CI"):
+        pytest.fail(message)
+    pytest.skip(message)
+
+
+def _backend_python(workdir: Path) -> str:
+    """The running interpreter if it has setuptools, else a throwaway venv that has it."""
+    if _have_backend(sys.executable):
+        return sys.executable
+    venv = workdir / "backend-venv"
+    steps = (
+        [sys.executable, "-m", "venv", str(venv)],
+        [str(venv / "bin" / "python"), "-m", "pip", "install", "--quiet", "setuptools>=70.1"],
+    )
+    for argv in steps:
+        proc = subprocess.run(argv, capture_output=True, text=True, check=False)  # noqa: S603 - fixed argv
+        if proc.returncode != 0:
+            _give_up(
+                f"no setuptools available and could not create a backend venv: {proc.stderr.strip()[-300:]}"
+            )
+    return str(venv / "bin" / "python")
+
+
+def _build(python: str, workdir: Path, kind: str, source: Path) -> Path:
+    """Run the PEP 517 backend directly (no network, no `build` package) and return the artifact."""
+    out = Path(tempfile.mkdtemp(prefix=f"out-{kind}-", dir=workdir))
+    code = f"import sys; from setuptools import build_meta as b; print(b.build_{kind}(sys.argv[1]))"
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [python, "-c", code, str(out)],
+        cwd=source,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        _give_up(f"could not build the {kind}: {proc.stderr.strip()[-400:]}")
+    return out / proc.stdout.strip().splitlines()[-1]
+
+
+def _private_copy(dest: Path) -> Path:
+    dest.mkdir()
+    for item in COPY_ITEMS:
+        src = ROOT / item
+        if not src.exists():
+            continue
+        if src.is_dir():
+            shutil.copytree(
+                src,
+                dest / item,
+                ignore=shutil.ignore_patterns("__pycache__", "*.egg-info", "*.pyc"),
+            )
+        else:
+            shutil.copy2(src, dest / item)
+    return dest
+
+
+@pytest.fixture(scope="module")
+def dists(tmp_path_factory):
+    work = tmp_path_factory.mktemp("dist")
+    src = _private_copy(work / "src")
+    python = _backend_python(work)
+    sdist = _build(python, work, "sdist", src)
+    wheel = _build(python, work, "wheel", src)
+    # The sdist must be able to produce a wheel on its own.
+    unpacked = work / "from-sdist"
+    unpacked.mkdir()
+    with tarfile.open(sdist) as tf:
+        if sys.version_info >= (3, 12):
+            tf.extractall(unpacked, filter="data")
+        else:
+            tf.extractall(unpacked)  # noqa: S202 - own sdist built a moment ago
+    (root,) = [p for p in unpacked.iterdir() if p.is_dir()]
+    wheel_from_sdist = _build(python, work, "wheel", root)
+    return {"work": work, "sdist": sdist, "wheel": wheel, "wheel_from_sdist": wheel_from_sdist}
+
+
+def _wheel_schema_files(path: Path) -> set[str]:
+    with zipfile.ZipFile(path) as zf:
+        return {
+            Path(n).name
+            for n in zf.namelist()
+            if n.startswith("regaudit_fhe/schemas/") and n.endswith(".json")
+        }
+
+
+def test_source_tree_has_exactly_the_expected_schema_files():
+    assert {p.name for p in PKG_SCHEMAS.glob("*.json")} == _expected_schema_files()
+    assert len(list_schemas()) == len(_expected_schema_files())
+
+
+def test_wheel_contains_every_runtime_schema(dists):
+    assert _wheel_schema_files(dists["wheel"]) == _expected_schema_files()
+
+
+def test_sdist_contains_every_runtime_schema(dists):
+    with tarfile.open(dists["sdist"]) as tf:
+        names = {
+            Path(n).name
+            for n in tf.getnames()
+            if "/src/regaudit_fhe/schemas/" in n and n.endswith(".json")
+        }
+    assert names == _expected_schema_files()
+
+
+def test_wheel_built_from_the_sdist_contains_every_runtime_schema(dists):
+    assert _wheel_schema_files(dists["wheel_from_sdist"]) == _expected_schema_files()
+
+
+_SMOKE = textwrap.dedent(
+    """
+    import sys, json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    target = Path(sys.argv[1]).resolve()
+    sys.path.insert(0, str(target))
+    import regaudit_fhe as rf
+    from regaudit_fhe import schemas
+
+    here = Path(rf.__file__).resolve()
+    assert target in here.parents, f"regaudit_fhe was not imported from the unpacked wheel: {here}"
+    assert not Path("schemas").exists(), "the working directory must not provide schemas"
+
+    # 1. every schema loads from the installed package
+    for name in schemas.list_schemas():
+        assert schemas.load_schema(name)["$schema"]
+    assert schemas.load_schema("envelope.v2")["$id"].endswith("/v2/envelope.json")
+
+    import numpy as np
+    report = rf.audit_fairness(
+        np.array([1.0, 0.0, 1.0, 0.0]), np.array([1.0, 0.0, 0.0, 0.0]),
+        np.array([1.0, 1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0, 1.0]),
+    )
+    signer = rf.Signer.generate(issuer="smoke", key_id="k1")
+
+    # 2. report.v1: sign, validate against the envelope schema, verify with trust material
+    v1 = rf.envelope("fairness", report, signer=signer)
+    schemas.validate_envelope(v1.to_dict())
+    out = rf.verify_envelope(v1, trusted_keys={"k1": signer.public_key_pem()})
+    assert out.trust_status == "TRUSTED", out.trust_status
+
+    # 3. report.v2: sign, validate against its schema, round-trip, verify (self-signed => not accepted)
+    v2 = rf.envelope_v2(
+        "fairness", report, signer=signer, deployment_id="smoke-dep",
+        audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f7",
+        issued_at=datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    schemas.validate_envelope_v2(v2.to_dict())
+    again = rf.parse_envelope(json.loads(json.dumps(v2.to_dict())))
+    res = rf.verify_report(again, rf.VerificationPolicy(allow_self_signed=True))
+    assert res.integrity_valid and res.trust_status == "SELF_SIGNED_ONLY" and res.accepted is False
+
+    # 4. input validation (used by every audit) works
+    schemas.validate_input("fairness", {
+        "y_true": [1, 0], "y_pred": [1, 0], "group_a": [1, 0], "group_b": [0, 1]})
+    print("SMOKE-OK", here)
+    """
+)
+
+
+def test_installed_wheel_works_outside_the_source_tree(dists, tmp_path):
+    target = tmp_path / "site"
+    with zipfile.ZipFile(dists["wheel"]) as zf:
+        zf.extractall(target)  # noqa: S202 - own wheel built a moment ago
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    assert ROOT not in cwd.resolve().parents
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", _SMOKE, str(target)],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "SMOKE-OK" in proc.stdout
+
+
+def test_a_wheel_without_schemas_is_detected(dists, tmp_path):
+    """Negative control: strip the schemas from an unpacked wheel; the smoke run must fail."""
+    target = tmp_path / "site"
+    with zipfile.ZipFile(dists["wheel"]) as zf:
+        zf.extractall(target)  # noqa: S202 - own wheel built a moment ago
+    shutil.rmtree(target / "regaudit_fhe" / "schemas")
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", _SMOKE, str(target)],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "schemas directory is missing" in proc.stderr
+
+
+def test_loader_ignores_a_schemas_directory_in_the_working_directory(dists, tmp_path):
+    """No silent fallback: a ./schemas directory next to the caller must not stand in for the package's."""
+    target = tmp_path / "site"
+    with zipfile.ZipFile(dists["wheel"]) as zf:
+        zf.extractall(target)  # noqa: S202 - own wheel built a moment ago
+    shutil.rmtree(target / "regaudit_fhe" / "schemas")
+    cwd = tmp_path / "elsewhere"
+    (cwd / "schemas").mkdir(parents=True)
+    for f in PKG_SCHEMAS.glob("*.json"):
+        shutil.copy2(f, cwd / "schemas" / f.name)
+    code = (
+        "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]);"
+        "from regaudit_fhe.schemas import load_schema;"
+        "load_schema('envelope.v2')"
+    )
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", code, str(target)],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0 and "FileNotFoundError" in proc.stderr

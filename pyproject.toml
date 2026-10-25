@@ -60,6 +60,12 @@ regaudit-fhe = "regaudit_fhe.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The JSON Schemas are runtime data (every audit validates against them). They live in a plain
+# directory inside the package, so they must be listed explicitly or neither the wheel nor the sdist
+# contains them. tests/test_installed_distribution.py guards this.
+[tool.setuptools.package-data]
+regaudit_fhe = ["py.typed", "schemas/*.schema.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
