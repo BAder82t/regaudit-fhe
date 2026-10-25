@@ -128,8 +128,6 @@ def test_readyz_does_not_leak_exception_detail(monkeypatch):
 
 @needs_httpx
 def test_readyz_failure_detail_is_logged_server_side(monkeypatch):
-    import logging
-
     def broken(name):
         raise RuntimeError("detail-for-operators")
 
@@ -252,7 +250,8 @@ def test_json_formatter_keeps_hostile_text_inside_one_json_record():
     assert len(line.splitlines()) == 1  # Unicode-aware splitting (U+2028/2029/0085) too
     parsed = json.loads(line)
     assert parsed["error"] == _HOSTILE  # round-trips as data
-    assert set(parsed) == {"ts", "level", "msg", "logger", "error", "error_type"}
+    # Python >= 3.12 adds a ``taskName`` attribute to every record; it is emitted as null.
+    assert set(parsed) - {"taskName"} == {"ts", "level", "msg", "logger", "error", "error_type"}
     assert "injected" not in parsed and parsed["msg"] == "readyz_schema_unavailable"
 
 
