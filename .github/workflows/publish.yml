@@ -45,7 +45,10 @@ jobs:
           set -euo pipefail
           test "$EVENT" = "push"
           test "$REF_TYPE" = "tag"
-          [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if ! [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # explicit: old bash ignores `set -e` for [[ ]]
+            echo "tag name $REF_NAME is not vX.Y.Z" >&2
+            exit 1
+          fi
           test "$(git cat-file -t "refs/tags/$REF_NAME")" = "tag"       # annotated tags only
           test "$(git rev-parse "refs/tags/$REF_NAME^{commit}")" = "$EVENT_SHA"
           git fetch --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
