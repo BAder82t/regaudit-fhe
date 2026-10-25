@@ -11,7 +11,8 @@ Checks (any failure exits non-zero with a message):
   * when ``--tag vX.Y.Z`` is given it equals that version, and the tag has the strict form;
   * ``--dist`` holds exactly one wheel and one sdist, nothing else;
   * wheel METADATA ``Version`` and the sdist ``PKG-INFO`` ``Version`` equal that version;
-  * both distributions contain exactly the expected runtime schema files and ``py.typed``.
+  * both distributions contain exactly the expected runtime schema files and ``py.typed``;
+  * the sdist contains the test helpers and data the test suite needs, so it can run the suite itself.
 """
 
 from __future__ import annotations
@@ -112,6 +113,20 @@ def check_sdist(path: Path, version: str) -> list[str]:
             )
         if not any(n.endswith("/src/regaudit_fhe/py.typed") for n in names):
             problems.append(f"{path.name}: py.typed is missing")
+        needed = (
+            "tests/_asgi.py",
+            "tests/vectors/report_v2/vectors.json",
+            "tests/test_installed_distribution.py",
+            "scripts/check_release_metadata.py",
+            "scripts/smoke_installed_wheel.py",
+        )
+        for suffix in needed:
+            if not any(
+                n.count("/") == suffix.count("/") + 1 and n.endswith("/" + suffix) for n in names
+            ):
+                problems.append(
+                    f"{path.name}: the sdist cannot run the test suite, {suffix} is missing"
+                )
     return problems
 
 

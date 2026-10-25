@@ -11,9 +11,8 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_release_metadata.py"
-pytestmark = pytest.mark.skipif(
-    not SCRIPT.is_file(), reason="scripts/ is not part of this checkout"
-)
+if not SCRIPT.is_file():
+    pytest.skip("scripts/ is not part of this checkout", allow_module_level=True)
 
 
 def _module():
@@ -49,7 +48,7 @@ def _wheel(path: Path, version="0.1.0", schemas=None, py_typed=True):
             zf.writestr("regaudit_fhe/py.typed", "")
 
 
-def _sdist(path: Path, version="0.1.0", schemas=None, py_typed=True, extra=None):
+def _sdist(path: Path, version="0.1.0", schemas=None, py_typed=True, extra=None, omit=None):
     top = f"regaudit_fhe-{version}"
     names = SCHEMAS if schemas is None else schemas
 
@@ -59,6 +58,15 @@ def _sdist(path: Path, version="0.1.0", schemas=None, py_typed=True, extra=None)
         tf.addfile(ti, io.BytesIO(data))
 
     with tarfile.open(path, "w:gz") as tf:
+        for support in (
+            "tests/_asgi.py",
+            "tests/vectors/report_v2/vectors.json",
+            "tests/test_installed_distribution.py",
+            "scripts/check_release_metadata.py",
+            "scripts/smoke_installed_wheel.py",
+        ):
+            if support not in (omit or ()):
+                add(tf, f"{top}/{support}")
         add(tf, f"{top}/PKG-INFO", f"Metadata-Version: 2.4\nName: x\nVersion: {version}\n".encode())
         for n in names:
             add(tf, f"{top}/src/regaudit_fhe/schemas/{n}", b"{}")
@@ -167,3 +175,12 @@ def test_an_sdist_with_a_symlink_member_is_refused(tmp_path):
 def test_the_real_repository_sources_agree_on_one_version():
     root = SCRIPT.parents[1]
     assert len(set(M.source_versions(root).values())) == 1
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["tests/_asgi.py", "tests/vectors/report_v2/vectors.json", "scripts/smoke_installed_wheel.py"],
+)
+def test_an_sdist_that_cannot_run_the_test_suite_is_refused(tmp_path, missing, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, sdist={"omit": [missing]})) == 1
+    assert "cannot run the test suite" in capsys.readouterr().err
