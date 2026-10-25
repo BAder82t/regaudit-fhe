@@ -30,8 +30,8 @@ push of tag vX.Y.Z  ──►  guard ──► build (release-build.yml) ──�
 | PyPI trusted publisher bound to this workflow and environment | **PyPI project setting** | **owner action (section 3)** |
 | Human code review of the release | process | **not enforced anywhere** |
 
-`release-rehearsal.yml` runs the same `release-build.yml` on pull requests that touch packaging or release
-files and on demand. Because it is path-filtered it must **not** be configured as a *required* status check (a
+`release-rehearsal.yml` runs the same `release-build.yml` on pushes to `release/**` branches, on pull requests that
+touch packaging or release files, and on demand (a `workflow_dispatch` needs the file on the default branch). Because it is path-filtered it must **not** be configured as a *required* status check (a
 PR that does not touch those paths would wait for it forever). It publishes nothing, signs nothing, has no environment and no `id-token`.
 
 ## 2. What a release needs before the tag is pushed

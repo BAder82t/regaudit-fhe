@@ -138,7 +138,10 @@ def test_no_workflow_expression_is_interpolated_into_a_shell_script():
 
 def test_the_rehearsal_cannot_publish():
     wf = _load(REHEARSAL)
-    assert set(wf["on"]) == {"pull_request", "workflow_dispatch"}
+    assert set(wf["on"]) == {"push", "pull_request", "workflow_dispatch"}
+    assert wf["on"]["push"] == {"branches": ["release/**"]}, (
+        "branches only: a tag push must not run the rehearsal"
+    )
     assert list(wf["jobs"]) == ["rehearsal"]
     assert wf["jobs"]["rehearsal"]["uses"] == "./.github/workflows/release-build.yml"
     assert wf["jobs"]["rehearsal"]["with"]["expected_tag"] == ""

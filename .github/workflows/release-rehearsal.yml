@@ -5,6 +5,9 @@ name: release-rehearsal
 # read-only, there is no id-token and no environment.
 
 on:
+  push:
+    branches:
+      - "release/**"   # branches only: a tag push never runs this workflow, and nothing here can publish
   pull_request:
     paths:
       - "pyproject.toml"
