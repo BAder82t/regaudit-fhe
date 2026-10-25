@@ -69,7 +69,16 @@ def check_wheel(path: Path, version: str) -> list[str]:
         meta = [n for n in names if n.endswith(".dist-info/METADATA")]
         if len(meta) != 1:
             return [f"{path.name}: expected one METADATA file, found {len(meta)}"]
-        got = _first(r"^Version:\s*(\S+)", zf.read(meta[0]).decode("utf-8"), "wheel Version")
+        meta_text = zf.read(meta[0]).decode("utf-8")
+        got = _first(r"^Version:\s*(\S+)", meta_text, "wheel Version")
+        if _first(r"^Name:\s*(\S+)", meta_text, "wheel Name") != "regaudit-fhe":
+            problems.append(f"{path.name}: METADATA Name is not regaudit-fhe")
+        allowed = ("regaudit_fhe/", f"regaudit_fhe-{version}.dist-info/")
+        stray = [n for n in names if not n.startswith(allowed)]
+        if stray:
+            problems.append(
+                f"{path.name}: members outside regaudit_fhe/ and its dist-info: {stray[:5]}"
+            )
         if got != version:
             problems.append(f"{path.name}: METADATA Version {got} != {version}")
         schemas = _schema_names(names, "regaudit_fhe/schemas/")
@@ -102,7 +111,14 @@ def check_sdist(path: Path, version: str) -> list[str]:
             return [*problems, f"{path.name}: expected one top-level PKG-INFO, found {len(info)}"]
         got_file = tf.extractfile(info[0])
         assert got_file is not None
-        got = _first(r"^Version:\s*(\S+)", got_file.read().decode("utf-8"), "sdist Version")
+        pkg_info = got_file.read().decode("utf-8")
+        got = _first(r"^Version:\s*(\S+)", pkg_info, "sdist Version")
+        if _first(r"^Name:\s*(\S+)", pkg_info, "sdist Name") != "regaudit-fhe":
+            problems.append(f"{path.name}: PKG-INFO Name is not regaudit-fhe")
+        top = f"regaudit_fhe-{version}"
+        stray = [n for n in names if n != top and not n.startswith(top + "/")]
+        if stray:
+            problems.append(f"{path.name}: members outside {top}/: {stray[:5]}")
         if got != version:
             problems.append(f"{path.name}: PKG-INFO Version {got} != {version}")
         schemas = _schema_names(names, "/src/regaudit_fhe/schemas/")
@@ -119,6 +135,7 @@ def check_sdist(path: Path, version: str) -> list[str]:
             "tests/test_installed_distribution.py",
             "scripts/check_release_metadata.py",
             "scripts/smoke_installed_wheel.py",
+            "CHANGELOG.md",
         )
         for suffix in needed:
             if not any(

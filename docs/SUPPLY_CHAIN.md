@@ -12,12 +12,12 @@ attestation surface.
 | Control                    | Mechanism                                                | File / location                                   |
 | -------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
 | Dependency updates         | GitHub Dependabot, weekly                                 | `.github/dependabot.yml`                          |
-| Vulnerability scanning     | `pip-audit --strict --vulnerability-service osv` in CI    | `.github/workflows/ci.yml`, `publish.yml`         |
-| SBOM (CycloneDX 1.6 JSON)  | `cyclonedx-py environment` in CI + on every release       | `.github/workflows/ci.yml`, `publish.yml`         |
+| Vulnerability scanning     | `pip-audit --strict --vulnerability-service osv` in CI    | `.github/workflows/ci.yml`, `pypi-release.yml`         |
+| SBOM (CycloneDX 1.6 JSON)  | `cyclonedx-py environment` in CI + on every release       | `.github/workflows/ci.yml`, `pypi-release.yml`         |
 | Dev environment pins (legacy, **not authoritative**) | `requirements-dev.txt` (pip-tools, partial; see below) | repository root                          |
-| OIDC PyPI publish          | `pypa/gh-action-pypi-publish@release/v1` (Trusted Publisher) | `.github/workflows/publish.yml`               |
-| Sigstore build attestation | `attestations: true` in publish action                    | `.github/workflows/publish.yml`                   |
-| Release-asset checksums    | `sha256sum dist/*` uploaded as a release asset            | `.github/workflows/publish.yml`                   |
+| OIDC PyPI publish          | `pypa/gh-action-pypi-publish@release/v1` (Trusted Publisher) | `.github/workflows/pypi-release.yml`               |
+| Sigstore build attestation | `attestations: true` in publish action                    | `.github/workflows/pypi-release.yml`                   |
+| Release-asset checksums    | `sha256sum dist/*` uploaded as a release asset            | `.github/workflows/pypi-release.yml`                   |
 
 The release pipeline, its controls and the GitHub/PyPI settings it depends on are described in
 [RELEASE_PROCESS.md](RELEASE_PROCESS.md); the pipeline has not yet run on GitHub Actions.
@@ -32,7 +32,7 @@ attached to the matching GitHub Release page.
 ## Verifying a wheel from PyPI
 
 > **Status: this recipe has not been exercised.** No release has been produced by the current
-> `publish.yml` since its actions were bumped to new major versions, so neither the attestation
+> `pypi-release.yml` since its actions were bumped to new major versions, so neither the attestation
 > location nor the identity strings below have been checked against a real release. In particular
 > `pip download` fetches only the wheel: the `.sigstore` bundles are uploaded to the GitHub Release
 > (and as a workflow artefact), not to PyPI, so download the bundle from the Release assets (or the
@@ -59,13 +59,13 @@ attached to the matching GitHub Release page.
    ```bash
    sigstore verify identity \
      --bundle dl/regaudit_fhe-<VERSION>-py3-none-any.whl.sigstore \
-     --cert-identity "https://github.com/BAder82t/regaudit-fhe/.github/workflows/publish.yml@refs/tags/v<VERSION>" \
+     --cert-identity "https://github.com/BAder82t/regaudit-fhe/.github/workflows/pypi-release.yml@refs/tags/v<VERSION>" \
      --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
      dl/regaudit_fhe-<VERSION>-py3-none-any.whl
    ```
 
    The verifier confirms (a) the artefact was produced by the
-   ``publish.yml`` workflow at the named tag, (b) the identity was
+   ``pypi-release.yml`` workflow at the named tag, (b) the identity was
    issued by GitHub's OIDC provider, and (c) the file was not
    modified after signing.
 
@@ -89,7 +89,7 @@ attached to the matching GitHub Release page.
 ## Pinned development environment (legacy, not authoritative)
 
 `requirements-dev.txt` is **not** a complete or authoritative lockfile and nothing in CI, the Dockerfile
-or the release pipeline installs from it: CI and `publish.yml` run `pip install -e ".[dev,server,fhe]"`
+or the release pipeline installs from it: CI and the release workflow run `pip install -e ".[dev,server,fhe]"`
 (unpinned extras), and the Dockerfile runs `pip install ".[server]"`. It was generated once with
 
     pip-compile --extra=dev --extra=server --output-file=requirements-dev.txt pyproject.toml

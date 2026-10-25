@@ -2,7 +2,7 @@ name: release-build
 
 # Reusable workflow: build the distributions ONCE, test the built artefacts (not the checkout),
 # audit and inventory them. It never publishes and holds no credentials (read-only token, no id-token).
-# Called by publish.yml (real releases) and by release-rehearsal.yml (rehearsals, no publication).
+# Called by pypi-release.yml (real releases) and by release-rehearsal.yml (rehearsals, no publication).
 
 on:
   workflow_call:
@@ -126,11 +126,13 @@ jobs:
           test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
           test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
       - name: Install the WHEEL into a clean virtualenv (TenSEAL only where a wheel exists)
+        env:
+          MATRIX_PYTHON: ${{ matrix.python }}
         run: |
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
-          if [ "${{ matrix.python }}" = "3.12" ]; then extras="dev,server,fhe"; else extras="dev,server"; fi
+          if [ "$MATRIX_PYTHON" = "3.12" ]; then extras="dev,server,fhe"; else extras="dev,server"; fi
           "$RUNNER_TEMP/venv/bin/python" -m pip install "$(ls "$PWD"/dist/*.whl)[$extras]"
       - name: Smoke-test the installed wheel from outside any checkout
         env:
@@ -165,6 +167,15 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: The downloaded files are the files that were built
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+          test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
       - name: Audit the environment the wheel installs into
         run: |
           set -euo pipefail
@@ -189,13 +200,24 @@ jobs:
         with:
           name: dist
           path: dist
-      - name: Generate the SBOM
+      - name: The downloaded files are the files that were built
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
         run: |
           set -euo pipefail
-          python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip "cyclonedx-bom==7.5.0"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install "$(ls "$PWD"/dist/*.whl)[server,fhe]"
-          "$RUNNER_TEMP/venv/bin/cyclonedx-py" environment --output-format JSON --output-file sbom.cdx.json
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+          test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
+      - name: Generate the SBOM of the wheel's environment (the tool lives in a separate virtualenv)
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/subject"
+          "$RUNNER_TEMP/subject/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/subject/bin/python" -m pip install "$(ls "$PWD"/dist/*.whl)[server,fhe]"
+          python -m venv "$RUNNER_TEMP/tool"
+          "$RUNNER_TEMP/tool/bin/python" -m pip install --upgrade pip "cyclonedx-bom==7.5.0"
+          "$RUNNER_TEMP/tool/bin/cyclonedx-py" environment --output-format JSON --output-file sbom.cdx.json "$RUNNER_TEMP/subject/bin/python"
       # actions/upload-artifact v7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

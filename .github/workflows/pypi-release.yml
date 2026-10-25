@@ -1,6 +1,8 @@
-name: publish
+name: pypi-release
 
-# Publishes a release to PyPI. Hardened (see docs/RELEASE_PROCESS.md):
+# Publishes a release to PyPI. The file is named pypi-release.yml on purpose: the PyPI trusted publisher is
+# bound to THIS name, so an older commit that still carries the former, unguarded publish.yml cannot obtain
+# an OIDC token PyPI accepts. Hardened (see docs/RELEASE_PROCESS.md):
 #   * the ONLY trigger is a push of a strict version tag vX.Y.Z; there is no workflow_dispatch;
 #   * the tagged commit must be the event commit, a tag object must resolve to it, and it must be
 #     reachable from the default branch;
@@ -49,6 +51,7 @@ jobs:
             echo "tag name $REF_NAME is not vX.Y.Z" >&2
             exit 1
           fi
+          git fetch --force --no-tags origin "+refs/tags/$REF_NAME:refs/tags/$REF_NAME"   # the tag OBJECT, not a rewritten ref
           test "$(git cat-file -t "refs/tags/$REF_NAME")" = "tag"       # annotated tags only
           test "$(git rev-parse "refs/tags/$REF_NAME^{commit}")" = "$EVENT_SHA"
           git fetch --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
@@ -110,8 +113,7 @@ jobs:
       url: https://pypi.org/p/regaudit-fhe
     permissions:
       contents: read
-      id-token: write       # PyPI trusted publishing (OIDC) and attestations
-      attestations: write
+      id-token: write       # PyPI trusted publishing (OIDC); also used for the PyPI attestations
     steps:
       # actions/download-artifact v8
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333

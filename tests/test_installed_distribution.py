@@ -277,3 +277,65 @@ def test_loader_ignores_a_schemas_directory_in_the_working_directory(dists, tmp_
         check=False,
     )
     assert proc.returncode != 0 and "FileNotFoundError" in proc.stderr
+
+
+# --- scripts/smoke_installed_wheel.py: it must pass on a real installed wheel and refuse each misuse ------------
+
+SMOKE = ROOT / "scripts" / "smoke_installed_wheel.py"
+_RUNNER = (
+    "import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = [sys.argv[0]] + sys.argv[2:];"
+    f"runpy.run_path({str(SMOKE)!r}, run_name='__main__')"
+)
+
+
+def _smoke(
+    dists,
+    tmp_path,
+    *,
+    folder="site-packages",
+    version="0.1.0",
+    forbid=(),
+    schemas_in_cwd=False,
+    strip=False,
+):
+    target = tmp_path / folder
+    with zipfile.ZipFile(dists["wheel"]) as zf:
+        zf.extractall(target)  # noqa: S202 - own wheel built a moment ago
+    if strip:
+        shutil.rmtree(target / "regaudit_fhe" / "schemas")
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    if schemas_in_cwd:
+        (cwd / "schemas").mkdir()
+    argv = [sys.executable, "-c", _RUNNER, str(target), "--version", version]
+    for f in forbid:
+        argv += ["--forbid-path", str(f)]
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)  # noqa: S603
+
+
+@pytest.mark.skipif(not SMOKE.is_file(), reason="scripts/ is not part of this checkout")
+class TestSmokeScript:
+    def test_passes_on_an_unpacked_wheel(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "smoke ok" in r.stdout
+
+    def test_refuses_a_wrong_expected_version(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path, version="9.9.9")
+        assert r.returncode != 0 and "installed version" in r.stderr
+
+    def test_refuses_a_package_that_is_not_in_site_packages(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path, folder="somewhere-else")
+        assert r.returncode != 0 and "not in site-packages" in r.stderr
+
+    def test_refuses_a_package_inside_a_forbidden_path(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path, forbid=[tmp_path])
+        assert r.returncode != 0 and "imported from" in r.stderr
+
+    def test_refuses_a_working_directory_that_provides_schemas(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path, schemas_in_cwd=True)
+        assert r.returncode != 0 and "must not contain a schemas/" in r.stderr
+
+    def test_fails_on_a_wheel_without_its_schemas(self, dists, tmp_path):
+        r = _smoke(dists, tmp_path, strip=True)
+        assert r.returncode != 0 and "FileNotFoundError" in r.stderr

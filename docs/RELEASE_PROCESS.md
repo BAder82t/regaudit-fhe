@@ -17,20 +17,22 @@ push of tag vX.Y.Z  ──►  guard ──► build (release-build.yml) ──�
 
 | Control | Where it lives | Enforced by |
 |---|---|---|
-| The only trigger is a push of a tag matching `v[0-9]+.[0-9]+.[0-9]+`; no `workflow_dispatch` | `publish.yml` | repo + `tests/test_release_workflow.py` |
-| The tag is an annotated tag, equals the event commit, and that commit is an ancestor of the default branch | `publish.yml` job `guard` | repo (shell; not yet run on GitHub) |
+| The only trigger is a push of a tag matching `v[0-9]+.[0-9]+.[0-9]+`; no `workflow_dispatch` | `pypi-release.yml` | repo + `tests/test_release_workflow.py` |
+| The tag is an annotated tag, equals the event commit, and that commit is an ancestor of the default branch | `pypi-release.yml` job `guard` | repo (shell; not yet run on GitHub) |
 | Tag = `pyproject.toml` version = `__version__` = `LIB_VERSION` = wheel METADATA = sdist PKG-INFO; one wheel + one sdist; 14 schemas and `py.typed` in each | `scripts/check_release_metadata.py` (called from `release-build.yml`) | repo + `tests/test_release_scripts.py` |
-| The built wheel is installed in a clean venv and used from outside the checkout; the test suite shipped in the sdist runs against it | `release-build.yml` job `smoke` | repo (shell; not yet run on GitHub) |
-| The files signed and uploaded are the files that were built (SHA-256 recorded as job outputs and re-checked) | `publish.yml` (`sigstore`, `publish`) | repo |
-| PyPI upload only in the `publish` job, bound to the `pypi` environment, `id-token: write` only in `sigstore` and `publish`, default token empty | `publish.yml` | repo + policy tests |
+| The built wheel is installed in a clean venv and used from outside the checkout; the test suite shipped in the **sdist** runs against it (the metadata check refuses an sdist that lacks the test helpers, test data, scripts or CHANGELOG) | `release-build.yml` job `smoke` | repo (shell; not yet run on GitHub) |
+| The files signed and uploaded are the files that were built (SHA-256 recorded as job outputs and re-checked) | `pypi-release.yml` (`sigstore`, `publish`) | repo |
+| PyPI upload only in the `publish` job, bound to the `pypi` environment, `id-token: write` only in `sigstore` and `publish`, default token empty | `pypi-release.yml` | repo + policy tests |
 | Third-party actions pinned to commit SHAs | all three release workflows | repo + policy tests |
+| The publishing workflow has its own file name (`pypi-release.yml`) that the PyPI trusted publisher is bound to, so an **older commit** that still carries the former, unguarded `publish.yml` cannot get a token PyPI accepts (GitHub runs the workflow file from the tagged commit) | file name + **PyPI setting (section 3.4)** | repo + owner action |
 | Required human approval of the `pypi` environment | **GitHub setting** | **not enforced by the repository: owner action (section 3)** |
 | Only maintainers can create `v*` tags | **GitHub ruleset** | **owner action (section 3)** |
 | PyPI trusted publisher bound to this workflow and environment | **PyPI project setting** | **owner action (section 3)** |
 | Human code review of the release | process | **not enforced anywhere** |
 
 `release-rehearsal.yml` runs the same `release-build.yml` on pull requests that touch packaging or release
-files and on demand. It publishes nothing, signs nothing, has no environment and no `id-token`.
+files and on demand. Because it is path-filtered it must **not** be configured as a *required* status check (a
+PR that does not touch those paths would wait for it forever). It publishes nothing, signs nothing, has no environment and no `id-token`.
 
 ## 2. What a release needs before the tag is pushed
 1. Qualified non-author review of the diff since the previous release (recorded, with the full 40-character commit).
@@ -77,15 +79,17 @@ JSON
 other two layers.)
 
 **3.3 Protect the default branch** (currently "Branch not protected"): require pull requests and the CI
-checks `lint`, `typecheck`, `bandit`, `tests`, `pip-audit`, and `release-rehearsal / rehearsal`. A required
+checks `lint`, `typecheck`, `bandit`, `tests` and `pip-audit`. Do not require `release-rehearsal` (path-filtered). A required
 approving review is possible only if a second collaborator exists.
 
-**3.4 PyPI trusted publisher** (PyPI project settings → Publishing). Confirm that the only trusted publisher is
-owner `BAder82t`, repository `regaudit-fhe`, workflow file `publish.yml`, environment `pypi`. Remove any other
-entry (for example an older workflow name). This was not inspected.
+**3.4 PyPI trusted publisher** (PyPI project settings → Publishing). **Change the existing publisher from the
+workflow file `publish.yml` to `pypi-release.yml`** (owner `BAder82t`, repository `regaudit-fhe`, environment
+`pypi`) **before the first release from this pipeline**, and remove any other entry. Until it is changed a release
+from the new workflow fails at the upload (fails closed); once it is changed, runs of the old `publish.yml` (still
+present in older commits and tags) can no longer obtain a token PyPI accepts. This was not inspected or changed.
 
 **3.5 Rehearse the publication path without touching the real project.** Make a throw-away fork or a new
-TestPyPI project with its own trusted publisher, point a copy of `publish.yml` at it
+TestPyPI project with its own trusted publisher, point a copy of `pypi-release.yml` at it
 (`repository-url: https://test.pypi.org/legacy/`), and push a `v0.0.0`-style tag **there**. Compare the output
 with `docs/SUPPLY_CHAIN.md` and correct that document. Do not do this in the real repository.
 
@@ -94,7 +98,12 @@ with `docs/SUPPLY_CHAIN.md` and correct that document. Do not do this in the rea
   was reviewed (`actionlint`/ShellCheck) and exercised locally in a Linux container where possible; GitHub
   runner differences, permissions and the environment gate are untested.
 * `release-build.yml` installs `pip-audit` and `cyclonedx-bom` at exact versions but does not hash-pin them or
-  their dependencies.
+  their dependencies, and the wheel's own dependencies are resolved at release time from their lower bounds
+  upward (no lockfile), so the audited environment is a point-in-time resolution.
+* The SBOM is generated from a virtualenv that contains the wheel and its runtime extras only; the generator
+  runs from a separate virtualenv.
+* Old tags and commits keep the workflows they were tagged with. Only the PyPI-side binding to the new file name
+  (3.4) and the environment approval (3.1) limit what a tag on an old commit can do.
 * A tag push that passes every gate still publishes without a human reading the code unless a reviewer is
   configured in 3.1.
 * Yanking a faulty release is a manual PyPI action and is not automated.

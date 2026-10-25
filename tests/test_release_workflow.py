@@ -14,7 +14,7 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-PUBLISH = WORKFLOWS / "publish.yml"
+PUBLISH = WORKFLOWS / "pypi-release.yml"
 BUILD = WORKFLOWS / "release-build.yml"
 REHEARSAL = WORKFLOWS / "release-rehearsal.yml"
 SHA = re.compile(r"@[0-9a-f]{40}(\s|$)")
@@ -142,3 +142,98 @@ def test_the_rehearsal_cannot_publish():
     assert list(wf["jobs"]) == ["rehearsal"]
     assert wf["jobs"]["rehearsal"]["uses"] == "./.github/workflows/release-build.yml"
     assert wf["jobs"]["rehearsal"]["with"]["expected_tag"] == ""
+
+
+# --- controls that an earlier version of these tests did not pin down ---------------------------------------
+
+ALL = (PUBLISH, BUILD, REHEARSAL)
+
+
+def _jobs(path: Path) -> dict:
+    return _load(path)["jobs"]
+
+
+def _all_steps(path: Path):
+    for name, job in _jobs(path).items():
+        for step in job.get("steps", []):
+            yield name, step
+
+
+def test_no_release_job_or_step_can_continue_after_a_failure():
+    for path in ALL:
+        text = path.read_text(encoding="utf-8")
+        assert "continue-on-error" not in text, path.name
+        assert not re.search(r"\b(always|failure|cancelled)\(\)", text), (
+            f"{path.name}: status-check override"
+        )
+        for block in _run_blocks(_load(path)):
+            assert "|| true" not in block and "|| :" not in block and "set +e" not in block, (
+                path.name
+            )
+
+
+def test_the_job_dependency_graph_is_exactly_the_intended_one():
+    rel = _jobs(PUBLISH)
+    assert rel["guard"].get("needs") is None
+    assert rel["build"]["needs"] == "guard"
+    assert rel["sigstore"]["needs"] == "build"
+    assert set(rel["publish"]["needs"]) == {"guard", "build", "sigstore"}
+    assert set(rel["github-release"]["needs"]) == {"build", "sigstore", "publish"}
+    build = _jobs(BUILD)
+    assert build["build"].get("needs") is None
+    for name in ("smoke", "audit", "sbom"):
+        assert build[name]["needs"] == "build", name
+
+
+def test_every_job_that_handles_the_artifacts_rechecks_their_digests():
+    need = ("sha256sum dist/*.whl", "sha256sum dist/*.tar.gz", "WHEEL_SHA256", "SDIST_SHA256")
+    for path, jobs in ((BUILD, ("smoke", "audit", "sbom")), (PUBLISH, ("sigstore", "publish"))):
+        for job in jobs:
+            blocks = "\n".join(s.get("run", "") for s in _jobs(path)[job]["steps"])
+            for needle in need:
+                assert needle in blocks, f"{path.name}:{job} lacks {needle!r}"
+
+
+def test_the_metadata_check_receives_the_expected_tag_and_the_audit_is_strict():
+    build = _jobs(BUILD)
+    check = next(s for s in build["build"]["steps"] if s.get("name", "").startswith("Version, tag"))
+    assert check["env"]["EXPECTED_TAG"] == "${{ inputs.expected_tag }}"
+    assert 'check_release_metadata.py --dist dist --tag "$EXPECTED_TAG"' in check["run"]
+    audit = "\n".join(s.get("run", "") for s in build["audit"]["steps"])
+    assert "pip-audit --strict --vulnerability-service osv" in audit.replace(
+        '"$RUNNER_TEMP/venv/bin/', ""
+    ).replace('"', "") or ("--strict" in audit and "pip-audit" in audit)
+    assert "--strict" in audit
+
+
+def test_the_guard_fetches_the_tag_object_before_testing_its_type():
+    guard = "\n".join(s.get("run", "") for s in _jobs(PUBLISH)["guard"]["steps"])
+    assert guard.index("git fetch --force --no-tags origin") < guard.index("git cat-file -t")
+
+
+def test_only_the_release_job_has_write_access_and_nothing_gets_attestation_write():
+    text = PUBLISH.read_text(encoding="utf-8")
+    assert "attestations: write" not in text
+    writers = {
+        n
+        for n, j in _jobs(PUBLISH).items()
+        if (j.get("permissions") or {}).get("contents") == "write"
+    }
+    assert writers == {"github-release"}
+    assert _jobs(PUBLISH)["publish"]["permissions"] == {"contents": "read", "id-token": "write"}
+    for path in (BUILD, REHEARSAL):
+        for name, job in _jobs(path).items():
+            assert (job.get("permissions") or {}) == {"contents": "read"}, f"{path.name}:{name}"
+
+
+def test_the_sbom_tool_does_not_share_a_virtualenv_with_the_thing_it_describes():
+    sbom = "\n".join(s.get("run", "") for s in _jobs(BUILD)["sbom"]["steps"])
+    assert "$RUNNER_TEMP/subject" in sbom and "$RUNNER_TEMP/tool" in sbom
+    assert '"$RUNNER_TEMP/subject/bin/python"' in sbom.split("environment --output-format")[1]
+
+
+def test_the_release_workflow_is_the_only_one_named_for_the_pypi_trusted_publisher():
+    assert PUBLISH.name == "pypi-release.yml"
+    assert not (WORKFLOWS / "publish.yml").exists(), (
+        "the former publish.yml must not come back under its old name"
+    )

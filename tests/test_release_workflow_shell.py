@@ -18,7 +18,7 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-PUBLISH = WORKFLOWS / "publish.yml"
+PUBLISH = WORKFLOWS / "pypi-release.yml"
 pytestmark = [
     pytest.mark.skipif(not PUBLISH.is_file(), reason="workflows are not part of this checkout"),
     pytest.mark.skipif(
@@ -83,6 +83,9 @@ GUARD = "the tag, the commit and the branch are acceptable"
 
 
 def _guard(repo: Path, **over: str):
+    _git(
+        repo, "push", "-q", "--force", "origin", "--tags"
+    )  # the runner fetches the tag from the remote
     return _bash(
         _step("guard", "Check the trigger, the tag and the commit"),
         repo,
@@ -137,6 +140,7 @@ def test_guard_refuses_a_tag_that_points_elsewhere_than_the_event_commit(repo):
     _git(repo, "commit", "-q", "-m", "two")
     _git(repo, "push", "-q", "origin", "master")
     _git(repo, "tag", "-a", "v1.2.3", "-m", "release", first)
+    _git(repo, "push", "-q", "--force", "origin", "--tags")
     r = _bash(
         _step("guard", "Check the trigger, the tag and the commit"),
         repo,

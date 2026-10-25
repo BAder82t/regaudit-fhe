@@ -1,6 +1,6 @@
 name: release-rehearsal
 
-# Runs the SAME build-and-test workflow that publish.yml uses, on pull requests that touch packaging or
+# Runs the SAME build-and-test workflow that pypi-release.yml uses, on pull requests that touch packaging or
 # release files and on demand. It publishes nothing, signs nothing and holds no credentials: the token is
 # read-only, there is no id-token and no environment.
 
@@ -12,7 +12,7 @@ on:
       - "src/**"
       - "scripts/**"
       - "tests/test_installed_distribution.py"
-      - ".github/workflows/publish.yml"
+      - ".github/workflows/pypi-release.yml"
       - ".github/workflows/release-build.yml"
       - ".github/workflows/release-rehearsal.yml"
   workflow_dispatch: {}

@@ -35,20 +35,32 @@ def _root(tmp_path: Path, pyproject="0.1.0", init="0.1.0", lib="0.1.0") -> Path:
     return root
 
 
-def _wheel(path: Path, version="0.1.0", schemas=None, py_typed=True):
+def _wheel(
+    path: Path, version="0.1.0", schemas=None, py_typed=True, name="regaudit-fhe", extra=None
+):
     names = SCHEMAS if schemas is None else schemas
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
             f"regaudit_fhe-{version}.dist-info/METADATA",
-            f"Metadata-Version: 2.4\nName: x\nVersion: {version}\n",
+            f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n",
         )
         for n in names:
             zf.writestr(f"regaudit_fhe/schemas/{n}", "{}")
         if py_typed:
             zf.writestr("regaudit_fhe/py.typed", "")
+        for member in extra or ():
+            zf.writestr(member, "x")
 
 
-def _sdist(path: Path, version="0.1.0", schemas=None, py_typed=True, extra=None, omit=None):
+def _sdist(
+    path: Path,
+    version="0.1.0",
+    schemas=None,
+    py_typed=True,
+    extra=None,
+    omit=None,
+    name="regaudit-fhe",
+):
     top = f"regaudit_fhe-{version}"
     names = SCHEMAS if schemas is None else schemas
 
@@ -64,10 +76,15 @@ def _sdist(path: Path, version="0.1.0", schemas=None, py_typed=True, extra=None,
             "tests/test_installed_distribution.py",
             "scripts/check_release_metadata.py",
             "scripts/smoke_installed_wheel.py",
+            "CHANGELOG.md",
         ):
             if support not in (omit or ()):
                 add(tf, f"{top}/{support}")
-        add(tf, f"{top}/PKG-INFO", f"Metadata-Version: 2.4\nName: x\nVersion: {version}\n".encode())
+        add(
+            tf,
+            f"{top}/PKG-INFO",
+            f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n".encode(),
+        )
         for n in names:
             add(tf, f"{top}/src/regaudit_fhe/schemas/{n}", b"{}")
         if py_typed:
@@ -179,8 +196,38 @@ def test_the_real_repository_sources_agree_on_one_version():
 
 @pytest.mark.parametrize(
     "missing",
-    ["tests/_asgi.py", "tests/vectors/report_v2/vectors.json", "scripts/smoke_installed_wheel.py"],
+    [
+        "tests/_asgi.py",
+        "tests/vectors/report_v2/vectors.json",
+        "scripts/smoke_installed_wheel.py",
+        "CHANGELOG.md",
+    ],
 )
 def test_an_sdist_that_cannot_run_the_test_suite_is_refused(tmp_path, missing, capsys):
     assert _run(_root(tmp_path), _dist(tmp_path, sdist={"omit": [missing]})) == 1
     assert "cannot run the test suite" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "member", ["evil_pkg/__init__.py", "evil.pth", "regaudit_fhe_evil/x.py", "setup.py"]
+)
+def test_a_wheel_with_members_outside_the_package_is_refused(tmp_path, member, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": [member]})) == 1
+    assert "outside regaudit_fhe/" in capsys.readouterr().err
+
+
+def test_a_wheel_with_another_project_name_is_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"name": "somebody-else"})) == 1
+    assert "Name is not regaudit-fhe" in capsys.readouterr().err
+
+
+def test_an_sdist_with_another_project_name_is_refused(tmp_path):
+    assert _run(_root(tmp_path), _dist(tmp_path, sdist={"name": "somebody-else"})) == 1
+
+
+def test_an_sdist_with_a_member_outside_its_top_directory_is_refused(tmp_path, capsys):
+    def stray(tf, top):
+        tf.addfile(tarfile.TarInfo("elsewhere/evil.py"), io.BytesIO(b""))
+
+    assert _run(_root(tmp_path), _dist(tmp_path, sdist={"extra": stray})) == 1
+    assert "members outside" in capsys.readouterr().err

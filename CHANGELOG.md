@@ -35,7 +35,9 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
 
 ### Release process
 
-- `publish.yml` was rewritten: the only trigger is a strict `vX.Y.Z` tag push (no `workflow_dispatch`);
+- The publishing workflow was rewritten **and renamed from `publish.yml` to `pypi-release.yml`** (the PyPI trusted
+  publisher must be changed to the new file name, which also stops older commits that still contain the
+  old, unguarded `publish.yml` from presenting the trusted name): the only trigger is a strict `vX.Y.Z` tag push (no `workflow_dispatch`);
   a `guard` job requires an annotated tag on the event commit that is reachable from the default branch;
   the tag, the source versions and the built wheel/sdist metadata must agree
   (`scripts/check_release_metadata.py`); the built wheel is installed and tested on Python 3.10-3.13 from
@@ -45,6 +47,7 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
   runs the same build-and-test without publishing. `docs/RELEASE_PROCESS.md` lists what GitHub and PyPI
   settings must additionally be configured by the owner. None of this has been run on GitHub Actions.
 - The build backend requirement is now bounded: `setuptools>=70.1,<85`.
+- The sdist now ships `tests/` (helpers and data), `scripts/`, `schemas/` and `CHANGELOG.md`, so it can run the test suite against an installed wheel; `scripts/check_release_metadata.py` refuses an sdist that cannot, and a wheel or sdist with unexpected members or another project name.
 
 ### Known limitations carried into this release
 - `verify_receipt(env)` without `strict=True` or trust material returns `True` for any envelope whose
