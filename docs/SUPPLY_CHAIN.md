@@ -19,6 +19,9 @@ attestation surface.
 | Sigstore build attestation | `attestations: true` in publish action                    | `.github/workflows/publish.yml`                   |
 | Release-asset checksums    | `sha256sum dist/*` uploaded as a release asset            | `.github/workflows/publish.yml`                   |
 
+The release pipeline, its controls and the GitHub/PyPI settings it depends on are described in
+[RELEASE_PROCESS.md](RELEASE_PROCESS.md); the pipeline has not yet run on GitHub Actions.
+
 Every artefact uploaded to PyPI carries a Sigstore-backed publish
 attestation that links the release to the GitHub Actions workflow run
 that produced it. The release tag, SBOM, and SHA-256 checksum file are
