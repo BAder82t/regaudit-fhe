@@ -231,3 +231,17 @@ def test_an_sdist_with_a_member_outside_its_top_directory_is_refused(tmp_path, c
 
     assert _run(_root(tmp_path), _dist(tmp_path, sdist={"extra": stray})) == 1
     assert "members outside" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "regaudit_fhe/payload.bin",
+        "regaudit_fhe/schemas/evil.json",
+        "regaudit_fhe-0.1.0.dist-info/extra.pth",
+        "regaudit_fhe/schemas/sub/x.schema.json",
+    ],
+)
+def test_unexpected_files_inside_the_package_or_dist_info_are_refused(tmp_path, member, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": [member]})) == 1
+    assert "outside regaudit_fhe/" in capsys.readouterr().err

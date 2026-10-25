@@ -62,6 +62,29 @@ def _schema_names(names: list[str], marker: str) -> set[str]:
     return {Path(n).name for n in names if marker in n and n.endswith(".schema.json")}
 
 
+DIST_INFO_FILES = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt"}
+
+
+def _allowed_wheel_member(name: str, version: str) -> bool:
+    """Only package code, the typed marker, the 14 schemas and the standard dist-info files."""
+    if name.startswith("regaudit_fhe/"):
+        rest = name[len("regaudit_fhe/") :]
+        if rest == "py.typed" or (rest.endswith(".py") and ".." not in Path(rest).parts):
+            return True
+        return (
+            rest.startswith("schemas/")
+            and Path(rest).name in EXPECTED_SCHEMAS
+            and rest.count("/") == 1
+        )
+    info = f"regaudit_fhe-{version}.dist-info/"
+    if name.startswith(info):
+        rest = name[len(info) :]
+        return rest in DIST_INFO_FILES or (
+            rest.startswith("licenses/") and rest.count("/") == 1 and rest != "licenses/"
+        )
+    return False
+
+
 def check_wheel(path: Path, version: str) -> list[str]:
     problems: list[str] = []
     with zipfile.ZipFile(path) as zf:
@@ -73,8 +96,7 @@ def check_wheel(path: Path, version: str) -> list[str]:
         got = _first(r"^Version:\s*(\S+)", meta_text, "wheel Version")
         if _first(r"^Name:\s*(\S+)", meta_text, "wheel Name") != "regaudit-fhe":
             problems.append(f"{path.name}: METADATA Name is not regaudit-fhe")
-        allowed = ("regaudit_fhe/", f"regaudit_fhe-{version}.dist-info/")
-        stray = [n for n in names if not n.startswith(allowed)]
+        stray = [n for n in names if not _allowed_wheel_member(n, version)]
         if stray:
             problems.append(
                 f"{path.name}: members outside regaudit_fhe/ and its dist-info: {stray[:5]}"

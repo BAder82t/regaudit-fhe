@@ -237,3 +237,57 @@ def test_the_release_workflow_is_the_only_one_named_for_the_pypi_trusted_publish
     assert not (WORKFLOWS / "publish.yml").exists(), (
         "the former publish.yml must not come back under its old name"
     )
+
+
+# --- gaps found by the second review's re-verification ---------------------------------------------------------
+
+
+def test_no_gate_job_or_step_can_be_switched_off_with_an_if():
+    """A job-level `if: false` would skip a gate without failing the caller."""
+    for path in ALL:
+        for name, job in _jobs(path).items():
+            if path == PUBLISH and name == "publish":
+                assert job["if"] == "github.event_name == 'push' && github.ref_type == 'tag'"
+                continue
+            assert "if" not in job, f"{path.name}:{name} has a job-level if"
+            for step in job.get("steps", []):
+                assert "if" not in step, f"{path.name}:{name}: step {step.get('name')!r} has an if"
+
+
+def test_every_checkout_drops_credentials_and_the_guard_fetches_full_history():
+    for path in ALL:
+        for _name, step in _all_steps(path):
+            if "actions/checkout@" in step.get("uses", ""):
+                assert step["with"]["persist-credentials"] is False, path.name
+    guard_checkout = next(
+        s for s in _jobs(PUBLISH)["guard"]["steps"] if "checkout" in s.get("uses", "")
+    )
+    assert guard_checkout["with"]["fetch-depth"] == 0
+
+
+def test_the_pypi_upload_step_asks_for_attestations_from_the_dist_directory_only():
+    publish_step = next(
+        s for s in _jobs(PUBLISH)["publish"]["steps"] if "pypi-publish" in s.get("uses", "")
+    )
+    assert publish_step["with"] == {"packages-dir": "dist", "attestations": True}
+
+
+def test_the_smoke_step_forbids_the_checkout_and_no_run_block_swallows_a_failure():
+    smoke = next(
+        s for s in _jobs(BUILD)["smoke"]["steps"] if s.get("name", "").startswith("Smoke-test")
+    )
+    assert "--forbid-path" in smoke["run"]
+    for path in ALL:
+        for block in _run_blocks(_load(path)):
+            assert not re.search(r";\s*true\b", block), path.name
+
+
+def test_manifest_ships_what_the_sdist_needs_to_run_the_suite():
+    manifest = (WORKFLOWS.parents[1] / "MANIFEST.in").read_text(encoding="utf-8")
+    for needle in (
+        "recursive-include tests",
+        "recursive-include scripts",
+        "recursive-include schemas",
+        "include CHANGELOG.md",
+    ):
+        assert needle in manifest, needle
