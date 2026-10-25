@@ -37,9 +37,10 @@ def _step(job: str, name: str) -> str:
 
 def _bash(script: str, cwd: Path, env: dict[str, str]):
     full = {"PATH": os.environ["PATH"], "HOME": str(cwd), "GIT_CONFIG_NOSYSTEM": "1", **env}
-    return subprocess.run(  # noqa: S603, S607 - fixed argv, scratch directories
-        ["bash", "-c", script], cwd=cwd, env=full, capture_output=True, text=True, check=False
-    )
+    return subprocess.run(  # noqa: S603 - fixed argv, scratch directories
+        ["bash", "-c", script],  # noqa: S607
+        cwd=cwd, env=full, capture_output=True, text=True, check=False,
+    )  # fmt: skip
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -49,9 +50,10 @@ def _git(cwd: Path, *args: str) -> str:
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
     }  # fmt: skip
-    out = subprocess.run(  # noqa: S603, S607 - fixed argv, scratch directories
-        ["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True
-    )
+    out = subprocess.run(  # noqa: S603 - fixed argv, scratch directories
+        ["git", *args],  # noqa: S607
+        cwd=cwd, env=env, capture_output=True, text=True, check=True,
+    )  # fmt: skip
     return out.stdout.strip()
 
 
