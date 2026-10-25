@@ -29,17 +29,29 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
 - The `server` module no longer re-exports `VerifyRequest`, `verify_receipt`, `AuditEnvelope` or
   `BaseModel` (the request model was removed deliberately; the others were incidental imports).
 
-### Known limitations carried into this release
+- **`GET /readyz` now answers HTTP 503 (same JSON body, `"ready": false`) when the schema bundle cannot be
+  loaded**, instead of 200. A probe that looks only at the status code now sees "not ready". `/healthz`
+  is unchanged (200 while the process lives). If you scrape the old behaviour, read the `ready` field.
 
-- `GET /readyz` answers HTTP 200 with `"ready": false` when the schema bundle is missing; an HTTP
-  probe that looks only at the status code will treat that instance as ready. The container
-  `HEALTHCHECK` uses `/healthz`.
+### Release process
+
+- `publish.yml` was rewritten: the only trigger is a strict `vX.Y.Z` tag push (no `workflow_dispatch`);
+  a `guard` job requires an annotated tag on the event commit that is reachable from the default branch;
+  the tag, the source versions and the built wheel/sdist metadata must agree
+  (`scripts/check_release_metadata.py`); the built wheel is installed and tested on Python 3.10-3.13 from
+  outside the checkout before anything is signed; the digests recorded at build time are re-checked
+  before upload; PyPI upload is confined to one job in the protected `pypi` environment; the default
+  token has no permissions; third-party actions are pinned to commit SHAs. A `release-rehearsal` workflow
+  runs the same build-and-test without publishing. `docs/RELEASE_PROCESS.md` lists what GitHub and PyPI
+  settings must additionally be configured by the owner. None of this has been run on GitHub Actions.
+- The build backend requirement is now bounded: `setuptools>=70.1,<85`.
+
+### Known limitations carried into this release
 - `verify_receipt(env)` without `strict=True` or trust material returns `True` for any envelope whose
   signature matches its own embedded key (documented; use `verify_envelope`/`verify_report` with a trust store).
-- `/docs`, `/openapi.json`, `/healthz`, `/readyz` and `/version` are served without authentication.
-- The build backend is not pinned (`setuptools>=68`), setuptools warns that the table-form
-  `project.license` and the license classifiers stop being supported on 2027-02-18, and the sdist
-  archive is not byte-reproducible (the wheel is).
+- `/docs`, `/openapi.json`, `/healthz`, `/readyz` and `/version` are served without authentication by design (see `docs/DEPLOYMENT.md`).
+- setuptools warns that the table-form `project.license` and the license classifiers stop being supported
+  on 2027-02-18, and the sdist archive is not byte-reproducible (the wheel is).
 - `requirements-dev.txt` is stale and not authoritative (see `docs/SUPPLY_CHAIN.md`).
 
 ### Tests

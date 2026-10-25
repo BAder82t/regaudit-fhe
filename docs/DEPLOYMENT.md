@@ -78,7 +78,7 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | Method | Path                              | Auth          | Purpose                                          |
 | ------ | --------------------------------- | ------------- | ------------------------------------------------ |
 | GET    | `/healthz`                        | none          | Liveness probe — process is alive.              |
-| GET    | `/readyz`                         | none          | Readiness probe + privacy-boundary warning.     |
+| GET    | `/readyz`                         | none          | Readiness probe + privacy-boundary warning. **200** when ready, **503** (same JSON body, `ready: false`) when the schema bundle cannot be loaded. |
 | GET    | `/version`                        | none          | Library + Python + TenSEAL versions.            |
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
@@ -174,7 +174,13 @@ docker run --rm -p 8080:8080 \
 The image runs as the unprivileged `regaudit` (UID 10001) account, has
 no shell installed, and exposes only port 8080. The
 `HEALTHCHECK` directive polls `/healthz` every 30 seconds; configure a
-separate `/readyz` probe at the orchestrator layer.
+separate `/readyz` probe at the orchestrator layer. `/healthz` stays 200 while the process is alive even
+when `/readyz` answers 503, so a failing readiness probe removes an instance from rotation without
+restarting it.
+
+`/healthz`, `/readyz`, `/version`, `/docs` and `/openapi.json` are served without authentication by design
+(`/version` discloses the library, Python and TenSEAL versions). Put them behind your ingress policy if
+that is not acceptable; `/v1/*` always requires a bearer token.
 
 To bake in the encrypted backend, uncomment the `[fhe]` install line in
 the Dockerfile (adds ~120 MiB).
