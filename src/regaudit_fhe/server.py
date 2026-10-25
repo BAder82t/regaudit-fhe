@@ -458,6 +458,12 @@ _RESERVED_LOG_FIELDS = frozenset(
 )
 
 
+# json.dumps(ensure_ascii=False) escapes "\n" and "\r" but leaves these Unicode line
+# separators raw, and Unicode-aware splitters (str.splitlines, some shippers) treat them as
+# record boundaries. Escaping them keeps one log record on one line; the JSON is unchanged.
+_LINE_BREAKS = {0x85: "\\u0085", 0x2028: "\\u2028", 0x2029: "\\u2029"}
+
+
 class _JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         import json
@@ -473,7 +479,7 @@ class _JSONFormatter(logging.Formatter):
                 continue
             if isinstance(value, (str, int, float, bool, type(None))):
                 payload[key] = value
-        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True).translate(_LINE_BREAKS)
 
 
 def configure_logging(level: int = logging.INFO) -> logging.Logger:
@@ -628,6 +634,26 @@ def _extract_bearer(request: Request) -> str | None:
     return None
 
 
+MIN_HMAC_KEY_BYTES = 16
+
+
+def _validated_hmac_key(key: object) -> bytes:
+    """Return ``key`` as bytes, or raise if it cannot be a usable HMAC key.
+
+    An explicitly supplied key must be at least :data:`MIN_HMAC_KEY_BYTES` long. Length is a
+    floor, not proof of randomness: the key must also be unpredictable (use
+    ``os.urandom``). Nothing about the value is put in the error message.
+    """
+    if not isinstance(key, (bytes, bytearray)):
+        raise TypeError(f"HMAC key must be bytes, not {type(key).__name__}")
+    if len(key) < MIN_HMAC_KEY_BYTES:
+        raise ValueError(
+            f"HMAC key must be at least {MIN_HMAC_KEY_BYTES} bytes (got {len(key)}); "
+            "omit it to have a secure random key generated"
+        )
+    return bytes(key)
+
+
 def _hash_token(token: str, key: bytes) -> bytes:
     """Keyed digest of a bearer token, for constant-time comparison only.
 
@@ -662,6 +688,7 @@ def make_auth_dependency(
     is the hex prefix of the hashed token, never the raw bearer — so
     log lines and rate-limit buckets do not leak credentials.
     """
+    salt = _validated_hmac_key(salt)
     frozen = _freeze_api_keys(config.api_keys, salt)
 
     def dependency(request: Request) -> Caller:
@@ -723,6 +750,13 @@ def build_app(
     self-signed check re-verifies profile and network exposure on every
     request. What remains CLI-only is the *startup* bind-host check, because
     only the CLI knows its bind address; see ``docs/DEPLOYMENT.md``.
+
+    ``salt`` is the HMAC key for bearer-token comparison. Leave it ``None`` (the
+    default and the CLI's behaviour) for a fresh ``os.urandom(32)`` key per
+    process. An explicit key must be ``bytes`` of at least 16 bytes, otherwise
+    ``ValueError``/``TypeError`` is raised; it is never replaced silently.
+    Length is only a floor: the key must also be unpredictable, because the
+    ``key_id`` written to logs is derived from it.
     """
     if not HAVE_FASTAPI:
         raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
@@ -730,7 +764,8 @@ def build_app(
     policy = config.verification_policy()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
-    auth_salt = salt if salt is not None else os.urandom(32)
+    # An explicit key is validated, never silently replaced: a bad one is a configuration error.
+    auth_salt = _validated_hmac_key(salt) if salt is not None else os.urandom(32)
 
     if config.dev_mode:
         logger.warning("dev_mode_enabled", extra={"warning": "auth disabled, do not use in prod"})

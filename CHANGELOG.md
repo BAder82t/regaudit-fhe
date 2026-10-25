@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — post-merge security maintenance
+
+Follow-up to the security-maintenance change, from a retrospective (AI-assisted, static)
+review. No change to the authentication design, the trust schema or any dependency.
+
+### Security
+
+- **Explicit HMAC keys are validated.** `build_app(salt=...)` and
+  `make_auth_dependency(salt=...)` now raise `ValueError` for a key shorter than 16 bytes
+  (including empty) and `TypeError` for a non-bytes key. An invalid key is never replaced
+  silently, and error messages never contain key material. Omitting `salt` (the default,
+  and what `regaudit-fhe serve` does) still generates `os.urandom(32)`.
+  **Compatibility:** an embedder passing a key under 16 bytes must now pass a longer,
+  unpredictable one (`os.urandom(32)`). No shipped example, test or doc did so. Length is
+  only a floor; it does not make a predictable key secure.
+- **Structured logs keep one record on one line.** `json.dumps(ensure_ascii=False)` left
+  U+0085, U+2028 and U+2029 unescaped, so Unicode-aware line splitters could see a forged
+  second record in attacker-influenced text. They are now escaped (`\u0085` etc.); the JSON
+  is equivalent and `\n` / `\r` were already escaped.
+
+### Tests
+
+- The FastAPI-dependent regressions moved to `tests/test_server_security_maintenance.py`.
+  Only a missing FastAPI skips that module; a broken `regaudit_fhe.server` import now fails.
+  The `_OnceFlag` and examples tests in `tests/test_security_maintenance.py` run in a
+  `[dev]`-only environment (previously a module-level skip silently dropped them).
+
 ## Unreleased — security maintenance (CodeQL findings)
 
 Confined to confirmed code-scanning findings; independent of any Phase 3B work and of
