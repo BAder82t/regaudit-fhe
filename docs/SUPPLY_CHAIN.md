@@ -28,6 +28,14 @@ attached to the matching GitHub Release page.
 
 ## Verifying a wheel from PyPI
 
+> **Status: this recipe has not been exercised.** No release has been produced by the current
+> `publish.yml` since its actions were bumped to new major versions, so neither the attestation
+> location nor the identity strings below have been checked against a real release. In particular
+> `pip download` fetches only the wheel: the `.sigstore` bundles are uploaded to the GitHub Release
+> (and as a workflow artefact), not to PyPI, so download the bundle from the Release assets (or the
+> attestation from the PyPI provenance URL). The certificate identity names the tag the workflow ran
+> on, so a run that was not triggered by that tag will not match it.
+
 > The procedure below assumes Python 3.10+, `sigstore-python`, and
 > `cyclonedx-py` are installed on the verifier host:
 >
@@ -96,17 +104,19 @@ Production users should pin the wheel in their own application's lockfile.
 
 ## Reproducible builds
 
-The release pipeline aims for byte-identical sdist output across
-runs at the same tag. Properties that the current build inherits
-from `python-build`:
+Measured for the 0.1.0 candidate (setuptools 82.0.1, `python -m build` with build isolation, two
+clean checkouts in different directories, `SOURCE_DATE_EPOCH` set to the commit time):
 
-  - `SOURCE_DATE_EPOCH` is automatically set by `python-build` from
-    the latest VCS commit timestamp.
-  - The wheel is `py3-none-any` (no compiled extensions in
-    `regaudit-fhe` itself; CKKS support comes from the optional
-    `tenseal` dependency, which is built separately).
-  - `setuptools` writes deterministic METADATA / RECORD entries when
-    `SOURCE_DATE_EPOCH` is set.
+  - **The wheel is byte-identical** across builds (same SHA-256), and a wheel built from the sdist has
+    the same members with identical contents as the directly built wheel.
+  - **The sdist is not byte-identical.** Its file contents are identical (`diff -r` of the unpacked
+    trees is empty), but the tar member modification times, owner and group names, and the gzip header
+    timestamp reflect the build, so the archive hash differs between builds. `SOURCE_DATE_EPOCH` does
+    not make the sdist archive deterministic with this toolchain. Do not rely on an sdist hash to
+    verify a rebuild; compare unpacked contents, or verify the Sigstore bundle published with the
+    release.
+  - The wheel is `py3-none-any` (no compiled extensions in `regaudit-fhe` itself; CKKS support comes
+    from the optional `tenseal` dependency, which is built separately).
 
 Caveats:
 
@@ -117,15 +127,16 @@ Caveats:
     pre-built per-platform from PyPI; verifying TenSEAL itself is the
     user's responsibility.
 
-To reproduce locally::
+To reproduce the wheel locally::
 
     git checkout v<VERSION>
     python -m pip install --upgrade pip build
-    python -m build
-    sha256sum dist/*
+    SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) python -m build
+    sha256sum dist/*.whl
 
-The hash should match the `SHA256SUMS` file uploaded with the matching
-release.
+The wheel hash should match the `SHA256SUMS` file uploaded with the matching release when the toolchain
+versions match. (Not demonstrated against a published release: no release has been built from this
+pipeline since the reproducibility measurement above.)
 
 ---
 

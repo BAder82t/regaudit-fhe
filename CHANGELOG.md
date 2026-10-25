@@ -18,6 +18,30 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
   next to the working directory must stop; that directory could previously decide which schema
   validated a payload.
 
+### Changed
+
+- **Dependency floors were raised since 0.0.8:** `cryptography>=50.0.2` (was `>=42`), `tenseal>=0.3.16`
+  (was `>=0.3.14`), `fastapi>=0.143.0` (was `>=0.115`), `uvicorn[standard]>=0.54.0` (was `>=0.30`),
+  `pydantic>=2.14.0` (was `>=2`), plus higher floors for the development tools. The `dev` extra now
+  also lists `setuptools>=70.1`. The suite passes with the runtime dependencies pinned at their floors.
+- **The Docker base image moved from `python:3.12-slim-bookworm` to `python:3.14-slim-bookworm`.**
+- `regaudit-fhe schema --list` and `/v1/schemas` now include `envelope.v2` (14 names, was 13).
+- The `server` module no longer re-exports `VerifyRequest`, `verify_receipt`, `AuditEnvelope` or
+  `BaseModel` (the request model was removed deliberately; the others were incidental imports).
+
+### Known limitations carried into this release
+
+- `GET /readyz` answers HTTP 200 with `"ready": false` when the schema bundle is missing; an HTTP
+  probe that looks only at the status code will treat that instance as ready. The container
+  `HEALTHCHECK` uses `/healthz`.
+- `verify_receipt(env)` without `strict=True` or trust material returns `True` for any envelope whose
+  signature matches its own embedded key (documented; use `verify_envelope`/`verify_report` with a trust store).
+- `/docs`, `/openapi.json`, `/healthz`, `/readyz` and `/version` are served without authentication.
+- The build backend is not pinned (`setuptools>=68`), setuptools warns that the table-form
+  `project.license` and the license classifiers stop being supported on 2027-02-18, and the sdist
+  archive is not byte-reproducible (the wheel is).
+- `requirements-dev.txt` is stale and not authoritative (see `docs/SUPPLY_CHAIN.md`).
+
 ### Tests
 
 - `tests/test_installed_distribution.py` builds the sdist and wheel (and a wheel from the sdist),
@@ -34,7 +58,7 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
 ## 0.1.0 — post-merge security maintenance
 
 Follow-up to the security-maintenance change, from a retrospective (AI-assisted, static)
-review. No change to the authentication design, the trust schema or any dependency.
+review. No change to the authentication design, the trust schema or any dependency *in that follow-up*; relative to the published 0.0.8 the dependency floors did change (see "Changed" under 0.1.0 above).
 
 ### Security
 
