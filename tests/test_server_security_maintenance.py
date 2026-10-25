@@ -105,7 +105,9 @@ def _client():
 
 @needs_httpx
 def test_readyz_is_ready_with_no_error_text_when_healthy():
-    body = _client().get("/readyz").json()
+    r = _client().get("/readyz")
+    body = r.json()
+    assert r.status_code == 200
     assert body["ready"] is True and body["error"] is None
     assert "privacy_boundary_warning" in body
 
@@ -120,6 +122,7 @@ def test_readyz_does_not_leak_exception_detail(monkeypatch):
     monkeypatch.setattr(server, "load_schema", broken)
     r = _client().get("/readyz")
     body = r.json()
+    assert r.status_code == 503
     assert body["ready"] is False
     assert body["error"] == "schema bundle unavailable"
     assert secret not in r.text and "RuntimeError" not in r.text and "/Users" not in r.text
@@ -279,3 +282,31 @@ def test_readyz_failure_with_hostile_detail_logs_exactly_one_valid_json_line(mon
     assert parsed["error"] == _HOSTILE and "injected" not in parsed
     # no second apparent record: every emitted line is itself valid JSON
     assert all(isinstance(json.loads(ln), dict) for ln in buf.getvalue().splitlines() if ln)
+
+
+@needs_httpx
+def test_readyz_is_503_when_the_schema_bundle_is_missing_from_the_package(monkeypatch, tmp_path):
+    """A status-code-only probe must see 'not ready' as a failure (real loader, not a stub)."""
+    from regaudit_fhe import schemas
+
+    schemas.load_schema.cache_clear()  # an earlier test may have cached the schema
+    monkeypatch.setattr(schemas, "__file__", str(tmp_path / "schemas.py"))  # no schemas/ next to it
+    try:
+        r = _client().get("/readyz")
+    finally:
+        monkeypatch.undo()
+        schemas.load_schema.cache_clear()
+    assert r.status_code == 503
+    assert r.json()["ready"] is False
+    assert str(tmp_path) not in r.text
+
+
+@needs_httpx
+def test_healthz_stays_200_when_not_ready(monkeypatch):
+    """Liveness must not follow readiness, or an orchestrator would restart a live process."""
+
+    def broken(name):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(server, "load_schema", broken)
+    assert _client().get("/healthz").status_code == 200

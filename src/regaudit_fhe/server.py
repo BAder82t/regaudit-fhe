@@ -818,7 +818,7 @@ def build_app(
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
+    def readyz() -> Any:
         try:
             load_schema("envelope")
             ready = True
@@ -832,11 +832,15 @@ def build_app(
                 "readyz_schema_unavailable",
                 extra={"error_type": type(exc).__name__, "error": str(exc)},
             )
-        return {
-            "ready": ready,
-            "error": error,
-            "privacy_boundary_warning": PRIVACY_WARNING,
-        }
+        # A readiness probe that looks only at the status code must see "not ready" as a non-2xx.
+        return JSONResponse(
+            status_code=200 if ready else 503,
+            content={
+                "ready": ready,
+                "error": error,
+                "privacy_boundary_warning": PRIVACY_WARNING,
+            },
+        )
 
     @app.get("/version")
     def version() -> dict[str, str]:
