@@ -9,9 +9,8 @@ wheel into a temporary directory, and exercise it in a subprocess whose working 
 the repository. The subprocess asserts that ``regaudit_fhe`` was imported from the unpacked wheel, not
 from the source tree.
 
-They need the ``setuptools`` build backend. If the running interpreter has none (a fresh Python 3.12+
-venv does not), a throwaway venv with ``setuptools`` is created, which needs network access. If neither is
-possible the tests are skipped locally; under ``CI`` they fail instead, so the guard cannot silently
+They need the ``setuptools>=70.1`` build backend, which the ``dev`` extra provides; nothing is downloaded.
+If it is missing the tests are skipped locally and fail under ``CI``, so the guard cannot silently
 disappear.
 """
 
@@ -67,24 +66,6 @@ def _give_up(message: str):
     pytest.skip(message)
 
 
-def _backend_python(workdir: Path) -> str:
-    """The running interpreter if it has setuptools, else a throwaway venv that has it."""
-    if _have_backend(sys.executable):
-        return sys.executable
-    venv = workdir / "backend-venv"
-    steps = (
-        [sys.executable, "-m", "venv", str(venv)],
-        [str(venv / "bin" / "python"), "-m", "pip", "install", "--quiet", "setuptools>=70.1"],
-    )
-    for argv in steps:
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)  # noqa: S603 - fixed argv
-        if proc.returncode != 0:
-            _give_up(
-                f"no setuptools available and could not create a backend venv: {proc.stderr.strip()[-300:]}"
-            )
-    return str(venv / "bin" / "python")
-
-
 def _build(python: str, workdir: Path, kind: str, source: Path) -> Path:
     """Run the PEP 517 backend directly (no network, no `build` package) and return the artifact."""
     out = Path(tempfile.mkdtemp(prefix=f"out-{kind}-", dir=workdir))
@@ -122,7 +103,11 @@ def _private_copy(dest: Path) -> Path:
 def dists(tmp_path_factory):
     work = tmp_path_factory.mktemp("dist")
     src = _private_copy(work / "src")
-    python = _backend_python(work)
+    python = sys.executable
+    if not _have_backend(python):
+        _give_up(
+            'setuptools>=70.1 is not installed in this environment (it is part of the "dev" extra)'
+        )
     sdist = _build(python, work, "sdist", src)
     wheel = _build(python, work, "wheel", src)
     # The sdist must be able to produce a wheel on its own.
@@ -150,6 +135,16 @@ def _wheel_schema_files(path: Path) -> set[str]:
 def test_source_tree_has_exactly_the_expected_schema_files():
     assert {p.name for p in PKG_SCHEMAS.glob("*.json")} == _expected_schema_files()
     assert len(list_schemas()) == len(_expected_schema_files())
+
+
+def test_top_level_schemas_directory_is_identical_to_the_packaged_one():
+    """The repository keeps a second copy (the Dockerfile copies it). It must not drift."""
+    top = ROOT / "schemas"
+    if not top.is_dir():
+        pytest.skip("no top-level schemas/ directory (not a source checkout)")
+    assert {p.name for p in top.glob("*.json")} == {p.name for p in PKG_SCHEMAS.glob("*.json")}
+    for packaged in PKG_SCHEMAS.glob("*.json"):
+        assert (top / packaged.name).read_bytes() == packaged.read_bytes(), packaged.name
 
 
 def test_wheel_contains_every_runtime_schema(dists):

@@ -48,6 +48,8 @@ dev = [
   "hypothesis>=6.168.5",
   "psutil>=5",
   "pdoc>=14",
+  # build backend for tests/test_installed_distribution.py (builds the sdist and wheel offline)
+  "setuptools>=70.1",
 ]
 
 [project.urls]
