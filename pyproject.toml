@@ -60,6 +60,9 @@ Issues = "https://github.com/BAder82t/regaudit-fhe/issues"
 [project.scripts]
 regaudit-fhe = "regaudit_fhe.cli:main"
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

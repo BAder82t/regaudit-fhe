@@ -214,10 +214,10 @@ def _wheel_equals_source(zf: zipfile.ZipFile, names: list[str], root: Path) -> l
         if zf.read(n) != (root / "src" / n).read_bytes():
             problems.append(f"wheel member {n} is not byte-identical to the checkout")
     licences = {n.rsplit("/", 1)[1]: n for n in names if "/licenses/" in n}
-    if set(licences) != {"LICENSE", "LICENSE-COMMERCIAL.md"}:
-        problems.append(
-            f"wheel licence files are {sorted(licences)}, expected LICENSE and LICENSE-COMMERCIAL.md"
-        )
+    # pyproject.toml sets license-files = ["LICENSE"]: the AGPL text is the only licence file the wheel declares.
+    # LICENSE-COMMERCIAL.md describes a separate commercial offer; it ships in the sdist as a document only.
+    if set(licences) != {"LICENSE"}:
+        problems.append(f"wheel licence files are {sorted(licences)}, expected only LICENSE")
     for base, member in licences.items():
         if (root / base).is_file() and zf.read(member) != (root / base).read_bytes():
             problems.append(f"wheel licence file {base} is not byte-identical to the checkout")

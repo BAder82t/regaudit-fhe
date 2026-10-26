@@ -220,6 +220,31 @@ _SMOKE = textwrap.dedent(
 )
 
 
+def _wheel_licence_view(wheel: Path) -> tuple[set[str], list[str]]:
+    with zipfile.ZipFile(wheel) as zf:
+        files = {n.rsplit("/", 1)[1] for n in zf.namelist() if "/licenses/" in n}
+        meta = next(n for n in zf.namelist() if n.endswith(".dist-info/METADATA"))
+        declared = [
+            line.split(": ", 1)[1]
+            for line in zf.read(meta).decode("utf-8").splitlines()
+            if line.startswith("License-File: ")
+        ]
+    return files, declared
+
+
+@pytest.mark.parametrize("which", ["wheel", "wheel_from_sdist"])
+def test_the_wheel_declares_only_the_agpl_text_as_its_licence_file(dists, which):
+    """The commercial notice is a separate document, not a licence file of the installed wheel."""
+    files, declared = _wheel_licence_view(dists[which])
+    assert files == {"LICENSE"} and declared == ["LICENSE"]
+
+
+def test_the_sdist_still_ships_the_commercial_notice_as_a_document(dists):
+    with tarfile.open(dists["sdist"]) as tf:
+        names = {n.split("/", 1)[1] for n in tf.getnames() if "/" in n}
+    assert {"LICENSE", "LICENSE-COMMERCIAL.md"} <= names
+
+
 def test_installed_wheel_works_outside_the_source_tree(dists, tmp_path):
     target = tmp_path / "site"
     with zipfile.ZipFile(dists["wheel"]) as zf:

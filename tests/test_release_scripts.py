@@ -80,7 +80,6 @@ def _wheel(
         *((f"regaudit_fhe/schemas/{n}", schema_body) for n in names),
         *((("regaudit_fhe/py.typed", ""),) if py_typed else ()),
         (di + "licenses/LICENSE", "AGPL text"),
-        (di + "licenses/LICENSE-COMMERCIAL.md", "commercial terms"),
     ]
     if entry_points is not None:
         files.append((di + "entry_points.txt", entry_points))
@@ -327,6 +326,12 @@ def test_an_extra_file_under_licenses_is_refused(tmp_path, capsys):
     extra = ["regaudit_fhe-0.1.0.dist-info/licenses/EXTRA.txt"]
     assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": extra})) == 1
     assert "licence files are" in capsys.readouterr().err
+
+
+def test_the_commercial_notice_is_not_a_declared_licence_file_of_the_wheel(tmp_path, capsys):
+    extra = ["regaudit_fhe-0.1.0.dist-info/licenses/LICENSE-COMMERCIAL.md"]
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": extra})) == 1
+    assert "expected only LICENSE" in capsys.readouterr().err
 
 
 TOMLLIB = importlib.util.find_spec("tomllib") is not None
