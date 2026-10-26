@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import regaudit_fhe as rf
-from regaudit_fhe import reports
+import regaudit_fhe.reports as reports
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,9 +32,12 @@ def test_pyproject_version_matches_the_library():
 
 
 def test_installed_metadata_matches_the_library():
+    installed: str | None
     try:
         installed = metadata.version("regaudit-fhe")
     except metadata.PackageNotFoundError:
+        installed = None
+    if installed is None:
         pytest.skip("regaudit-fhe is not installed")
     assert installed == rf.__version__
 

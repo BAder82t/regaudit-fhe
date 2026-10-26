@@ -467,8 +467,6 @@ _LINE_BREAKS = {0x85: "\\u0085", 0x2028: "\\u2028", 0x2029: "\\u2029"}
 
 class _JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        import json
-
         payload: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
             "level": record.levelname,
@@ -952,11 +950,9 @@ def build_app(
             raise HTTPException(422, str(exc)) from exc
         except (ValueError, OverflowError) as exc:
             # The primitives reject inputs the schema cannot express (for example arrays of unequal length).
-            # Say so with a 422; keep the detail in the server log only.
-            logger.warning(
-                "audit_input_rejected",
-                extra={"primitive": primitive, "error_type": type(exc).__name__, "error": str(exc)},
-            )
+            # Say so with a 422. The log carries a fixed message and the exception class only: the exception
+            # text can echo caller-supplied values.
+            logger.warning("audit_input_rejected", extra={"error_type": type(exc).__name__})
             raise HTTPException(
                 422, "the audit input is inconsistent (see the input schema)"
             ) from exc

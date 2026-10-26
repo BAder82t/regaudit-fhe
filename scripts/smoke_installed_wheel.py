@@ -30,7 +30,7 @@ def main() -> int:
     import numpy as np
 
     import regaudit_fhe as rf
-    from regaudit_fhe import schemas
+    import regaudit_fhe.schemas as schemas
 
     here = Path(rf.__file__).resolve()
     cwd = Path.cwd().resolve()

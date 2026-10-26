@@ -113,11 +113,14 @@ def dists(tmp_path_factory):
     # The sdist must be able to produce a wheel on its own.
     unpacked = work / "from-sdist"
     unpacked.mkdir()
+    if not hasattr(tarfile, "data_filter"):
+        # Never fall back to an unfiltered extraction: the filter is in 3.12+ and was back-ported to
+        # 3.10.12 and 3.11.4.
+        _give_up(
+            "this interpreter's tarfile has no extraction filters (needs 3.10.12+, 3.11.4+ or 3.12+)"
+        )
     with tarfile.open(sdist) as tf:
-        if sys.version_info >= (3, 12):
-            tf.extractall(unpacked, filter="data")
-        else:
-            tf.extractall(unpacked)  # noqa: S202 - own sdist built a moment ago
+        tf.extractall(unpacked, filter="data")
     (root,) = [p for p in unpacked.iterdir() if p.is_dir()]
     wheel_from_sdist = _build(python, work, "wheel", root)
     return {"work": work, "sdist": sdist, "wheel": wheel, "wheel_from_sdist": wheel_from_sdist}

@@ -165,3 +165,41 @@ def test_an_overflow_inside_a_primitive_is_a_422_not_a_500(monkeypatch):
     monkeypatch.setattr(server, "_audit_dispatch", boom)
     status, body, _ = run(_call(_app(), "/v1/audit/fairness", [json.dumps(GOOD).encode()]))
     assert status == 422 and b"inconsistent" in body
+
+
+def test_the_rejection_log_carries_the_exception_class_but_never_its_text(monkeypatch):
+    """CodeQL py/log-injection: exception text can echo caller-supplied values, so it must not be logged."""
+    import logging
+
+    from regaudit_fhe import server
+
+    secret = "attacker-chosen\nFORGED LOG LINE"
+
+    def boom(primitive, payload):
+        raise ValueError(secret)
+
+    class Capture(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+
+        def emit(self, record):
+            self.records.append(record)
+
+    capture = Capture()
+    log = logging.getLogger("regaudit-fhe.test-capture")
+    log.setLevel(logging.DEBUG)
+    log.handlers = [capture]
+    log.propagate = False
+    cfg = ServerConfig(
+        api_keys={}, dev_mode=True, max_body_bytes=LIMIT, rate_limit_per_min=10000,
+        request_timeout_s=30.0, cors_origins=(),
+    )  # fmt: skip
+    app = build_app(config=cfg, logger=log)
+    monkeypatch.setattr(server, "_audit_dispatch", boom)
+    status, body, _ = run(_call(app, "/v1/audit/fairness", [json.dumps(GOOD).encode()]))
+    assert status == 422 and secret.encode() not in body
+    records = [r for r in capture.records if r.getMessage() == "audit_input_rejected"]
+    assert len(records) == 1
+    assert records[0].error_type == "ValueError" and not hasattr(records[0], "error")
+    assert all("FORGED" not in r.getMessage() for r in capture.records)
