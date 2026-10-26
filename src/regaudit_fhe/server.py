@@ -62,6 +62,7 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
+import json
 import logging
 import math
 import os
@@ -532,23 +533,81 @@ class TokenBucketRateLimiter:
 # ---------------------------------------------------------------------------
 
 
-class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+class _BodyTooLarge(Exception):
+    """Raised inside the receive channel when a request body passes the limit."""
+
+
+class BodySizeLimitMiddleware:
+    """Pure ASGI. Rejects an oversized ``Content-Length`` up front AND counts the bytes actually received, so a
+    chunked body (no ``Content-Length``) cannot exceed the limit either, on every route and before any
+    authentication or parsing of the body."""
+
     def __init__(self, app, max_bytes: int) -> None:
-        super().__init__(app)
+        self.app = app
         self.max_bytes = max_bytes
 
-    async def dispatch(self, request: Request, call_next):
-        cl = request.headers.get("content-length")
-        if cl is not None:
+    async def _reject(self, send, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None:
             try:
-                if int(cl) > self.max_bytes:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"detail": (f"request body exceeds limit {self.max_bytes} bytes")},
-                    )
+                too_big = int(declared) > self.max_bytes
             except ValueError:
-                return JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
-        return await call_next(request)
+                await self._reject(send, 400, "invalid Content-Length")
+                return
+            if too_big:
+                await self._reject(send, 413, f"request body exceeds limit {self.max_bytes} bytes")
+                return
+        received = 0
+        exceeded = False
+        started = False
+
+        async def limited_receive():
+            nonlocal received, exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    exceeded = True
+                    raise _BodyTooLarge
+            return message
+
+        async def tracking_send(message) -> None:
+            # The framework turns a failed body read into its own 400; the client must see 413 instead.
+            nonlocal started
+            if exceeded:
+                if not started:
+                    started = True
+                    await self._reject(
+                        send, 413, f"request body exceeds limit {self.max_bytes} bytes"
+                    )
+                return
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _BodyTooLarge:
+            if not started:
+                started = True
+                await self._reject(send, 413, f"request body exceeds limit {self.max_bytes} bytes")
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -886,6 +945,16 @@ def build_app(
             env = _audit_dispatch(primitive, payload)
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except ValueError as exc:
+            # The primitives reject inputs the schema cannot express (for example arrays of unequal length).
+            # Say so with a 422; keep the detail in the server log only.
+            logger.warning(
+                "audit_input_rejected",
+                extra={"primitive": primitive, "error_type": type(exc).__name__, "error": str(exc)},
+            )
+            raise HTTPException(
+                422, "the audit input is inconsistent (see the input schema)"
+            ) from exc
         # Never log payload — it may contain PHI / PII.
         logger.info(
             "audit_evaluated",

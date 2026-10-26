@@ -178,6 +178,11 @@ separate `/readyz` probe at the orchestrator layer. `/healthz` stays 200 while t
 when `/readyz` answers 503, so a failing readiness probe removes an instance from rotation without
 restarting it.
 
+**Do not expose the server directly to untrusted clients.** The request body is limited (1 MiB by default,
+including chunked bodies), but the audit primitives have no per-input resource caps and the request timeout does
+not cancel the worker; terminate TLS, authenticate, and enforce size, rate and time limits on every route in a
+reverse proxy. Revoking a key in the trust store needs a server restart.
+
 `/healthz`, `/readyz`, `/version`, `/docs` and `/openapi.json` are served without authentication by design
 (`/version` discloses the library, Python and TenSEAL versions). Put them behind your ingress policy if
 that is not acceptable; `/v1/*` always requires a bearer token.

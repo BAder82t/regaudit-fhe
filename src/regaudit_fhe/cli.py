@@ -352,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="DEVELOPMENT ONLY. Check integrity without trust material. The result is "
         "SELF_SIGNED_ONLY and the command exits 1, never 0. With --trusted-keys it has no "
-        "effect in the development profile; it is refused (exit 3) in any other profile.",
+        "effect in the development profile; it is refused (exit 2) in any other profile.",
     )
     verify_p.add_argument("--profile", choices=PROFILES, default="development")
     verify_p.add_argument("--verifier-id", help="This verifier's audience identifier.")

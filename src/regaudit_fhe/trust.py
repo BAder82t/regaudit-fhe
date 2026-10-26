@@ -14,7 +14,6 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,6 +23,7 @@ from typing import Any
 
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
+from .canonical import CanonicalError, loads_strict
 
 
 class TrustStoreError(ValueError):
@@ -351,9 +351,12 @@ class TrustStore:
         except (OSError, UnicodeDecodeError) as exc:
             raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
         try:
-            payload = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise TrustStoreError(f"trust-store {str(path)!r} is not valid JSON: {exc}") from exc
+            # strict JSON: a duplicated key must not silently replace an earlier entry or the revoked list
+            payload = loads_strict(body, max_bytes=MAX_TRUST_STORE_BYTES)
+        except CanonicalError as exc:
+            raise TrustStoreError(
+                f"trust-store {str(path)!r} is not valid JSON under the strict policy: {exc}"
+            ) from exc
         except RecursionError as exc:
             raise TrustStoreError(f"trust-store {str(path)!r} is nested too deeply") from exc
         if not isinstance(payload, Mapping):
