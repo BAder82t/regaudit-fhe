@@ -62,6 +62,7 @@ import asyncio
 import hashlib
 import hmac
 import ipaddress
+import json
 import logging
 import math
 import os
@@ -466,8 +467,6 @@ _LINE_BREAKS = {0x85: "\\u0085", 0x2028: "\\u2028", 0x2029: "\\u2029"}
 
 class _JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        import json
-
         payload: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
             "level": record.levelname,
@@ -532,23 +531,86 @@ class TokenBucketRateLimiter:
 # ---------------------------------------------------------------------------
 
 
-class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+class _BodyTooLarge(Exception):
+    """Raised inside the receive channel when a request body passes the limit."""
+
+
+class BodySizeLimitMiddleware:
+    """Pure ASGI. Rejects an oversized ``Content-Length`` up front AND counts the bytes actually received, so a
+    chunked body (no ``Content-Length``) cannot exceed the limit either, on every route and before any
+    authentication or parsing of the body."""
+
     def __init__(self, app, max_bytes: int) -> None:
-        super().__init__(app)
+        self.app = app
         self.max_bytes = max_bytes
 
-    async def dispatch(self, request: Request, call_next):
-        cl = request.headers.get("content-length")
-        if cl is not None:
+    async def _reject(self, send, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None:
             try:
-                if int(cl) > self.max_bytes:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"detail": (f"request body exceeds limit {self.max_bytes} bytes")},
-                    )
+                too_big = int(declared) > self.max_bytes
             except ValueError:
-                return JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
-        return await call_next(request)
+                await self._reject(send, 400, "invalid Content-Length")
+                return
+            if too_big:
+                await self._reject(send, 413, f"request body exceeds limit {self.max_bytes} bytes")
+                return
+        received = 0
+        exceeded = False
+        started = False
+
+        async def limited_receive():
+            nonlocal received, exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    exceeded = True
+                    raise _BodyTooLarge
+            return message
+
+        async def tracking_send(message) -> None:
+            # The framework turns a failed body read into its own 400; the client must see 413 instead.
+            nonlocal started
+            if exceeded:
+                if not started:
+                    started = True
+                    await self._reject(
+                        send, 413, f"request body exceeds limit {self.max_bytes} bytes"
+                    )
+                return
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except Exception:
+            # Depending on the Starlette/anyio versions our abort reaches us bare or wrapped in an
+            # ExceptionGroup by an inner BaseHTTPMiddleware. Once we have aborted the read ourselves the
+            # only cause of the failure is the oversize body, so answer 413; anything else propagates.
+            if not exceeded:
+                raise
+            if not started:
+                started = True
+                await self._reject(send, 413, f"request body exceeds limit {self.max_bytes} bytes")
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -818,7 +880,7 @@ def build_app(
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
+    def readyz() -> Any:
         try:
             load_schema("envelope")
             ready = True
@@ -832,11 +894,15 @@ def build_app(
                 "readyz_schema_unavailable",
                 extra={"error_type": type(exc).__name__, "error": str(exc)},
             )
-        return {
-            "ready": ready,
-            "error": error,
-            "privacy_boundary_warning": PRIVACY_WARNING,
-        }
+        # A readiness probe that looks only at the status code must see "not ready" as a non-2xx.
+        return JSONResponse(
+            status_code=200 if ready else 503,
+            content={
+                "ready": ready,
+                "error": error,
+                "privacy_boundary_warning": PRIVACY_WARNING,
+            },
+        )
 
     @app.get("/version")
     def version() -> dict[str, str]:
@@ -882,6 +948,14 @@ def build_app(
             env = _audit_dispatch(primitive, payload)
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except (ValueError, OverflowError) as exc:
+            # The primitives reject inputs the schema cannot express (for example arrays of unequal length).
+            # Say so with a 422. The log carries a fixed message and the exception class only: the exception
+            # text can echo caller-supplied values.
+            logger.warning("audit_input_rejected", extra={"error_type": type(exc).__name__})
+            raise HTTPException(
+                422, "the audit input is inconsistent (see the input schema)"
+            ) from exc
         # Never log payload — it may contain PHI / PII.
         logger.info(
             "audit_evaluated",

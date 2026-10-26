@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=70.1,<85", "wheel"]  # bounded: a new major backend is reviewed before it builds a release
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "regaudit-fhe"
-version = "0.0.8"
+version = "0.1.0"
 description = "Depth-tracked regulatory audit primitives with a plaintext model and an optional TenSEAL CKKS backend."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,6 +48,9 @@ dev = [
   "hypothesis>=6.168.5",
   "psutil>=5",
   "pdoc>=14",
+  # build backend for tests/test_installed_distribution.py (builds the sdist and wheel offline)
+  "setuptools>=70.1",
+  "pyyaml>=6",    # tests/test_release_workflow.py reads the workflow files
 ]
 
 [project.urls]
@@ -57,8 +60,17 @@ Issues = "https://github.com/BAder82t/regaudit-fhe/issues"
 [project.scripts]
 regaudit-fhe = "regaudit_fhe.cli:main"
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The JSON Schemas are runtime data (every audit validates against them). They live in a plain
+# directory inside the package, so they must be listed explicitly or neither the wheel nor the sdist
+# contains them. tests/test_installed_distribution.py guards this.
+[tool.setuptools.package-data]
+regaudit_fhe = ["py.typed", "schemas/*.schema.json"]
 
 [tool.ruff]
 line-length = 100

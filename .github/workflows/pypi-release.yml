@@ -1,0 +1,163 @@
+name: pypi-release
+
+# Publishes a release to PyPI. The file is named pypi-release.yml on purpose: the PyPI trusted publisher is
+# bound to THIS name, so an older commit that still carries the former, unguarded publish.yml cannot obtain
+# an OIDC token PyPI accepts. Hardened (see docs/RELEASE_PROCESS.md):
+#   * the ONLY trigger is a push of a strict version tag vX.Y.Z; there is no workflow_dispatch;
+#   * the tagged commit must be the event commit, a tag object must resolve to it, and it must be
+#     reachable from the default branch;
+#   * tag == pyproject version == __version__ == LIB_VERSION == built wheel/sdist metadata;
+#   * the built wheel and sdist are installed and tested (Python 3.10-3.13) before anything is signed;
+#   * the files uploaded are re-hashed against the digests recorded at build time;
+#   * PyPI upload happens only in the `publish` job, bound to the protected `pypi` environment
+#     (configure required reviewers there: docs/RELEASE_PROCESS.md);
+#   * every third-party action is pinned to a commit SHA; the default token has no permissions.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: the tag, the commit and the branch are acceptable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the trigger, the tag and the commit
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$EVENT" = "push"
+          test "$REF_TYPE" = "tag"
+          if ! [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # explicit: old bash ignores `set -e` for [[ ]]
+            echo "tag name $REF_NAME is not vX.Y.Z" >&2
+            exit 1
+          fi
+          git fetch --force --no-tags origin "+refs/tags/$REF_NAME:refs/tags/$REF_NAME"   # the tag OBJECT, not a rewritten ref
+          test "$(git cat-file -t "refs/tags/$REF_NAME")" = "tag"       # annotated tags only
+          test "$(git rev-parse "refs/tags/$REF_NAME^{commit}")" = "$EVENT_SHA"
+          git fetch --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$EVENT_SHA" "origin/$DEFAULT_BRANCH"
+          echo "tag $REF_NAME -> $EVENT_SHA is on $DEFAULT_BRANCH"
+
+  build:
+    name: build and test the distributions
+    needs: guard
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      expected_tag: ${{ github.ref_name }}
+
+  sigstore:
+    name: sign the distributions (keyless)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # actions/download-artifact v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: dist
+          path: dist
+      - name: The files to sign are the files that were built
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+          test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
+      # sigstore/gh-action-sigstore-python v3.5.0
+      - uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9
+        with:
+          inputs: |
+            ./dist/*.tar.gz
+            ./dist/*.whl
+      # actions/upload-artifact v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sigstore-bundles
+          path: |
+            dist/*.sigstore
+            dist/*.sigstore.json
+          if-no-files-found: error
+
+  publish:
+    name: upload to PyPI (protected environment)
+    needs: [guard, build, sigstore]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/regaudit-fhe
+    permissions:
+      contents: read
+      id-token: write       # PyPI trusted publishing (OIDC); also used for the PyPI attestations
+    steps:
+      # actions/download-artifact v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: dist
+          path: dist
+      - name: Re-verify the files about to be uploaded
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test "$REF_NAME" = "v$VERSION"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+          test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
+          test -f "dist/regaudit_fhe-${VERSION}-py3-none-any.whl"
+          test -f "dist/regaudit_fhe-${VERSION}.tar.gz"
+      # pypa/gh-action-pypi-publish release/v1 (v1.14.3)
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
+        with:
+          packages-dir: dist
+          attestations: true
+
+  github-release:
+    name: attach the evidence to the GitHub Release
+    needs: [build, sigstore, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # actions/download-artifact v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          path: assets
+      # softprops/action-gh-release v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          files: |
+            assets/dist/*
+            assets/dist-checksums/SHA256SUMS
+            assets/sbom/sbom.cdx.json
+            assets/sigstore-bundles/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

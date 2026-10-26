@@ -32,28 +32,19 @@ class SchemaError(ValueError):
     """Raised when a payload fails JSON Schema validation."""
 
 
-def _candidate_schema_dirs() -> list[Path]:
-    """Locate the bundled schemas directory.
-
-    Order tried:
-      1. The installed package data (``importlib.resources``).
-      2. The repository's top-level ``schemas/`` directory (used in
-         editable installs and tests).
-    """
-    out: list[Path] = []
-    pkg_dir = Path(__file__).parent
-    out.append(pkg_dir / "schemas")
-    out.append(pkg_dir.parent.parent.parent / "schemas")
-    out.append(Path.cwd() / "schemas")
-    return out
-
-
-@cache
 def _schemas_dir() -> Path:
-    for cand in _candidate_schema_dirs():
-        if cand.is_dir():
-            return cand
-    raise FileNotFoundError("Could not locate the regaudit-fhe schemas/ directory.")
+    """Return the schemas directory shipped inside the installed package.
+
+    There is deliberately no fallback to the current working directory or to a source checkout:
+    a schema silently taken from elsewhere would hide a packaging defect (a wheel without its
+    schemas) and would let the working directory choose which schema validates a payload.
+    """
+    path = Path(__file__).parent / "schemas"
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"the regaudit-fhe schemas directory is missing from the installed package: {path}"
+        )
+    return path
 
 
 @cache
@@ -73,7 +64,7 @@ def load_schema(name: str) -> dict[str, Any]:
         path = _schemas_dir() / f"{primitive}.{direction}.schema.json"
     else:
         raise KeyError(f"schema name must be 'envelope' or '<primitive>.<direction>'; got {name!r}")
-    with path.open("r") as fh:
+    with path.open("r", encoding="utf-8") as fh:
         return cast(dict[str, Any], json.load(fh))
 
 

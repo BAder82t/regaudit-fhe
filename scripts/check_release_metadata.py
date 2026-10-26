@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""Check that a release's identities agree and that the built distributions are complete.
+
+Standard library only; it never imports ``regaudit_fhe`` (it must be able to judge a broken build).
+
+    python scripts/check_release_metadata.py --dist dist [--tag v0.1.0] [--root .]
+
+Checks (any failure exits non-zero with a message):
+  * the version written in ``pyproject.toml``, ``regaudit_fhe/__init__.py`` and ``reports.py``
+    (``LIB_VERSION``) is one and the same;
+  * when ``--tag vX.Y.Z`` is given it equals that version, and the tag has the strict form;
+  * ``--dist`` holds exactly one wheel and one sdist, nothing else;
+  * wheel METADATA ``Version`` and the sdist ``PKG-INFO`` ``Version`` equal that version;
+  * both distributions contain exactly the expected runtime schema files and ``py.typed``;
+  * every file in the wheel's package is byte-identical to the file in ``--root`` (and none is missing or extra), the
+    wheel's RECORD is consistent, its dependencies and console scripts equal ``pyproject.toml``'s;
+  * every file in the sdist equals the checkout's, apart from PKG-INFO, setup.cfg and the egg-info directory;
+  * the sdist contains the test helpers and data the test suite needs, so it can run the suite itself.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import csv
+import hashlib
+import io
+import re
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+
+PRIMITIVES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
+EXPECTED_SCHEMAS = {"envelope.schema.json", "envelope.v2.schema.json"} | {
+    f"{p}.{d}.schema.json" for p in PRIMITIVES for d in ("input", "output")
+}
+STRICT_TAG = re.compile(r"^v([0-9]+\.[0-9]+\.[0-9]+)$")
+
+
+def _first(pattern: str, text: str, what: str) -> str:
+    match = re.search(pattern, text, re.MULTILINE)
+    if not match:
+        raise SystemExit(f"FAIL: cannot find {what}")
+    return match.group(1)
+
+
+def source_versions(root: Path) -> dict[str, str]:
+    return {
+        "pyproject.toml": _first(
+            r'^version\s*=\s*"([^"]+)"',
+            (root / "pyproject.toml").read_text(encoding="utf-8"),
+            "pyproject version",
+        ),
+        "regaudit_fhe/__init__.py": _first(
+            r'^__version__\s*=\s*"([^"]+)"',
+            (root / "src/regaudit_fhe/__init__.py").read_text(encoding="utf-8"),
+            "__version__",
+        ),
+        "regaudit_fhe/reports.py": _first(
+            r'^LIB_VERSION:\s*str\s*=\s*"([^"]+)"',
+            (root / "src/regaudit_fhe/reports.py").read_text(encoding="utf-8"),
+            "LIB_VERSION",
+        ),
+    }
+
+
+def _schema_names(names: list[str], marker: str) -> set[str]:
+    return {Path(n).name for n in names if marker in n and n.endswith(".schema.json")}
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _declared_from_pyproject(root: Path) -> tuple[set[tuple[str, str]], dict[str, str]] | None:
+    """(extra, distribution) pairs and console scripts declared in pyproject.toml; None if tomllib is unavailable."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10: the release workflow runs this on 3.12
+        return None
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8")).get(
+        "project", {}
+    )
+
+    def dist(spec: str) -> str:
+        return _norm(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", spec).group(1))  # type: ignore[union-attr]
+
+    pairs = {("", dist(d)) for d in project.get("dependencies", [])}
+    for extra, deps in project.get("optional-dependencies", {}).items():
+        pairs |= {(extra, dist(d)) for d in deps}
+    return pairs, dict(project.get("scripts", {}))
+
+
+def _wheel_metadata_matches_pyproject(
+    zf: zipfile.ZipFile, meta_text: str, di: str, root: Path
+) -> list[str]:
+    declared = _declared_from_pyproject(root)
+    if declared is None:
+        return []
+    want_pairs, want_scripts = declared
+    problems: list[str] = []
+    got_pairs = set()
+    for m in re.finditer(r"^Requires-Dist:\s*(.+)$", meta_text, re.MULTILINE):
+        spec = m.group(1)
+        name = _norm(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", spec).group(1))  # type: ignore[union-attr]
+        extra = re.search(r"extra\s*==\s*['\"]([^'\"]+)['\"]", spec)
+        got_pairs.add((extra.group(1) if extra else "", name))
+    if got_pairs != want_pairs:
+        problems.append(
+            f"wheel METADATA dependencies differ from pyproject.toml (extra {sorted(got_pairs - want_pairs)}, "
+            f"missing {sorted(want_pairs - got_pairs)})"
+        )
+    ep_name = di + "entry_points.txt"
+    if ep_name in zf.namelist():
+        ep = zf.read(ep_name).decode("utf-8")
+        section = re.search(r"\[console_scripts\]\n(.*?)(?:\n\[|\Z)", ep, re.DOTALL)
+        got_scripts = {}
+        for line in (section.group(1) if section else "").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                got_scripts[k.strip()] = v.strip()
+        if got_scripts != want_scripts or re.findall(r"^\[(.+)\]$", ep, re.MULTILINE) != [
+            "console_scripts"
+        ]:
+            problems.append(
+                "wheel entry_points.txt differs from [project.scripts] in pyproject.toml"
+            )
+    elif want_scripts:
+        problems.append("wheel has no entry_points.txt but pyproject.toml declares scripts")
+    wheel_file = zf.read(di + "WHEEL").decode("utf-8") if di + "WHEEL" in zf.namelist() else ""
+    if not re.search(r"^Tag:\s*py3-none-any\s*$", wheel_file, re.MULTILINE) or not re.search(
+        r"^Root-Is-Purelib:\s*true\s*$", wheel_file, re.MULTILINE
+    ):
+        problems.append("wheel WHEEL file is not a pure-Python py3-none-any wheel")
+    return problems
+
+
+def _wheel_record_consistent(zf: zipfile.ZipFile, di: str) -> list[str]:
+    """RECORD must list every member (except itself) with the right SHA-256 and size."""
+    record_name = di + "RECORD"
+    if record_name not in zf.namelist():
+        return ["wheel has no RECORD file"]
+    problems: list[str] = []
+    listed = {}
+    for row in csv.reader(io.StringIO(zf.read(record_name).decode("utf-8"))):
+        if row:
+            listed[row[0]] = row[1:]
+    members = [n for n in zf.namelist() if not n.endswith("/")]
+    for n in members:
+        if n == record_name:
+            continue
+        entry = listed.get(n)
+        if entry is None or not entry[0].startswith("sha256="):
+            problems.append(f"wheel RECORD does not list {n}")
+            continue
+        data = zf.read(n)
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+        )
+        if entry[0] != "sha256=" + digest or (entry[1] and int(entry[1]) != len(data)):
+            problems.append(f"wheel RECORD hash or size is wrong for {n}")
+    for n in listed:
+        if n != record_name and n not in members:
+            problems.append(f"wheel RECORD lists a member that is not in the archive: {n}")
+    return problems
+
+
+DIST_INFO_FILES = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt"}
+
+
+def _allowed_wheel_member(name: str, version: str) -> bool:
+    """Only package code, the typed marker, the 14 schemas and the standard dist-info files."""
+    if name.startswith("regaudit_fhe/"):
+        rest = name[len("regaudit_fhe/") :]
+        if rest == "py.typed" or (rest.endswith(".py") and ".." not in Path(rest).parts):
+            return True
+        return (
+            rest.startswith("schemas/")
+            and Path(rest).name in EXPECTED_SCHEMAS
+            and rest.count("/") == 1
+        )
+    info = f"regaudit_fhe-{version}.dist-info/"
+    if name.startswith(info):
+        rest = name[len(info) :]
+        return rest in DIST_INFO_FILES or (
+            rest.startswith("licenses/") and rest.count("/") == 1 and rest != "licenses/"
+        )
+    return False
+
+
+def _wheel_equals_source(zf: zipfile.ZipFile, names: list[str], root: Path) -> list[str]:
+    """Every packaged file must be byte-identical to the checkout it was built from, and nothing may be missing."""
+    problems: list[str] = []
+    pkg = root / "src" / "regaudit_fhe"
+    expected = {
+        "regaudit_fhe/" + p.relative_to(pkg).as_posix()
+        for p in pkg.rglob("*")
+        if p.is_file()
+        and "__pycache__" not in p.parts
+        and (
+            p.suffix == ".py"
+            or p.name == "py.typed"
+            or (p.parent.name == "schemas" and p.suffix == ".json")
+        )
+    }
+    shipped = {n for n in names if n.startswith("regaudit_fhe/")}
+    if shipped != expected:
+        problems.append(
+            f"wheel package files differ from the checkout (extra {sorted(shipped - expected)[:5]}, "
+            f"missing {sorted(expected - shipped)[:5]})"
+        )
+    for n in sorted(shipped & expected):
+        if zf.read(n) != (root / "src" / n).read_bytes():
+            problems.append(f"wheel member {n} is not byte-identical to the checkout")
+    licences = {n.rsplit("/", 1)[1]: n for n in names if "/licenses/" in n}
+    # pyproject.toml sets license-files = ["LICENSE"]: the AGPL text is the only licence file the wheel declares.
+    # LICENSE-COMMERCIAL.md describes a separate commercial offer; it ships in the sdist as a document only.
+    if set(licences) != {"LICENSE"}:
+        problems.append(f"wheel licence files are {sorted(licences)}, expected only LICENSE")
+    for base, member in licences.items():
+        if (root / base).is_file() and zf.read(member) != (root / base).read_bytes():
+            problems.append(f"wheel licence file {base} is not byte-identical to the checkout")
+    return problems
+
+
+def check_wheel(path: Path, version: str, root: Path | None = None) -> list[str]:
+    problems: list[str] = []
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        meta = [n for n in names if n.endswith(".dist-info/METADATA")]
+        if len(meta) != 1:
+            return [f"{path.name}: expected one METADATA file, found {len(meta)}"]
+        meta_text = zf.read(meta[0]).decode("utf-8")
+        got = _first(r"^Version:\s*(\S+)", meta_text, "wheel Version")
+        if _first(r"^Name:\s*(\S+)", meta_text, "wheel Name") != "regaudit-fhe":
+            problems.append(f"{path.name}: METADATA Name is not regaudit-fhe")
+        stray = [n for n in names if not _allowed_wheel_member(n, version)]
+        if stray:
+            problems.append(
+                f"{path.name}: members outside regaudit_fhe/ and its dist-info: {stray[:5]}"
+            )
+        if got != version:
+            problems.append(f"{path.name}: METADATA Version {got} != {version}")
+        if len(names) != len(set(names)):
+            problems.append(f"{path.name}: duplicate member names in the archive")
+        di = f"regaudit_fhe-{version}.dist-info/"
+        problems += _wheel_record_consistent(zf, di)
+        if root is not None:
+            problems += _wheel_equals_source(zf, names, root)
+            problems += _wheel_metadata_matches_pyproject(zf, meta_text, di, root)
+        schemas = _schema_names(names, "regaudit_fhe/schemas/")
+        if schemas != EXPECTED_SCHEMAS:
+            problems.append(
+                f"{path.name}: schema files differ (missing {sorted(EXPECTED_SCHEMAS - schemas)}, "
+                f"unexpected {sorted(schemas - EXPECTED_SCHEMAS)})"
+            )
+        if "regaudit_fhe/py.typed" not in names:
+            problems.append(f"{path.name}: py.typed is missing")
+        bad = [n for n in names if n.startswith("/") or ".." in Path(n).parts]
+        if bad:
+            problems.append(f"{path.name}: unsafe member names {bad[:3]}")
+    return problems
+
+
+def _sdist_equals_source(tf: tarfile.TarFile, members, version: str, root: Path) -> list[str]:
+    """Every file in the sdist must be byte-identical to the checkout, except the few files the backend generates."""
+    top = f"regaudit_fhe-{version}/"
+    generated = ("PKG-INFO", "setup.cfg")
+    problems: list[str] = []
+    for m in members:
+        if not m.isreg() or not m.name.startswith(top):
+            continue
+        rel = m.name[len(top) :]
+        if rel in generated or rel.startswith("src/regaudit_fhe.egg-info/"):
+            continue
+        source = root / rel
+        if not source.is_file():
+            problems.append(f"sdist member {rel} is not in the checkout")
+            continue
+        extracted = tf.extractfile(m)
+        if extracted is None or extracted.read() != source.read_bytes():
+            problems.append(f"sdist member {rel} is not byte-identical to the checkout")
+    return problems[:20]
+
+
+def check_sdist(path: Path, version: str, root: Path | None = None) -> list[str]:
+    problems: list[str] = []
+    with tarfile.open(path) as tf:
+        members = tf.getmembers()
+        names = [m.name for m in members]
+        bad = [m.name for m in members if not (m.isreg() or m.isdir())]
+        if bad:
+            problems.append(f"{path.name}: non-regular members {bad[:3]}")
+        unsafe = [n for n in names if n.startswith("/") or ".." in Path(n).parts]
+        if unsafe:
+            problems.append(f"{path.name}: unsafe member names {unsafe[:3]}")
+        if root is not None:
+            problems += _sdist_equals_source(tf, members, version, root)
+        info = [n for n in names if n.count("/") == 1 and n.endswith("/PKG-INFO")]
+        if len(info) != 1:
+            return [*problems, f"{path.name}: expected one top-level PKG-INFO, found {len(info)}"]
+        got_file = tf.extractfile(info[0])
+        assert got_file is not None
+        pkg_info = got_file.read().decode("utf-8")
+        got = _first(r"^Version:\s*(\S+)", pkg_info, "sdist Version")
+        if _first(r"^Name:\s*(\S+)", pkg_info, "sdist Name") != "regaudit-fhe":
+            problems.append(f"{path.name}: PKG-INFO Name is not regaudit-fhe")
+        top = f"regaudit_fhe-{version}"
+        stray = [n for n in names if n != top and not n.startswith(top + "/")]
+        if stray:
+            problems.append(f"{path.name}: members outside {top}/: {stray[:5]}")
+        if got != version:
+            problems.append(f"{path.name}: PKG-INFO Version {got} != {version}")
+        schemas = _schema_names(names, "/src/regaudit_fhe/schemas/")
+        if schemas != EXPECTED_SCHEMAS:
+            problems.append(
+                f"{path.name}: schema files differ (missing {sorted(EXPECTED_SCHEMAS - schemas)}, "
+                f"unexpected {sorted(schemas - EXPECTED_SCHEMAS)})"
+            )
+        if not any(n.endswith("/src/regaudit_fhe/py.typed") for n in names):
+            problems.append(f"{path.name}: py.typed is missing")
+        needed = (
+            "tests/_asgi.py",
+            "tests/vectors/report_v2/vectors.json",
+            "tests/test_installed_distribution.py",
+            "scripts/check_release_metadata.py",
+            "scripts/smoke_installed_wheel.py",
+            "CHANGELOG.md",
+        )
+        for suffix in needed:
+            if not any(
+                n.count("/") == suffix.count("/") + 1 and n.endswith("/" + suffix) for n in names
+            ):
+                problems.append(
+                    f"{path.name}: the sdist cannot run the test suite, {suffix} is missing"
+                )
+    return problems
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--dist", required=True, type=Path)
+    ap.add_argument(
+        "--tag", default="", help="expected tag, strict form vX.Y.Z (omit for a rehearsal)"
+    )
+    ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    args = ap.parse_args(argv)
+
+    problems: list[str] = []
+    versions = source_versions(args.root)
+    distinct = set(versions.values())
+    if len(distinct) != 1:
+        problems.append(f"source version strings disagree: {versions}")
+    version = next(iter(sorted(distinct)))
+
+    if args.tag:
+        match = STRICT_TAG.match(args.tag)
+        if not match:
+            problems.append(f"tag {args.tag!r} is not of the form vX.Y.Z")
+        elif match.group(1) != version:
+            problems.append(f"tag {args.tag} does not match the package version {version}")
+
+    files = sorted(p for p in args.dist.iterdir() if p.is_file()) if args.dist.is_dir() else []
+    wheels = [p for p in files if p.suffix == ".whl"]
+    sdists = [p for p in files if p.name.endswith(".tar.gz")]
+    others = [p.name for p in files if p not in wheels and p not in sdists]
+    if len(wheels) != 1 or len(sdists) != 1 or others:
+        problems.append(
+            f"{args.dist} must hold exactly one wheel and one sdist (found {len(wheels)} wheel(s), "
+            f"{len(sdists)} sdist(s), other files {others})"
+        )
+    else:
+        problems += check_wheel(wheels[0], version, args.root)
+        problems += check_sdist(sdists[0], version, args.root)
+
+    if problems:
+        print("RELEASE CHECK FAILED", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    print(
+        f"release check ok: version {version}; 1 wheel + 1 sdist; {len(EXPECTED_SCHEMAS)} schemas in each"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

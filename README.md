@@ -428,7 +428,7 @@ An audit result is wrapped into a regulator-facing, signed JSON envelope.
 {
   "schema": "regaudit-fhe.report.v2",
   "schema_version": "regaudit-fhe.report.v2",
-  "algorithm_version": "0.0.8",
+  "algorithm_version": "0.1.0",
   "primitive": "fairness",
   "backend": "plaintext",
   "parameter_set": { "...": "..." },
@@ -529,7 +529,7 @@ docs/COMPLIANCE.md     regulator-facing scope statement and disclaimers
 docs/DEPLOYMENT.md     server hardening guide + production checklist
 docs/SUPPLY_CHAIN.md   Sigstore verification, SBOM, reproducible build notes
 docs/roadmap/          design notes for non-shipping work
-schemas/               source-of-truth JSON Schemas
+schemas/               copy of the JSON Schemas (the package loads src/regaudit_fhe/schemas/; a test keeps them identical)
 tests/                 unit, integration, edge-case, property-based, schema, security,
                        canonical report.v2 vectors (tests/vectors/), exit-code tests
 scripts/               build helpers and the mutation-sensitivity check
@@ -540,7 +540,7 @@ benchmarks/            d=6 CKKS wall-clock + memory benchmarks
 ## JSON schemas
 
 Every primitive input, primitive output, and the audit envelope itself
-ships with a Draft-2020-12 JSON Schema under [`schemas/`](schemas/).
+ships with a Draft-2020-12 JSON Schema under [`schemas/`](schemas/) (the copy inside the installed package is `src/regaudit_fhe/schemas/`; a test keeps the two byte-identical).
 Auditors and integrators can pin specific schema versions and reject
 payloads that do not conform.
 

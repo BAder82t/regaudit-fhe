@@ -1,9 +1,110 @@
 # Changelog
 
-## Unreleased — post-merge security maintenance
+## 0.1.0 — release candidate (NOT PUBLISHED)
+
+Everything under the "0.1.0 —" headings below ships in this release. **0.1.0 is a Pre-Alpha release
+with deliberate, behaviour-changing security defaults; read "Changed (breaking, deliberate)" in the
+Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading from 0.0.x.**
+
+### Fixed
+
+- **The JSON schemas are now included in the wheel and the sdist.** Every earlier release (0.0.2 to
+  0.0.8) shipped without `schemas/*.schema.json`, so after a clean install `regaudit-fhe audit …`,
+  `regaudit-fhe schema …` and any `load_schema` / `validate_*` call raised `FileNotFoundError`.
+  The suite did not notice because it ran from a checkout where the loader found the files through
+  its working-directory and repository-root fallbacks.
+- **The schema loader reads only the installed package's `schemas/` directory.** It no longer falls
+  back to `./schemas` or a repository-root `schemas/`. Callers who relied on a `schemas/` directory
+  next to the working directory must stop; that directory could previously decide which schema
+  validated a payload.
+
+### Changed
+
+- **Dependency floors were raised since 0.0.8:** `cryptography>=50.0.2` (was `>=42`), `tenseal>=0.3.16`
+  (was `>=0.3.14`), `fastapi>=0.143.0` (was `>=0.115`), `uvicorn[standard]>=0.54.0` (was `>=0.30`),
+  `pydantic>=2.14.0` (was `>=2`), plus higher floors for the development tools. The `dev` extra now
+  also lists `setuptools>=70.1`. The suite passes with the runtime dependencies pinned at their floors.
+- **The Docker base image moved from `python:3.12-slim-bookworm` to `python:3.14-slim-bookworm`.**
+- `regaudit-fhe schema --list` and `/v1/schemas` now include `envelope.v2` (14 names, was 13).
+- The `server` module no longer re-exports `VerifyRequest`, `verify_receipt`, `AuditEnvelope` or
+  `BaseModel` (the request model was removed deliberately; the others were incidental imports).
+
+- **`GET /readyz` now answers HTTP 503 (same JSON body, `"ready": false`) when the schema bundle cannot be
+  loaded**, instead of 200. A probe that looks only at the status code now sees "not ready". `/healthz`
+  is unchanged (200 while the process lives). If you scrape the old behaviour, read the `ready` field.
+
+### Security fixes found by the AI-agent reviews of this candidate
+
+- **The request-body limit now counts the bytes actually received on every route**, so a chunked body (no
+  `Content-Length`) can no longer exceed it; the connection is answered with HTTP 413 as soon as the limit is
+  passed, before authentication or parsing. Previously only `Content-Length` was checked, `/v1/audit/*` read and
+  parsed an arbitrarily large chunked body before authenticating, and a 400 MiB chunked request raised the server's
+  memory use by about 2.8 GB. Measured after the fix on a real uvicorn server: 200 MiB offered, response 413,
+  memory unchanged.
+- **Trust-store files are parsed with the strict JSON policy** (`loads_strict`): duplicate keys, `NaN`/`Infinity`,
+  a BOM or invalid UTF-8 are now refused with `TrustStoreError`. Previously a duplicated key silently won, so a
+  duplicate `"revoked"` entry could empty the revocation list and a duplicate key id could re-activate a
+  compromised key. **Compatibility:** a trust store with such content (or a BOM) that loaded before is now refused.
+- **A trust store in the legacy `keys`/`revoked`/`parameter_set_pins` form now refuses unknown top-level members.**
+  A misspelt `"revokd": [...]` used to load with an empty revocation list, so a key meant to be revoked verified as
+  `TRUSTED` (found by the adversarial review, reproduced on a real server). **Compatibility:** a legacy store with any
+  other top-level member is now refused; the `entries` form already refused unknown members.
+- Schema files and `regaudit-fhe audit --input` are read as UTF-8 regardless of the locale (two schemas contain
+  non-ASCII text; under an ASCII locale loading them raised `UnicodeDecodeError`).
+- An `OverflowError` inside a primitive (a huge integer) answers 422 like other inconsistent input.
+- Inconsistent audit inputs that the schema cannot express (for example arrays of unequal length) answer HTTP 422
+  instead of 500; the detail is logged server-side only.
+- `regaudit-fhe verify --help` now says that `--allow-self-signed` outside the development profile exits 2 (it
+  said 3, but the code returned 2).
+
+### Release process
+
+- The publishing workflow was rewritten **and renamed from `publish.yml` to `pypi-release.yml`** (the PyPI trusted
+  publisher must be changed to the new file name, which also stops older commits that still contain the
+  old, unguarded `publish.yml` from presenting the trusted name): the only trigger is a strict `vX.Y.Z` tag push (no `workflow_dispatch`);
+  a `guard` job requires an annotated tag on the event commit that is reachable from the default branch;
+  the tag, the source versions and the built wheel/sdist metadata must agree
+  (`scripts/check_release_metadata.py`); the built wheel is installed and tested on Python 3.10-3.13 from
+  outside the checkout before anything is signed; the digests recorded at build time are re-checked
+  before upload; PyPI upload is confined to one job in the protected `pypi` environment; the default
+  token has no permissions; third-party actions are pinned to commit SHAs. A `release-rehearsal` workflow
+  runs the same build-and-test without publishing. `docs/RELEASE_PROCESS.md` lists what GitHub and PyPI
+  settings must additionally be configured by the owner. None of this has been run on GitHub Actions.
+- The build backend requirement is now bounded: `setuptools>=70.1,<85`.
+- The sdist now ships `tests/` (helpers and data), `scripts/`, `schemas/` and `CHANGELOG.md`, so it can run the test suite against an installed wheel; `scripts/check_release_metadata.py` refuses an sdist that cannot, and a wheel or sdist with unexpected members or another project name.
+
+### Known limitations carried into this release
+
+- **The HTTP server is not hardened for direct exposure to untrusted clients.** There are no per-input
+  resource caps on the audit primitives (for example the `provenance` bucket count grows memory with its square,
+  and the request timeout answers 504 but does not cancel the worker), `X-Request-ID` has no length limit, a chunked 413 is logged as an unhandled exception and a client that disconnects mid-body on `/v1/verify` logs a traceback, `/readyz` checks one schema and caches the first successful load, the
+  trust store is read once at start-up (revocation needs a restart), and the replay database is created with
+  the process's default file mode. Run it behind a reverse proxy that enforces size, rate and time limits on
+  every route.
+- `verify_receipt(env)` without `strict=True` or trust material returns `True` for any envelope whose
+  signature matches its own embedded key (documented; use `verify_envelope`/`verify_report` with a trust store).
+- `/docs`, `/openapi.json`, `/healthz`, `/readyz` and `/version` are served without authentication by design (see `docs/DEPLOYMENT.md`).
+- setuptools warns that the table-form `project.license` and the license classifiers stop being supported
+  on 2027-02-18, and the sdist archive is not byte-reproducible (the wheel is).
+- `requirements-dev.txt` is stale and not authoritative (see `docs/SUPPLY_CHAIN.md`).
+
+### Tests
+
+- `tests/test_installed_distribution.py` builds the sdist and wheel (and a wheel from the sdist),
+  checks all 14 schemas are present, unpacks the wheel and runs it from a directory outside the
+  repository (v1 and v2 sign/verify, schema validation). It also checks that the top-level
+  `schemas/` copy (used by the Dockerfile) stays byte-identical to the packaged one. It needs
+  `setuptools>=70.1`, which is now in the `dev` extra.
+
+### Release notes
+
+- `requirements-dev.txt` is a legacy convenience file, not an authoritative lockfile (see
+  `docs/SUPPLY_CHAIN.md`).
+
+## 0.1.0 — post-merge security maintenance
 
 Follow-up to the security-maintenance change, from a retrospective (AI-assisted, static)
-review. No change to the authentication design, the trust schema or any dependency.
+review. No change to the authentication design, the trust schema or any dependency *in that follow-up*; relative to the published 0.0.8 the dependency floors did change (see "Changed" under 0.1.0 above).
 
 ### Security
 
@@ -27,7 +128,7 @@ review. No change to the authentication design, the trust schema or any dependen
   The `_OnceFlag` and examples tests in `tests/test_security_maintenance.py` run in a
   `[dev]`-only environment (previously a module-level skip silently dropped them).
 
-## Unreleased — security maintenance (CodeQL findings)
+## 0.1.0 — security maintenance (CodeQL findings)
 
 Confined to confirmed code-scanning findings; independent of any Phase 3B work and of
 the trust schema. The full inventory and evidence are in
@@ -58,7 +159,7 @@ the trust schema. The full inventory and evidence are in
   `openfhe_fairness_roundtrip.py`) print and assert `trust_status` / `sha256_valid` /
   `signature_valid` instead of the deprecated `valid` and the boolean `issuer_trusted`.
 
-## Unreleased — Phase 3A: `report.v2` trust core
+## 0.1.0 — Phase 3A: `report.v2` trust core
 
 Candidate trust-core implementation of the approved parts of
 `docs/TRUST_SPEC.md`. **Not production readiness.** Trust-anchor distribution
@@ -138,9 +239,9 @@ high-assurance historical acceptance are deliberately not implemented.
   (e.g. `--allow-self-signed` with a non-development profile, or a production
   profile without its required options), `3` a specified trust or replay resource
   that is unavailable or unusable. Two behaviours change:
-  a consistent self-signed report used to exit `0` and now exits `1`; an
-  unreadable or malformed `--trusted-keys` file used to exit `2` and now exits
-  `3`. Running without `--trusted-keys` and without `--allow-self-signed` is a
+  a consistent self-signed report used to exit `0` and now exits `1`; a
+  malformed or empty `--trusted-keys` file used to exit `2` (and a missing path or a directory exited `1`
+  with a traceback) and every unusable trust file now exits `3`. Running without `--trusted-keys` and without `--allow-self-signed` is a
   usage error (`2`). `serve` keeps `2` for "refusing to start".
 - `regaudit-fhe verify` output gains the authoritative fields above and keeps
   `valid` (now an alias of `accepted`) and `trusted_issuer`.
@@ -217,7 +318,7 @@ files.
   (evaluator/decryption-key separation, OpenFHE behavioural verification,
   differential-privacy enforcement).
 
-## Unreleased — Phase 1 trust hardening (partly superseded by Phase 3A above)
+## 0.1.0 — Phase 1 trust hardening (partly superseded by Phase 3A above)
 
 ### Changed (deliberate, security-motivated default changes)
 
