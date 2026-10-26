@@ -604,7 +604,12 @@ class BodySizeLimitMiddleware:
 
         try:
             await self.app(scope, limited_receive, tracking_send)
-        except _BodyTooLarge:
+        except Exception:
+            # Depending on the Starlette/anyio versions our abort reaches us bare or wrapped in an
+            # ExceptionGroup by an inner BaseHTTPMiddleware. Once we have aborted the read ourselves the
+            # only cause of the failure is the oversize body, so answer 413; anything else propagates.
+            if not exceeded:
+                raise
             if not started:
                 started = True
                 await self._reject(send, 413, f"request body exceeds limit {self.max_bytes} bytes")

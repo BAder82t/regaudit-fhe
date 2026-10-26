@@ -115,3 +115,41 @@ def test_unequal_array_lengths_are_a_422_not_a_500():
     bad = dict(GOOD, group_a=[1])
     status, body, _ = run(_call(_app(), "/v1/audit/fairness", [json.dumps(bad).encode()]))
     assert status == 422 and b"inconsistent" in body
+
+
+def test_a_wrapped_abort_still_becomes_413_and_an_unrelated_error_still_propagates():
+    """Inner middleware may re-raise our abort wrapped in another exception (an ExceptionGroup, depending on versions)."""
+    from regaudit_fhe.server import BodySizeLimitMiddleware
+
+    async def reading_app(scope, receive, send):
+        try:
+            while True:
+                message = await receive()
+                if not message.get("more_body"):
+                    break
+        except Exception as exc:
+            raise RuntimeError("wrapped by an inner layer") from exc
+
+    async def failing_app(scope, receive, send):
+        raise RuntimeError("unrelated failure")
+
+    async def drive(app, chunks):
+        sent, it = [], iter(chunks)
+
+        async def receive():
+            body = next(it, None)
+            if body is None:
+                return {"type": "http.disconnect"}
+            return {"type": "http.request", "body": body, "more_body": body is not chunks[-1]}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "headers": [], "method": "POST", "path": "/x"}
+        await BodySizeLimitMiddleware(app, 1024)(scope, receive, send)
+        return sent
+
+    sent = run(drive(reading_app, [b"x" * 600, b"y" * 600, b"z" * 600]))
+    assert sent[0]["status"] == 413
+    with pytest.raises(RuntimeError, match="unrelated failure"):
+        run(drive(failing_app, [b"small"]))
