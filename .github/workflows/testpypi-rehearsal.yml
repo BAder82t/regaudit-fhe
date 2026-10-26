@@ -1,0 +1,167 @@
+name: testpypi-rehearsal
+
+# NON-PRODUCTION rehearsal of the publishing path against TestPyPI (https://test.pypi.org). It lives only on
+# the rehearsal branch and is never merged to master. Boundaries:
+#   * the ONLY trigger is a push to one exact branch; there is no tag trigger and no workflow_dispatch;
+#   * it can use the `testpypi` environment ONLY: no `pypi` environment, no production endpoint, no tag;
+#   * the version must be 0.0.9NN, and the branch must descend from the accepted candidate;
+#   * the artefacts are built and tested by the SAME reusable release-build.yml as the production workflow;
+#   * the files uploaded are re-hashed against the build, and what TestPyPI serves is downloaded and compared.
+# The distributions carry a rehearsal version, so they are NOT byte-identical to the 0.1.0 release artefacts.
+
+on:
+  push:
+    branches:
+      - "rehearsal/testpypi-0.0.901"
+
+permissions: {}
+
+concurrency:
+  group: testpypi-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: the branch, the commit and the version are acceptable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the trigger, the branch and the ancestry
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          CANDIDATE: 8fb437f53dc32991feb9ef3b5e97d939a1f297b6
+        run: |
+          set -euo pipefail
+          test "$EVENT" = "push"
+          test "$REF_TYPE" = "branch"
+          test "$REF_NAME" = "rehearsal/testpypi-0.0.901"
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          git merge-base --is-ancestor "$CANDIDATE" "$EVENT_SHA"
+          version="$(python3 -c "import re;print(re.search(r'^version\s*=\s*\"([^\"]+)\"',open('pyproject.toml').read(),re.M).group(1))")"
+          if ! [[ "$version" =~ ^0\.0\.9[0-9]{2}$ ]]; then
+            echo "rehearsal version $version is not 0.0.9NN" >&2
+            exit 1
+          fi
+          echo "rehearsal $version on $EVENT_SHA descends from $CANDIDATE"
+
+  build:
+    name: build and test the distributions
+    needs: guard
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      expected_tag: ""
+
+  publish:
+    name: upload to TestPyPI (protected environment)
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/regaudit-fhe
+    permissions:
+      contents: read
+      id-token: write       # TestPyPI trusted publishing (OIDC)
+    steps:
+      # actions/download-artifact v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: dist
+          path: dist
+      - name: Re-verify the files about to be uploaded
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^0\.0\.9[0-9]{2}$ ]]
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          test "$(sha256sum dist/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+          test "$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" = "$SDIST_SHA256"
+          test -f "dist/regaudit_fhe-${VERSION}-py3-none-any.whl"
+          test -f "dist/regaudit_fhe-${VERSION}.tar.gz"
+      # pypa/gh-action-pypi-publish release/v1 (v1.14.3)
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          attestations: true
+
+  verify:
+    name: what TestPyPI serves is what was built
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7 (only for scripts/)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          path: repo
+      # actions/setup-python v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - name: Ask TestPyPI what it serves and compare with the build
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          SDIST_SHA256: ${{ needs.build.outputs.sdist_sha256 }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, sys, time, urllib.request
+          version = os.environ["VERSION"]
+          url = f"https://test.pypi.org/pypi/regaudit-fhe/{version}/json"
+          for attempt in range(1, 19):
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      files = json.load(r)["urls"]
+                  if len(files) == 2:
+                      break
+              except OSError as exc:
+                  print(f"not served yet ({exc})")
+              time.sleep(20)
+          else:
+              sys.exit("TestPyPI does not serve both files")
+          served = {f["packagetype"]: f["digests"]["sha256"] for f in files}
+          want = {"bdist_wheel": os.environ["WHEEL_SHA256"], "sdist": os.environ["SDIST_SHA256"]}
+          if served != want:
+              sys.exit(f"served {served} != built {want}")
+          print("TestPyPI serves the wheel and sdist that were built:", served)
+          PY
+      - name: Download the served wheel and check it byte for byte
+        env:
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel_sha256 }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/served"
+          python -m pip download --no-deps --only-binary :all: --index-url https://test.pypi.org/simple/ \
+            --dest "$RUNNER_TEMP/served" "regaudit-fhe==${VERSION}"
+          test "$(find "$RUNNER_TEMP/served" -type f | wc -l)" -eq 1
+          test "$(sha256sum "$RUNNER_TEMP"/served/*.whl | cut -d' ' -f1)" = "$WHEEL_SHA256"
+      - name: Install the served wheel into a clean virtualenv and smoke-test it
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$(ls "$RUNNER_TEMP"/served/*.whl)[server]"
+          scratch="$(mktemp -d)"
+          cd "$scratch"
+          "$RUNNER_TEMP/venv/bin/python" "$GITHUB_WORKSPACE/repo/scripts/smoke_installed_wheel.py" \
+            --version "$VERSION" --forbid-path "$GITHUB_WORKSPACE"
