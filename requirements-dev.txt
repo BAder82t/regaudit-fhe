@@ -4,7 +4,7 @@
 #
 #    pip-compile --extra=dev --extra=server --output-file=requirements-dev.txt pyproject.toml
 #
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
