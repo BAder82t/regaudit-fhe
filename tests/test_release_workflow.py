@@ -294,3 +294,11 @@ def test_manifest_ships_what_the_sdist_needs_to_run_the_suite():
         "include CHANGELOG.md",
     ):
         assert needle in manifest, needle
+
+
+def test_every_workflow_in_the_repository_pins_its_third_party_actions_to_commits():
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for ref in _uses(path):
+            if ref.startswith("./"):
+                continue
+            assert SHA.search(ref + "\n"), f"{path.name}: {ref} is not pinned to a 40-hex commit"

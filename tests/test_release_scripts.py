@@ -32,11 +32,25 @@ def _root(tmp_path: Path, pyproject="0.1.0", init="0.1.0", lib="0.1.0") -> Path:
     (root / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{pyproject}"\n')
     (root / "src/regaudit_fhe/__init__.py").write_text(f'__version__ = "{init}"\n')
     (root / "src/regaudit_fhe/reports.py").write_text(f'LIB_VERSION: str = "{lib}"\n')
+    (root / "src/regaudit_fhe/py.typed").write_text("")
+    (root / "src/regaudit_fhe/schemas").mkdir()
+    for n in SCHEMAS:
+        (root / "src/regaudit_fhe/schemas" / n).write_text("{}")
+    (root / "LICENSE").write_text("AGPL text")
+    (root / "LICENSE-COMMERCIAL.md").write_text("commercial terms")
     return root
 
 
 def _wheel(
-    path: Path, version="0.1.0", schemas=None, py_typed=True, name="regaudit-fhe", extra=None
+    path: Path,
+    version="0.1.0",
+    schemas=None,
+    py_typed=True,
+    name="regaudit-fhe",
+    extra=None,
+    init="0.1.0",
+    lib="0.1.0",
+    schema_body="{}",
 ):
     names = SCHEMAS if schemas is None else schemas
     with zipfile.ZipFile(path, "w") as zf:
@@ -44,10 +58,15 @@ def _wheel(
             f"regaudit_fhe-{version}.dist-info/METADATA",
             f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n",
         )
+        zf.writestr("regaudit_fhe/__init__.py", f'__version__ = "{init}"\n')
+        zf.writestr("regaudit_fhe/reports.py", f'LIB_VERSION: str = "{lib}"\n')
         for n in names:
-            zf.writestr(f"regaudit_fhe/schemas/{n}", "{}")
+            zf.writestr(f"regaudit_fhe/schemas/{n}", schema_body)
         if py_typed:
             zf.writestr("regaudit_fhe/py.typed", "")
+        di = f"regaudit_fhe-{version}.dist-info/licenses/"
+        zf.writestr(di + "LICENSE", "AGPL text")
+        zf.writestr(di + "LICENSE-COMMERCIAL.md", "commercial terms")
         for member in extra or ():
             zf.writestr(member, "x")
 
@@ -245,3 +264,38 @@ def test_an_sdist_with_a_member_outside_its_top_directory_is_refused(tmp_path, c
 def test_unexpected_files_inside_the_package_or_dist_info_are_refused(tmp_path, member, capsys):
     assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": [member]})) == 1
     assert "outside regaudit_fhe/" in capsys.readouterr().err
+
+
+def test_a_modified_schema_in_the_wheel_is_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"schema_body": '{"tampered": true}'})) == 1
+    assert "not byte-identical to the checkout" in capsys.readouterr().err
+
+
+def test_a_modified_python_module_in_the_wheel_is_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"init": "0.1.0 # evil"})) == 1
+    assert "regaudit_fhe/__init__.py is not byte-identical" in capsys.readouterr().err
+
+
+def test_an_extra_python_file_in_the_wheel_package_is_refused(tmp_path, capsys):
+    assert (
+        _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": ["regaudit_fhe/backdoor.py"]})) == 1
+    )
+    assert "differ from the checkout" in capsys.readouterr().err
+
+
+def test_a_missing_python_file_in_the_wheel_package_is_refused(tmp_path):
+    root = _root(tmp_path)
+    (root / "src/regaudit_fhe/extra_module.py").write_text("x = 1\n")
+    assert _run(root, _dist(tmp_path)) == 1
+
+
+@pytest.mark.filterwarnings("ignore:Duplicate name")
+def test_duplicate_member_names_in_the_wheel_are_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": ["regaudit_fhe/py.typed"]})) == 1
+    assert "duplicate member names" in capsys.readouterr().err
+
+
+def test_an_extra_file_under_licenses_is_refused(tmp_path, capsys):
+    extra = ["regaudit_fhe-0.1.0.dist-info/licenses/EXTRA.txt"]
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": extra})) == 1
+    assert "licence files are" in capsys.readouterr().err

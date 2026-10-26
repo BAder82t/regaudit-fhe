@@ -12,6 +12,7 @@ Checks (any failure exits non-zero with a message):
   * ``--dist`` holds exactly one wheel and one sdist, nothing else;
   * wheel METADATA ``Version`` and the sdist ``PKG-INFO`` ``Version`` equal that version;
   * both distributions contain exactly the expected runtime schema files and ``py.typed``;
+  * every file in the wheel's package is byte-identical to the file in ``--root`` (and none is missing or extra);
   * the sdist contains the test helpers and data the test suite needs, so it can run the suite itself.
 """
 
@@ -85,7 +86,42 @@ def _allowed_wheel_member(name: str, version: str) -> bool:
     return False
 
 
-def check_wheel(path: Path, version: str) -> list[str]:
+def _wheel_equals_source(zf: zipfile.ZipFile, names: list[str], root: Path) -> list[str]:
+    """Every packaged file must be byte-identical to the checkout it was built from, and nothing may be missing."""
+    problems: list[str] = []
+    pkg = root / "src" / "regaudit_fhe"
+    expected = {
+        "regaudit_fhe/" + p.relative_to(pkg).as_posix()
+        for p in pkg.rglob("*")
+        if p.is_file()
+        and "__pycache__" not in p.parts
+        and (
+            p.suffix == ".py"
+            or p.name == "py.typed"
+            or (p.parent.name == "schemas" and p.suffix == ".json")
+        )
+    }
+    shipped = {n for n in names if n.startswith("regaudit_fhe/")}
+    if shipped != expected:
+        problems.append(
+            f"wheel package files differ from the checkout (extra {sorted(shipped - expected)[:5]}, "
+            f"missing {sorted(expected - shipped)[:5]})"
+        )
+    for n in sorted(shipped & expected):
+        if zf.read(n) != (root / "src" / n).read_bytes():
+            problems.append(f"wheel member {n} is not byte-identical to the checkout")
+    licences = {n.rsplit("/", 1)[1]: n for n in names if "/licenses/" in n}
+    if set(licences) != {"LICENSE", "LICENSE-COMMERCIAL.md"}:
+        problems.append(
+            f"wheel licence files are {sorted(licences)}, expected LICENSE and LICENSE-COMMERCIAL.md"
+        )
+    for base, member in licences.items():
+        if (root / base).is_file() and zf.read(member) != (root / base).read_bytes():
+            problems.append(f"wheel licence file {base} is not byte-identical to the checkout")
+    return problems
+
+
+def check_wheel(path: Path, version: str, root: Path | None = None) -> list[str]:
     problems: list[str] = []
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
@@ -103,6 +139,10 @@ def check_wheel(path: Path, version: str) -> list[str]:
             )
         if got != version:
             problems.append(f"{path.name}: METADATA Version {got} != {version}")
+        if len(names) != len(set(names)):
+            problems.append(f"{path.name}: duplicate member names in the archive")
+        if root is not None:
+            problems += _wheel_equals_source(zf, names, root)
         schemas = _schema_names(names, "regaudit_fhe/schemas/")
         if schemas != EXPECTED_SCHEMAS:
             problems.append(
@@ -204,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(sdists)} sdist(s), other files {others})"
         )
     else:
-        problems += check_wheel(wheels[0], version)
+        problems += check_wheel(wheels[0], version, args.root)
         problems += check_sdist(sdists[0], version)
 
     if problems:

@@ -34,7 +34,7 @@ attached to the matching GitHub Release page.
 > **Status: this recipe has not been exercised.** No release has been produced by the current
 > `pypi-release.yml` since its actions were bumped to new major versions, so neither the attestation
 > location nor the identity strings below have been checked against a real release. In particular
-> `pip download` fetches only the wheel: the `.sigstore` bundles are uploaded to the GitHub Release
+> `pip download` fetches only the wheel: the `.sigstore.json` bundles are uploaded to the GitHub Release
 > (and as a workflow artefact), not to PyPI, so download the bundle from the Release assets (or the
 > attestation from the PyPI provenance URL). The certificate identity names the tag the workflow ran
 > on, so a run that was not triggered by that tag will not match it.
@@ -58,7 +58,7 @@ attached to the matching GitHub Release page.
 
    ```bash
    sigstore verify identity \
-     --bundle dl/regaudit_fhe-<VERSION>-py3-none-any.whl.sigstore \
+     --bundle dl/regaudit_fhe-<VERSION>-py3-none-any.whl.sigstore.json \
      --cert-identity "https://github.com/BAder82t/regaudit-fhe/.github/workflows/pypi-release.yml@refs/tags/v<VERSION>" \
      --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
      dl/regaudit_fhe-<VERSION>-py3-none-any.whl

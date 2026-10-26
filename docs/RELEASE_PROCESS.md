@@ -35,12 +35,12 @@ touch packaging or release files, and on demand (a `workflow_dispatch` needs the
 PR that does not touch those paths would wait for it forever). It publishes nothing, signs nothing, has no environment and no `id-token`.
 
 ## 2. What a release needs before the tag is pushed
-1. Qualified non-author review of the diff since the previous release (recorded, with the full 40-character commit).
+1. The review the owner has decided on for this release, recorded with the full 40-character commit. For 0.1.0 the owner waived human code review and substituted independent AI-agent reviews plus executable verification (`docs/rc/RC_ACCEPTANCE_REPORT.md`); that is a lower assurance than a professional audit and must be stated as such in the release notes.
 2. `CHANGELOG.md` section for the version, known limitations listed; version bumped consistently
    (`python scripts/check_release_metadata.py --dist dist --tag vX.Y.Z` after a local build).
 3. A green `release-rehearsal` run on the exact commit (GitHub Actions, not only local).
 4. The owner's explicit decision to publish.
-5. An **annotated** tag on a commit that is already on the default branch:
+5. The release commit **merged into the default branch first** (the `guard` job refuses a commit that is not reachable from it), then an **annotated** tag on that commit:
    `git tag -a vX.Y.Z -m "regaudit-fhe X.Y.Z" <commit>` then `git push origin vX.Y.Z`.
 6. Approve the `pypi` environment deployment in the GitHub UI after reading the job summary.
 7. After publication: install from PyPI into a clean venv outside the repository and run
@@ -82,6 +82,8 @@ other two layers.)
 checks `lint`, `typecheck`, `bandit`, `tests` and `pip-audit`. Do not require `release-rehearsal` (path-filtered). A required
 approving review is possible only if a second collaborator exists.
 
+**3.3b Enforce SHA pinning of actions** (Settings → Actions → General → "Require actions to be pinned to a full-length commit SHA"; currently off). All workflows in the repository already use full SHAs.
+
 **3.4 PyPI trusted publisher** (PyPI project settings → Publishing). **Change the existing publisher from the
 workflow file `publish.yml` to `pypi-release.yml`** (owner `BAder82t`, repository `regaudit-fhe`, environment
 `pypi`) **before the first release from this pipeline**, and remove any other entry. Until it is changed a release
@@ -94,6 +96,9 @@ TestPyPI project with its own trusted publisher, point a copy of `pypi-release.y
 with `docs/SUPPLY_CHAIN.md` and correct that document. Do not do this in the real repository.
 
 ## 4. Known gaps
+* **The guard cannot stop someone who can push to the repository.** GitHub runs the workflow file from the tagged commit, so a writer can ship a modified `pypi-release.yml` under the same name. Only the owner-side controls (3.1 required reviewer on the `pypi` environment, 3.2 tag ruleset, 3.3 branch protection, 3.4 the PyPI publisher bound to the environment) limit that. Until they are in place the pipeline is not protected against a malicious or compromised writer.
+* The `sigstore` job signs outside the `pypi` environment, so a Sigstore bundle proves "this workflow file at this tag produced the files", not "a reviewer approved"; the PyPI attestation created in the `publish` job is the environment-bound one.
+* The build tools and their transitive dependencies are version-pinned only for `build`, `twine`, `pip-audit` and `cyclonedx-bom` (not hash-pinned); `wheel` floats within the `setuptools` bound.
 * The `guard`, `smoke`, `sigstore`, `publish` and `github-release` steps have never run on GitHub. Their shell
   was reviewed (`actionlint`/ShellCheck) and exercised locally in a Linux container where possible; GitHub
   runner differences, permissions and the environment gate are untested.
