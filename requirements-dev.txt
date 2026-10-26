@@ -87,7 +87,7 @@ pytest==9.1.1
     #   regaudit-fhe (pyproject.toml)
 pytest-cov==7.1.0
     # via regaudit-fhe (pyproject.toml)
-python-dotenv==1.2.2
+python-dotenv==1.2.4
     # via uvicorn
 pyyaml==6.0.3
     # via uvicorn
