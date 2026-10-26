@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib.util
 import io
 import tarfile
@@ -36,6 +38,16 @@ def _root(tmp_path: Path, pyproject="0.1.0", init="0.1.0", lib="0.1.0") -> Path:
     (root / "src/regaudit_fhe/schemas").mkdir()
     for n in SCHEMAS:
         (root / "src/regaudit_fhe/schemas" / n).write_text("{}")
+    for rel in (
+        "tests/_asgi.py",
+        "tests/vectors/report_v2/vectors.json",
+        "tests/test_installed_distribution.py",
+        "scripts/check_release_metadata.py",
+        "scripts/smoke_installed_wheel.py",
+        "CHANGELOG.md",
+    ):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(b"")
     (root / "LICENSE").write_text("AGPL text")
     (root / "LICENSE-COMMERCIAL.md").write_text("commercial terms")
     return root
@@ -51,24 +63,40 @@ def _wheel(
     init="0.1.0",
     lib="0.1.0",
     schema_body="{}",
+    requires=(),
+    entry_points=None,
+    record_tamper=False,
 ):
     names = SCHEMAS if schemas is None else schemas
+    di = f"regaudit_fhe-{version}.dist-info/"
+    meta = f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n" + "".join(
+        f"Requires-Dist: {r}\n" for r in requires
+    )
+    files: list[tuple[str, str]] = [
+        (di + "METADATA", meta),
+        (di + "WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"),
+        ("regaudit_fhe/__init__.py", f'__version__ = "{init}"\n'),
+        ("regaudit_fhe/reports.py", f'LIB_VERSION: str = "{lib}"\n'),
+        *((f"regaudit_fhe/schemas/{n}", schema_body) for n in names),
+        *((("regaudit_fhe/py.typed", ""),) if py_typed else ()),
+        (di + "licenses/LICENSE", "AGPL text"),
+        (di + "licenses/LICENSE-COMMERCIAL.md", "commercial terms"),
+    ]
+    if entry_points is not None:
+        files.append((di + "entry_points.txt", entry_points))
+    files += [(m, "x") for m in extra or ()]
+    rows = []
+    for n, body in files:
+        data = body.encode()
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        if record_tamper and n == "regaudit_fhe/reports.py":
+            digest = "A" * 43
+        rows.append(f"{n},sha256={digest},{len(data)}")
+    rows.append(f"{di}RECORD,,")
     with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr(
-            f"regaudit_fhe-{version}.dist-info/METADATA",
-            f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n",
-        )
-        zf.writestr("regaudit_fhe/__init__.py", f'__version__ = "{init}"\n')
-        zf.writestr("regaudit_fhe/reports.py", f'LIB_VERSION: str = "{lib}"\n')
-        for n in names:
-            zf.writestr(f"regaudit_fhe/schemas/{n}", schema_body)
-        if py_typed:
-            zf.writestr("regaudit_fhe/py.typed", "")
-        di = f"regaudit_fhe-{version}.dist-info/licenses/"
-        zf.writestr(di + "LICENSE", "AGPL text")
-        zf.writestr(di + "LICENSE-COMMERCIAL.md", "commercial terms")
-        for member in extra or ():
-            zf.writestr(member, "x")
+        for n, body in files:
+            zf.writestr(n, body)
+        zf.writestr(di + "RECORD", "\n".join(rows) + "\n")
 
 
 def _sdist(
@@ -299,3 +327,46 @@ def test_an_extra_file_under_licenses_is_refused(tmp_path, capsys):
     extra = ["regaudit_fhe-0.1.0.dist-info/licenses/EXTRA.txt"]
     assert _run(_root(tmp_path), _dist(tmp_path, wheel={"extra": extra})) == 1
     assert "licence files are" in capsys.readouterr().err
+
+
+TOMLLIB = importlib.util.find_spec("tomllib") is not None
+
+
+@pytest.mark.skipif(
+    not TOMLLIB, reason="needs tomllib (Python 3.11+); the release workflow runs on 3.12"
+)
+def test_an_added_dependency_in_the_wheel_metadata_is_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"requires": ["evil-package>=1"]})) == 1
+    assert "dependencies differ from pyproject.toml" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not TOMLLIB, reason="needs tomllib (Python 3.11+)")
+def test_a_changed_console_script_is_refused(tmp_path, capsys):
+    ep = "[console_scripts]\nregaudit-fhe = evil.module:main\n"
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"entry_points": ep})) == 1
+    assert "entry_points.txt differs" in capsys.readouterr().err
+
+
+def test_a_record_file_that_does_not_match_the_members_is_refused(tmp_path, capsys):
+    assert _run(_root(tmp_path), _dist(tmp_path, wheel={"record_tamper": True})) == 1
+    assert "RECORD hash or size is wrong" in capsys.readouterr().err
+
+
+def test_a_changed_source_file_in_the_sdist_is_refused(tmp_path, capsys):
+    def backdoor(tf, top):
+        data = b"import os; os.system('x')\n"
+        ti = tarfile.TarInfo(f"{top}/src/regaudit_fhe/__init__.py")
+        ti.size = len(data)
+        tf.addfile(ti, io.BytesIO(data))
+
+    assert _run(_root(tmp_path), _dist(tmp_path, sdist={"extra": backdoor})) == 1
+    assert "not byte-identical to the checkout" in capsys.readouterr().err
+
+
+def test_an_extra_setup_py_in_the_sdist_is_refused(tmp_path, capsys):
+    def add(tf, top):
+        ti = tarfile.TarInfo(f"{top}/setup.py")
+        tf.addfile(ti, io.BytesIO(b""))
+
+    assert _run(_root(tmp_path), _dist(tmp_path, sdist={"extra": add})) == 1
+    assert "setup.py is not in the checkout" in capsys.readouterr().err

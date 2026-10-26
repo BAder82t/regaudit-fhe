@@ -12,13 +12,19 @@ Checks (any failure exits non-zero with a message):
   * ``--dist`` holds exactly one wheel and one sdist, nothing else;
   * wheel METADATA ``Version`` and the sdist ``PKG-INFO`` ``Version`` equal that version;
   * both distributions contain exactly the expected runtime schema files and ``py.typed``;
-  * every file in the wheel's package is byte-identical to the file in ``--root`` (and none is missing or extra);
+  * every file in the wheel's package is byte-identical to the file in ``--root`` (and none is missing or extra), the
+    wheel's RECORD is consistent, its dependencies and console scripts equal ``pyproject.toml``'s;
+  * every file in the sdist equals the checkout's, apart from PKG-INFO, setup.cfg and the egg-info directory;
   * the sdist contains the test helpers and data the test suite needs, so it can run the suite itself.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
+import hashlib
+import io
 import re
 import sys
 import tarfile
@@ -61,6 +67,103 @@ def source_versions(root: Path) -> dict[str, str]:
 
 def _schema_names(names: list[str], marker: str) -> set[str]:
     return {Path(n).name for n in names if marker in n and n.endswith(".schema.json")}
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _declared_from_pyproject(root: Path) -> tuple[set[tuple[str, str]], dict[str, str]] | None:
+    """(extra, distribution) pairs and console scripts declared in pyproject.toml; None if tomllib is unavailable."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10: the release workflow runs this on 3.12
+        return None
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8")).get(
+        "project", {}
+    )
+
+    def dist(spec: str) -> str:
+        return _norm(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", spec).group(1))  # type: ignore[union-attr]
+
+    pairs = {("", dist(d)) for d in project.get("dependencies", [])}
+    for extra, deps in project.get("optional-dependencies", {}).items():
+        pairs |= {(extra, dist(d)) for d in deps}
+    return pairs, dict(project.get("scripts", {}))
+
+
+def _wheel_metadata_matches_pyproject(
+    zf: zipfile.ZipFile, meta_text: str, di: str, root: Path
+) -> list[str]:
+    declared = _declared_from_pyproject(root)
+    if declared is None:
+        return []
+    want_pairs, want_scripts = declared
+    problems: list[str] = []
+    got_pairs = set()
+    for m in re.finditer(r"^Requires-Dist:\s*(.+)$", meta_text, re.MULTILINE):
+        spec = m.group(1)
+        name = _norm(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", spec).group(1))  # type: ignore[union-attr]
+        extra = re.search(r"extra\s*==\s*['\"]([^'\"]+)['\"]", spec)
+        got_pairs.add((extra.group(1) if extra else "", name))
+    if got_pairs != want_pairs:
+        problems.append(
+            f"wheel METADATA dependencies differ from pyproject.toml (extra {sorted(got_pairs - want_pairs)}, "
+            f"missing {sorted(want_pairs - got_pairs)})"
+        )
+    ep_name = di + "entry_points.txt"
+    if ep_name in zf.namelist():
+        ep = zf.read(ep_name).decode("utf-8")
+        section = re.search(r"\[console_scripts\]\n(.*?)(?:\n\[|\Z)", ep, re.DOTALL)
+        got_scripts = {}
+        for line in (section.group(1) if section else "").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                got_scripts[k.strip()] = v.strip()
+        if got_scripts != want_scripts or re.findall(r"^\[(.+)\]$", ep, re.MULTILINE) != [
+            "console_scripts"
+        ]:
+            problems.append(
+                "wheel entry_points.txt differs from [project.scripts] in pyproject.toml"
+            )
+    elif want_scripts:
+        problems.append("wheel has no entry_points.txt but pyproject.toml declares scripts")
+    wheel_file = zf.read(di + "WHEEL").decode("utf-8") if di + "WHEEL" in zf.namelist() else ""
+    if not re.search(r"^Tag:\s*py3-none-any\s*$", wheel_file, re.MULTILINE) or not re.search(
+        r"^Root-Is-Purelib:\s*true\s*$", wheel_file, re.MULTILINE
+    ):
+        problems.append("wheel WHEEL file is not a pure-Python py3-none-any wheel")
+    return problems
+
+
+def _wheel_record_consistent(zf: zipfile.ZipFile, di: str) -> list[str]:
+    """RECORD must list every member (except itself) with the right SHA-256 and size."""
+    record_name = di + "RECORD"
+    if record_name not in zf.namelist():
+        return ["wheel has no RECORD file"]
+    problems: list[str] = []
+    listed = {}
+    for row in csv.reader(io.StringIO(zf.read(record_name).decode("utf-8"))):
+        if row:
+            listed[row[0]] = row[1:]
+    members = [n for n in zf.namelist() if not n.endswith("/")]
+    for n in members:
+        if n == record_name:
+            continue
+        entry = listed.get(n)
+        if entry is None or not entry[0].startswith("sha256="):
+            problems.append(f"wheel RECORD does not list {n}")
+            continue
+        data = zf.read(n)
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+        )
+        if entry[0] != "sha256=" + digest or (entry[1] and int(entry[1]) != len(data)):
+            problems.append(f"wheel RECORD hash or size is wrong for {n}")
+    for n in listed:
+        if n != record_name and n not in members:
+            problems.append(f"wheel RECORD lists a member that is not in the archive: {n}")
+    return problems
 
 
 DIST_INFO_FILES = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt"}
@@ -141,8 +244,11 @@ def check_wheel(path: Path, version: str, root: Path | None = None) -> list[str]
             problems.append(f"{path.name}: METADATA Version {got} != {version}")
         if len(names) != len(set(names)):
             problems.append(f"{path.name}: duplicate member names in the archive")
+        di = f"regaudit_fhe-{version}.dist-info/"
+        problems += _wheel_record_consistent(zf, di)
         if root is not None:
             problems += _wheel_equals_source(zf, names, root)
+            problems += _wheel_metadata_matches_pyproject(zf, meta_text, di, root)
         schemas = _schema_names(names, "regaudit_fhe/schemas/")
         if schemas != EXPECTED_SCHEMAS:
             problems.append(
@@ -157,7 +263,28 @@ def check_wheel(path: Path, version: str, root: Path | None = None) -> list[str]
     return problems
 
 
-def check_sdist(path: Path, version: str) -> list[str]:
+def _sdist_equals_source(tf: tarfile.TarFile, members, version: str, root: Path) -> list[str]:
+    """Every file in the sdist must be byte-identical to the checkout, except the few files the backend generates."""
+    top = f"regaudit_fhe-{version}/"
+    generated = ("PKG-INFO", "setup.cfg")
+    problems: list[str] = []
+    for m in members:
+        if not m.isreg() or not m.name.startswith(top):
+            continue
+        rel = m.name[len(top) :]
+        if rel in generated or rel.startswith("src/regaudit_fhe.egg-info/"):
+            continue
+        source = root / rel
+        if not source.is_file():
+            problems.append(f"sdist member {rel} is not in the checkout")
+            continue
+        extracted = tf.extractfile(m)
+        if extracted is None or extracted.read() != source.read_bytes():
+            problems.append(f"sdist member {rel} is not byte-identical to the checkout")
+    return problems[:20]
+
+
+def check_sdist(path: Path, version: str, root: Path | None = None) -> list[str]:
     problems: list[str] = []
     with tarfile.open(path) as tf:
         members = tf.getmembers()
@@ -168,6 +295,8 @@ def check_sdist(path: Path, version: str) -> list[str]:
         unsafe = [n for n in names if n.startswith("/") or ".." in Path(n).parts]
         if unsafe:
             problems.append(f"{path.name}: unsafe member names {unsafe[:3]}")
+        if root is not None:
+            problems += _sdist_equals_source(tf, members, version, root)
         info = [n for n in names if n.count("/") == 1 and n.endswith("/PKG-INFO")]
         if len(info) != 1:
             return [*problems, f"{path.name}: expected one top-level PKG-INFO, found {len(info)}"]
@@ -245,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         problems += check_wheel(wheels[0], version, args.root)
-        problems += check_sdist(sdists[0], version)
+        problems += check_sdist(sdists[0], version, args.root)
 
     if problems:
         print("RELEASE CHECK FAILED", file=sys.stderr)

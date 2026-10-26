@@ -64,7 +64,7 @@ def load_schema(name: str) -> dict[str, Any]:
         path = _schemas_dir() / f"{primitive}.{direction}.schema.json"
     else:
         raise KeyError(f"schema name must be 'envelope' or '<primitive>.<direction>'; got {name!r}")
-    with path.open("r") as fh:
+    with path.open("r", encoding="utf-8") as fh:
         return cast(dict[str, Any], json.load(fh))
 
 

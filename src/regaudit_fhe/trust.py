@@ -300,6 +300,13 @@ class TrustStore:
         pins: dict[str, str] = {}
 
         if "keys" in payload and isinstance(payload["keys"], Mapping):
+            unknown_members = set(payload) - {"keys", "revoked", "parameter_set_pins"}
+            if unknown_members:
+                # A misspelt "revoked" would otherwise load as an empty revocation list and fail open.
+                raise TrustStoreError(
+                    f"trust-store has unknown member(s) {sorted(unknown_members)!r}; "
+                    "expected only keys, revoked and parameter_set_pins"
+                )
             raw_keys = payload["keys"]
             raw_revoked = payload.get("revoked", [])
             raw_pins = payload.get("parameter_set_pins", {})

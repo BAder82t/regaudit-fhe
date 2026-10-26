@@ -153,3 +153,15 @@ def test_a_wrapped_abort_still_becomes_413_and_an_unrelated_error_still_propagat
     assert sent[0]["status"] == 413
     with pytest.raises(RuntimeError, match="unrelated failure"):
         run(drive(failing_app, [b"small"]))
+
+
+def test_an_overflow_inside_a_primitive_is_a_422_not_a_500(monkeypatch):
+    """Found by Agent C: a huge integer made a primitive raise OverflowError and the server answered 500."""
+    from regaudit_fhe import server
+
+    def boom(primitive, payload):
+        raise OverflowError("int too large to convert to float")
+
+    monkeypatch.setattr(server, "_audit_dispatch", boom)
+    status, body, _ = run(_call(_app(), "/v1/audit/fairness", [json.dumps(GOOD).encode()]))
+    assert status == 422 and b"inconsistent" in body

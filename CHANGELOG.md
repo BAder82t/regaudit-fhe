@@ -45,6 +45,13 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
   a BOM or invalid UTF-8 are now refused with `TrustStoreError`. Previously a duplicated key silently won, so a
   duplicate `"revoked"` entry could empty the revocation list and a duplicate key id could re-activate a
   compromised key. **Compatibility:** a trust store with such content (or a BOM) that loaded before is now refused.
+- **A trust store in the legacy `keys`/`revoked`/`parameter_set_pins` form now refuses unknown top-level members.**
+  A misspelt `"revokd": [...]` used to load with an empty revocation list, so a key meant to be revoked verified as
+  `TRUSTED` (found by the adversarial review, reproduced on a real server). **Compatibility:** a legacy store with any
+  other top-level member is now refused; the `entries` form already refused unknown members.
+- Schema files and `regaudit-fhe audit --input` are read as UTF-8 regardless of the locale (two schemas contain
+  non-ASCII text; under an ASCII locale loading them raised `UnicodeDecodeError`).
+- An `OverflowError` inside a primitive (a huge integer) answers 422 like other inconsistent input.
 - Inconsistent audit inputs that the schema cannot express (for example arrays of unequal length) answer HTTP 422
   instead of 500; the detail is logged server-side only.
 - `regaudit-fhe verify --help` now says that `--allow-self-signed` outside the development profile exits 2 (it
@@ -70,7 +77,7 @@ Phase 3A section and `docs/rc/RC_COMPATIBILITY_ASSESSMENT.md` before upgrading f
 
 - **The HTTP server is not hardened for direct exposure to untrusted clients.** There are no per-input
   resource caps on the audit primitives (for example the `provenance` bucket count grows memory with its square,
-  and the request timeout answers 504 but does not cancel the worker), `X-Request-ID` has no length limit, the
+  and the request timeout answers 504 but does not cancel the worker), `X-Request-ID` has no length limit, a chunked 413 is logged as an unhandled exception and a client that disconnects mid-body on `/v1/verify` logs a traceback, `/readyz` checks one schema and caches the first successful load, the
   trust store is read once at start-up (revocation needs a restart), and the replay database is created with
   the process's default file mode. Run it behind a reverse proxy that enforces size, rate and time limits on
   every route.

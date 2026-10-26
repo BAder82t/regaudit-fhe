@@ -950,7 +950,7 @@ def build_app(
             env = _audit_dispatch(primitive, payload)
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
-        except ValueError as exc:
+        except (ValueError, OverflowError) as exc:
             # The primitives reject inputs the schema cannot express (for example arrays of unequal length).
             # Say so with a 422; keep the detail in the server log only.
             logger.warning(

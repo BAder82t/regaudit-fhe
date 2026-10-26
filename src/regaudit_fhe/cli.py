@@ -147,7 +147,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     if args.schema:
         print(json.dumps(SCHEMAS[args.primitive], indent=2))
         return 0
-    payload = json.loads(Path(args.input).read_text())
+    payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
     try:
         env = _audit_dispatch(args.primitive, payload)
     except SchemaError as exc:
