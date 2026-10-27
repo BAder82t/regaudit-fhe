@@ -151,13 +151,63 @@ breakdown, and security analysis, is in
 pip install regaudit-fhe
 ```
 
-The plaintext model that runs the depth-budgeted slot-vector circuits
-(used for testing, oracles, and CI) requires only `numpy>=1.26`. The
-encrypted execution path lives behind the optional `[fhe]` extra:
+That is enough for everything except encrypted execution and the HTTP server: the six
+audit primitives run in the plaintext reference model, and signing, verification, the
+schemas and the `regaudit-fhe` command all work (Python 3.10 or newer; the only hard
+dependencies are `numpy`, `cryptography` and `jsonschema`).
+
+| You want to... | Install | Notes |
+| --- | --- | --- |
+| Audit, sign, verify, use the CLI | `pip install regaudit-fhe` | Plaintext reference model. |
+| Run the primitives on CKKS ciphertexts | `pip install "regaudit-fhe[fhe]"` | Adds TenSEAL. Needs a TenSEAL wheel for your platform and Python; if `pip` cannot find one the install fails, and the base package still works. |
+| Run `regaudit-fhe serve` / `build_app()` | `pip install "regaudit-fhe[server]"` | Adds FastAPI and uvicorn. Without it `serve` stops with a message naming this extra. |
+| Try the experimental OpenFHE backend | `pip install "regaudit-fhe[openfhe]"` | Optional and experimental. |
+| Work on the project | `pip install -e ".[dev,server,fhe]"` | Test, lint and type-check tools. |
+
+Quote the extra: in **zsh** (the default macOS shell) an unquoted `regaudit-fhe[fhe]` fails
+with `no matches found`.
+
+Check the install from any directory (it needs nothing from a checkout):
 
 ```bash
-pip install regaudit-fhe[fhe]    # adds the TenSEAL CKKS backend
+regaudit-fhe --help
+regaudit-fhe schema --list                         # the 14 bundled JSON Schemas
+python -c "import regaudit_fhe as rf; print(rf.__version__)"
 ```
+
+### Try it in one minute
+
+[`examples/strict_verification_quickstart.py`](examples/strict_verification_quickstart.py)
+uses only the installed package and synthetic data. It signs a report, verifies it
+against a trust store (`TRUSTED`), then shows what a valid-but-untrusted signature, a
+forged report and a tampered report look like, and what the CLI exit codes are:
+
+```bash
+python examples/strict_verification_quickstart.py            # files go to a temp dir
+python examples/strict_verification_quickstart.py --out demo # keep report.json + trust_store.json
+regaudit-fhe verify -i demo/report.json --trusted-keys demo/trust_store.json --verifier-id regulator-a
+```
+
+### Encrypted execution (needs `[fhe]`)
+
+```python
+import numpy as np
+import regaudit_fhe as rf
+from regaudit_fhe.fhe import build_d6_context
+from regaudit_fhe.fhe import primitives as enc
+
+ctx = build_d6_context()                       # CKKS context; takes a few seconds
+y_true = np.array([1, 0, 1, 1, 0, 1, 0, 0.]); y_pred = np.array([1, 0, 1, 0, 0, 1, 1, 0.])
+a = np.array([1, 1, 1, 1, 0, 0, 0, 0.])
+report = enc.fairness_encrypted(ctx, y_true, y_pred, a, 1.0 - a)   # same report type as audit_fairness
+```
+
+`ctx` holds the secret key and the call decrypts the aggregate scalars, so in this form the
+same process sees both the inputs and the result: it demonstrates that the encrypted circuit
+matches the plaintext one, not a deployment where the data holder and the evaluator differ.
+`rf.envelope(...)` records `backend: "plaintext"` unless you pass a `parameter_set=`
+(see `examples/signed_envelope.py`), so describe the backend in the parameter set when you
+sign an encrypted-path result.
 
 ---
 
@@ -199,6 +249,29 @@ print(envelope.to_json())                     # ship this to the regulator
 | `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
 
 Everything else in this section is detail layered on that one idea.
+
+### A valid signature is not a trusted signer
+
+A report carries the public key that checks its own signature. So anyone can produce a
+report whose hash and signature are perfectly consistent: generate a key, sign, embed the key.
+Consistency proves the bytes were not changed after signing. It proves nothing about **who**
+signed. Only a key the verifier registered beforehand can answer that.
+
+| What you ran | What a good result means | Does it authenticate the issuer? |
+| --- | --- | --- |
+| `rf.verify_report(env, VerificationPolicy(trust_store=...))` / `regaudit-fhe verify --trusted-keys` | `trust_status == "TRUSTED"`, `accepted` is `True` (CLI exit 0) | **Yes**, within the key's registered scope. |
+| `VerificationPolicy(allow_self_signed=True)` / `--allow-self-signed` | `integrity_valid` is `True`, `trust_status == "SELF_SIGNED_ONLY"`, `accepted` is `False` (CLI exit 1) | No. Development only. |
+| `VerificationPolicy()` with no trust store | raises `VerificationUnavailable` (CLI exit 2) | n/a: refuses rather than trusting the embedded key. |
+| `rf.verify_receipt(env)` | returns `True` for an intact report **signed by anyone** (one-time `UserWarning`) | **No.** Do not use it as an accept/reject decision. |
+| `rf.verify_envelope(env)` with no `trusted_keys`/`trust_store` | `.trust_status == "SELF_SIGNED_ONLY"`, but the deprecated `.valid` is `True` | **No.** Branch on `trust_status`, never on `valid`. |
+
+Rules of thumb: decide on `result.accepted` (or the CLI exit code `0`), never on
+`integrity_valid`, `valid` or a truthy return value. Build the trust store from keys you
+obtained out of band (a key ceremony, the issuer's published fingerprint), not from
+a report you received. Even `TRUSTED` says only "signed by a key in my trust store, within
+its scope, with every policy rule met"; it does not say the audit is correct or that anything
+is compliant. [`examples/strict_verification_quickstart.py`](examples/strict_verification_quickstart.py)
+runs each of these cases.
 
 ### Regulator side — verify a report (recommended)
 
@@ -474,16 +547,20 @@ SHA-256 receipts are useful for tamper evidence only.
 
 ## Examples
 
-The [`examples/`](examples/) folder ships four end-to-end flows:
+The [`examples/`](examples/) folder ships these flows. They use synthetic data and
+need only the installed package unless noted. Run them from a checkout (the folder is not
+part of the wheel); `01` and `02` write their JSON output into the current directory.
 
-| File                                    | Flow                                                                                              |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `01_client_local_audit.py`              | Internal audit on synthetic data; archive JSON locally.                                           |
-| `02_client_to_regulator.py`             | Build a regulator submission bundle.                                                              |
-| `03_regulator_verify.py`                | Verify every envelope inside a bundle against a `TrustStore`; surfaces typed failure reasons.     |
-| `04_cli_roundtrip.sh`                   | Pure CLI: input → audit → verify, no Python knowledge required.                                   |
-
-Run any of them after `pip install -e .[dev]`.
+| File | Flow |
+| ---- | ---- |
+| `strict_verification_quickstart.py` | **Start here.** Create, sign and strictly verify a `report.v2`; valid signature vs trusted signer; forged and tampered reports; CLI exit codes. |
+| `04_cli_roundtrip.sh` | Pure CLI: input -> audit -> verify (`SELF_SIGNED_ONLY`, exit 1, as the CLI signs with an ephemeral key). |
+| `01_client_local_audit.py` | Internal audit on synthetic data; archive JSON locally. |
+| `02_client_to_regulator.py` | Build a regulator submission bundle. |
+| `03_regulator_verify.py` | Verify every envelope inside a bundle against a `TrustStore` (`--bundle`, `--trust-store`); surfaces typed failure reasons. |
+| `signed_envelope.py`, `regulator_verify_signature.py` | Signing, tamper detection and trusted-key pinning walk-throughs. |
+| `server_client.py` | Drive the HTTP app in-process with a test client: auth scopes, three audits, one verification (needs `[server]`). |
+| `openfhe_fairness_roundtrip.py`, `benchmark_reproduce.py` | Encrypted-backend demos (need `[fhe]`). |
 
 ---
 
