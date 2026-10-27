@@ -143,21 +143,56 @@ def _audit_dispatch(primitive: str, payload: dict[str, Any]) -> AuditEnvelope:
     raise ValueError(f"unknown primitive {primitive!r}")
 
 
+_EPHEMERAL_NOTE = (
+    "note: this report.v1 is signed with an ephemeral key generated for this run, so it can "
+    "only ever verify as SELF_SIGNED_ONLY. To issue a report a verifier can trust, sign with "
+    "a long-lived key through the library (regaudit_fhe.envelope_v2); see "
+    "examples/strict_verification_quickstart.py.\n"
+)
+
+
 def _cmd_audit(args: argparse.Namespace) -> int:
     if args.schema:
         print(json.dumps(SCHEMAS[args.primitive], indent=2))
         return 0
-    payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if not args.input:
+        sys.stderr.write(
+            f"regaudit-fhe audit {args.primitive}: --input FILE is required "
+            f"(see 'regaudit-fhe audit {args.primitive} --schema' for its shape)\n"
+        )
+        return 2
+    try:
+        payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        sys.stderr.write(f"cannot read {args.input!r}: {exc}\n")
+        return 2
+    except (ValueError, RecursionError) as exc:
+        sys.stderr.write(f"{args.input!r} is not valid JSON: {exc}\n")
+        return 2
+    if not isinstance(payload, dict):
+        sys.stderr.write(
+            f"input rejected: {args.input!r} must contain a JSON object, "
+            f"not {type(payload).__name__}\n"
+        )
+        return 2
     try:
         env = _audit_dispatch(args.primitive, payload)
     except SchemaError as exc:
         sys.stderr.write(f"input rejected: {exc}\n")
         return 2
+    except ValueError as exc:  # e.g. mismatched vector lengths, non-finite values
+        sys.stderr.write(f"input rejected: {exc}\n")
+        return 2
     out = env.to_json()
     if args.output:
-        Path(args.output).write_text(out + "\n")
+        try:
+            Path(args.output).write_text(out + "\n")
+        except OSError as exc:
+            sys.stderr.write(f"cannot write {args.output!r}: {exc}\n")
+            return 2
     else:
         sys.stdout.write(out + "\n")
+    sys.stderr.write(_EPHEMERAL_NOTE)
     return 0
 
 
