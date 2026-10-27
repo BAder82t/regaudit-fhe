@@ -99,7 +99,7 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-ruff==0.17.0
+ruff==0.17.2
     # via regaudit-fhe (pyproject.toml)
 sortedcontainers==2.4.0
     # via hypothesis
