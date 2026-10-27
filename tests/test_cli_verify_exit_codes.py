@@ -370,3 +370,20 @@ def test_oversized_report_is_never_read_into_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", must_not_read)
     with pytest.raises(OSError, match="limit"):
         cli._read_report(str(big))
+
+
+def test_refusal_hint_goes_to_stderr_only(tmp_path, signer):
+    """A refusal explains itself on stderr; stdout stays pure JSON and the exit code stays 1."""
+    p = run("-i", _v1_file(tmp_path, signer), "--allow-self-signed")
+    assert p.returncode == 1
+    assert _verdict(p)["trust_status"] == "SELF_SIGNED_ONLY"
+    assert "SELF_SIGNED_ONLY" in p.stderr and "--trusted-keys" in p.stderr
+    assert "Traceback" not in p.stderr
+
+
+def test_invalid_report_hint_names_the_reason(tmp_path):
+    stranger = rf.Signer.generate(issuer="acme", key_id="stranger")
+    other = rf.Signer.generate(issuer="acme", key_id="acme-1")
+    p = run("-i", _v2_file(tmp_path, stranger), "--trusted-keys", _store_file(tmp_path, other))
+    assert p.returncode == 1 and _verdict(p)["trust_status"] == "INVALID"
+    assert "INVALID" in p.stderr and _verdict(p)["reason"] in p.stderr

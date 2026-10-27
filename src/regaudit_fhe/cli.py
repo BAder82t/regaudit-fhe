@@ -266,6 +266,20 @@ def _read_report(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
+def _refusal_hint(trust_status: str, reason: str | None) -> str:
+    """One stderr line saying what a refusal means (stdout and the exit code are unchanged)."""
+    if trust_status == "SELF_SIGNED_ONLY":
+        return (
+            "not accepted: SELF_SIGNED_ONLY. The report is intact and its signature matches the "
+            "key embedded in it, but nothing shows who holds that key. Verify with "
+            "--trusted-keys <your trust store> to authenticate the issuer."
+        )
+    return (
+        f"not accepted: {trust_status} ({reason or 'see blocking_reasons'}). "
+        "See blocking_reasons in the JSON above and docs/TRUST_SPEC.md."
+    )
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Exit 0 only if the report is accepted under the selected policy.
 
@@ -344,6 +358,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             result.blocking_reasons[0] if result.blocking_reasons else result.reasons[0]
         )
     print(json.dumps(payload, indent=2))
+    if not result.accepted:
+        sys.stderr.write(_refusal_hint(result.trust_status, payload.get("reason")) + "\n")
     return 0 if result.accepted else 1
 
 
