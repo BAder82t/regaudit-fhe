@@ -6,8 +6,8 @@ Usage examples:
     regaudit-fhe audit drift   --input drift.json
     regaudit-fhe verify        --input report.json
 
-Each primitive's input JSON shape is documented in docs/cli_inputs.md and
-echoed by ``regaudit-fhe audit <primitive> --schema``.
+Each primitive's input JSON shape is echoed by ``regaudit-fhe audit <primitive> --schema``;
+the full JSON Schemas are listed by ``regaudit-fhe schema --list``.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
