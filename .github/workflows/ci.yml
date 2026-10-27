@@ -98,6 +98,27 @@ jobs:
       - run: pip install -e ".[dev,server,fhe]"
       - run: pytest tests/ -q --cov=regaudit_fhe --cov-report=term-missing --cov-fail-under=80
 
+  server-floor:
+    # The jobs above install the NEWEST fastapi/pydantic the resolver offers. This one installs exactly the minimums
+    # declared in pyproject.toml (read from it, never hard-coded here) and fails if the resolver substitutes anything.
+    name: server floors (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python scripts/server_floors.py constraints > "$RUNNER_TEMP/floors.txt"
+      - run: pip install -e ".[dev,server,fhe]" -c "$RUNNER_TEMP/floors.txt"
+      - run: python scripts/server_floors.py check
+      - run: pytest tests/ -q
+
   benchmark:
     name: benchmarks (smoke, py3.12)
     runs-on: ubuntu-latest
