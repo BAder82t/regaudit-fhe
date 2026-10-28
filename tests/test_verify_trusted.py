@@ -249,3 +249,46 @@ def test_a_non_finite_result_is_never_trusted(report, signer, store):
     )
     assert lenient.trust_status == "TRUSTED"  # the engine alone cannot see it
     assert not rf.verify_trusted(rf.AuditEnvelope.from_dict(d), store).trusted
+
+
+@pytest.mark.parametrize("value", [(1.0, 2.0), np.float64(0.25)], ids=["tuple", "numpy-float"])
+def test_signed_non_json_python_values_are_never_trusted(report, signer, store, value):
+    """Signature-valid, engine says TRUSTED, but the value is not what JSON would carry."""
+    import base64
+
+    import regaudit_fhe.reports as reports
+
+    d = rf.envelope("drift", report, signer=signer).to_dict()
+    d["result"]["distance"] = value
+    body = {k: v for k, v in d.items() if k not in ("receipt", "timestamp")}
+    raw = reports.canonical_json(body)
+    d["receipt"]["sha256"] = reports.sha256_hex(raw)
+    d["receipt"]["signature_b64"] = base64.b64encode(signer.sign(raw)).decode()
+    env = rf.AuditEnvelope.from_dict(d)
+    lenient = rf.verify_report(env, rf.VerificationPolicy(trust_store=store))
+    assert lenient.trust_status == "TRUSTED"
+    assert not rf.verify_trusted(env, store).trusted
+
+
+def test_an_unexpected_engine_error_is_a_refusal_not_an_exception(v2, store, monkeypatch):
+    import regaudit_fhe.trusted as trusted
+
+    def boom(*_a, **_k):
+        raise TypeError("unhashable type: 'list'")
+
+    monkeypatch.setattr(trusted, "verify", boom)
+    out = rf.verify_trusted(v2.to_json(), store)
+    assert out.verdict is rf.TrustVerdict.INVALID and out.reasons == ("VERIFICATION_ERROR",)
+
+
+def test_a_misconfigured_verifier_still_raises_rather_than_returning_a_verdict(
+    v2, store, monkeypatch
+):
+    import regaudit_fhe.trusted as trusted
+
+    def unavailable(*_a, **_k):
+        raise rf.VerificationUnavailable("replay store missing")
+
+    monkeypatch.setattr(trusted, "verify", unavailable)
+    with pytest.raises(rf.VerificationUnavailable):
+        rf.verify_trusted(v2.to_json(), store)

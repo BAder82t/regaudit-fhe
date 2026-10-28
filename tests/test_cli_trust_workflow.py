@@ -251,3 +251,32 @@ def test_legacy_audit_output_is_unchanged_without_signing_options(work):
     assert proc.returncode == 0
     assert json.loads(proc.stdout)["schema"] == "regaudit-fhe.report.v1"
     assert "SELF_SIGNED_ONLY" in proc.stderr
+
+
+def test_a_report_v1_with_an_unsigned_extra_member_is_refused_not_trusted(work):
+    """The case strict parsing exists for: report.v1 verified as TRUSTED with extra members."""
+    import numpy as np
+
+    import regaudit_fhe as rf
+    from regaudit_fhe._keys import spki_fingerprint
+
+    signer = rf.Signer.generate(issuer="acme", key_id="v1-key")
+    (work / "v1.pub").write_text(signer.public_key_pem())
+    env = rf.envelope(
+        "drift", rf.audit_drift(np.array([0.2, 0.8]), np.array([0.3, 0.7])), signer=signer
+    )
+    (work / "v1.json").write_text(env.to_json())
+    added = cli(
+        "trust", "add", "--store", "v1store.json", "--key-id", "v1-key", "--issuer", "acme",
+        "--public-key", "v1.pub", "--fingerprint", spki_fingerprint(signer.public_key_pem()),
+        cwd=work,
+    )  # fmt: skip
+    assert added.returncode == 0, added.stderr
+    ok = _verify(work, "--trusted-keys", "v1store.json", report="v1.json")
+    assert ok.returncode == 0 and json.loads(ok.stdout)["trust_status"] == "TRUSTED"
+    data = json.loads(env.to_json())
+    data["approved_by"] = "regulator"
+    (work / "v1.json").write_text(json.dumps(data))
+    refused = _verify(work, "--trusted-keys", "v1store.json", report="v1.json")
+    assert refused.returncode == 2 and refused.stdout == ""
+    assert "unknown member" in refused.stderr
