@@ -73,7 +73,7 @@ from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
-LIB_VERSION: str = "0.1.0"
+LIB_VERSION: str = "0.1.1"
 SIGNATURE_ALG: str = "Ed25519"
 
 

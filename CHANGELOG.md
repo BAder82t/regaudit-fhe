@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.1 — defensive patch (candidate, NOT PUBLISHED)
+
+Four defensive fixes found by an AI-assisted security review of 0.1.0, plus container hygiene. This is
+not an audit and gives no production assurance. No change to signing formats, schemas, `report.v1` /
+`report.v2` verification results for well-formed reports, trust semantics or crypto backends: reports
+signed by 0.1.0 verify the same under 0.1.1. The only change visible in a freshly signed report is
+`algorithm_version` (`"0.1.1"`).
+
+### Fixed
+
+- **A non-finite audit result is no longer signed.** `envelope()` raised no error when a schema-valid but
+  overflowing input (for example coefficients of `1e308` on `/v1/audit/disagreement`) produced `NaN` or
+  `Infinity`. `report.v1` signed the literal `NaN` while the HTTP layer delivered `null`, so the delivered
+  report failed its own verification (`HASH_MISMATCH`) and `breach` read `false` because `NaN > threshold`
+  is false. `envelope()` now raises `ValueError` for a non-finite result or `dp` block; `POST /v1/audit/*`
+  answers HTTP 422 and `regaudit-fhe audit` exits 2. Library callers that previously signed a non-finite
+  result now get `ValueError`; such a report could not survive a JSON round trip.
+- **`POST /v1/verify` answers 422 instead of 500 when a report's `primitive` is not a string.** A
+  `report.v1` with a JSON array or object as `primitive` raised `TypeError` in the verifier when the
+  matching trust-store entry restricts `primitives`. The verifier now refuses it (`PRIMITIVE_NOT_ALLOWED`)
+  and the endpoint answers `422 {"detail": "malformed envelope"}`. A non-string `primitive` that previously
+  produced an HTTP 200 verdict (for example `null` or a number) now also answers 422 on this endpoint.
+- **`POST /v1/audit/{primitive}` parses its body strictly**, as `/v1/verify` already did: a duplicate key,
+  `NaN`/`Infinity` literal, byte-order mark, trailing data, empty body or non-object body is refused with
+  HTTP 422 (`request body is not strict JSON` or `request body must be an object`). The body is still read
+  and size-limited before authentication. Previously the last duplicate key won silently. The OpenAPI
+  request body for this route is now a generic object.
+
+### Changed
+
+- The runtime Docker stage removes `pip` (nothing is installed after the build) and `.dockerignore` excludes
+  environment files, key material and coverage output from the build context.
+- `SECURITY.md` named `0.0.7` as the current version; it now names `0.1.1`.
+
 ## 0.1.0 — release candidate (NOT PUBLISHED)
 
 Everything under the "0.1.0 —" headings below ships in this release. **0.1.0 is a Pre-Alpha release
