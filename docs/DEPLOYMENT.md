@@ -174,18 +174,37 @@ per request before these bounds existed (see `docs/RESOURCE_BOUNDS_MEASUREMENTS.
 not an audit). The server now bounds the work at four points. Defaults are safe for a single small replica;
 tune them for your deployment.
 
-1. **Input structure (`/v1/audit` only).** Before schema validation the parsed payload is checked against
-   `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` (per array, and members per object), `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS` (sum of
-   array lengths) and `REGAUDIT_FHE_MAX_JSON_DEPTH`. A violation is refused with `413`:
+1. **Input structure (`/v1/audit` only).** Before schema validation the parsed payload is checked against the
+   limits below. A violation is refused with `413`:
 
    ```json
    {"detail": "audit input has an array longer than the configured limit",
-    "code": "INPUT_LIMIT_EXCEEDED", "limit": "max_array_elements", "maximum": 32768}
+    "code": "INPUT_LIMIT_EXCEEDED", "limit": "max_array_elements", "maximum": 131072}
    ```
 
-   `limit` is one of `max_array_elements`, `max_total_elements`, `max_json_depth`. The refusal never echoes keys
-   or values from the request. The CLI (`regaudit-fhe audit ...`) is not limited. To restore the previous
-   behaviour for trusted callers, raise the three limits; the body limit still applies.
+   `limit` is one of `max_array_elements`, `max_total_elements`, `max_json_depth`, `max_concordance_samples`,
+   `max_disagreement_models`. The refusal never echoes keys or values from the request. The CLI
+   (`regaudit-fhe audit ...`) is not limited. Every setting must be a positive integer; an invalid value makes the
+   server refuse to start, and there is no value that turns a limit off.
+
+   | Setting | Default | Why this value |
+   | --- | --- | --- |
+   | `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` | `131072` | Owner-decided maximum for one array (and for the member count of one object). The input schemas themselves set no `maxItems`; 131072 is a policy value, not a schema value. |
+   | `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS` | `524288` | Sum of all array lengths in one payload. The widest input is `fairness`: four equal-length arrays, 4 x 131072. Every primitive's largest request at the per-array maximum therefore fits; a fifth maximum array does not. Measured peak memory of such a request is about 50 MB above baseline (Python 3.12), which keeps six admitted requests (2 running + 4 queued) inside 512 MiB. |
+   | `REGAUDIT_FHE_MAX_JSON_DEPTH` | `4` | The root object is depth 1. The deepest valid input is `disagreement` (`model_polynomials` is an array of 4-number arrays): depth 3. One level of headroom; anything deeper is invalid under the schemas anyway (every input schema has `additionalProperties: false`). Minimum accepted setting: 3. |
+   | `REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES` | `8192` | The concordance circuit does O(n^2) vector work: measured 0.5 s at 2048 samples, 3.3 s at 8192, 9.9 s at 16384, 32 s at 32768 (loaded host, directional), and minutes at 131072, which would hold an audit slot far past any request timeout. |
+   | `REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS` | `32` | The disagreement circuit sums M(M-1)/2 pairwise terms over the test input. 32 models is 496 pairs (about 2 s at 131072 test points); 1024 models measured 1.45 s with only 1024 test points. |
+
+   **Compatibility.** The previous server accepted any payload that fit the body limit. Requests that exceeded
+   the limits above now get `413` (for example a `concordance` request with more than 8192 samples, which on the
+   previous server ran for tens of seconds to minutes). With the default 1 MiB body limit, the per-array limit
+   is rarely the binding one: 131072 full-precision floats are about 2.6 MB. Raise `REGAUDIT_FHE_MAX_BODY_BYTES`
+   together with these limits if you need the full sizes, and raise the matching memory limit.
+
+   **Order of checks.** The body-size limit is enforced while the body is read, but a body within that limit is
+   read and parsed (strictly, on the event loop) *before* the structure limits and the concurrency gate can
+   refuse it. A large accepted body therefore still costs parse time and memory first; only a proxy in front can
+   refuse it earlier.
 2. **Bounded concurrency with backpressure.** At most `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS` audits compute at once
    (on dedicated threads) and at most `REGAUDIT_FHE_MAX_QUEUED_AUDITS` wait, each for at most
    `REGAUDIT_FHE_QUEUE_WAIT_S`. Everything else is refused immediately:
@@ -238,9 +257,19 @@ tune them for your deployment.
 - **Probes.** Use a readiness/liveness timeout of at least 2 s and a failure threshold of 3 or more; the
   image's `HEALTHCHECK` allows 5 s.
 
+### What the limits do not guarantee
+
+These are application-level limits. They do not prevent every denial-of-service scenario: bodies up to the body
+limit are still read and parsed before any gate can refuse them, connections and unauthenticated requests are not
+rate-limited by the application, and a running computation cannot be interrupted. `REGAUDIT_FHE_LIMIT_CONCURRENCY`
+is enforced by uvicorn itself and answers a plain-text `503` without `Retry-After` and without the JSON body shown
+above; only `SERVER_BUSY` (from the audit and verify gates) is a structured JSON refusal with `Retry-After`. Do not
+assume one error format across all overload refusals.
+
 ### Reverse-proxy requirements
 
-The application bounds work per process; it does not replace a proxy. Configure the proxy (nginx, Envoy, HAProxy,
+The application bounds work per process; it does not replace a proxy. Exposed deployments need upstream controls for
+request body size, connection limits, header and body timeouts, and per-client rate enforcement. Configure the proxy (nginx, Envoy, HAProxy,
 a cloud load balancer) to:
 
 - terminate TLS and enforce a **request-header read timeout** (nginx `client_header_timeout`), a **body read
