@@ -6,6 +6,11 @@ starlette 1.10, uvicorn 0.54, loopback) on which other jobs were running: the 1-
 start of each run. Absolute times are therefore upper-ish and noisy; ratios and the status counts are the
 reliable part. Three runs per cell; the values below are medians unless a range is shown.
 
+> **Superseded defaults.** The tables below were measured with the first draft of the limits (32768 elements per
+> array, 131072 in total, depth 8). The 0.1.1 candidate ships 131072 / 524288 / depth 4 plus the concordance,
+> disagreement and in-flight-body limits; see "0.1.1 combined candidate" at the end of this file for the
+> measurements that apply to the shipped defaults.
+
 Tooling: `scripts/resource_bounds_probe.py` (host) and `scripts/resource_bounds_container.py` (container).
 "Before" is master `d0a4105`; "after" is this branch. Payload: the `fairness` input with four equal arrays of `n`
 elements; `n = 131064` is the largest that fits the 1 MiB body limit (1 048 575 bytes), `n = 32768` is the largest the
@@ -69,3 +74,37 @@ Peak memory is sampled from `docker stats` (about once per second), so it can mi
   about 400 ms to validate 120 000 elements, so caching is not a measurable win. About 97 % of the large-request time
   is the per-element `enum` check inside `iter_errors`; the structure limits bound it instead of changing validation.
 - A running audit cannot be interrupted (thread). The 0.6 s and 1.7-1.95 s residuals above are those jobs finishing.
+
+## 0.1.1 combined candidate (shipped defaults)
+
+AI-assisted measurements, not an audit. Same shared machine (load average 33 to 40 at every run; Docker Desktop
+VM, CPython 3.14 image), so times are directional and outcomes and memory are the evidence.
+
+**Cost of the largest legal request per primitive** (one request, host, Python 3.12, full-precision floats):
+
+| Primitive | Input | Body | CPU time | Peak RSS above baseline |
+| --- | --- | --- | --- | --- |
+| fairness | 4 x 131072 bits | 1.5 MB | 2.0 s | 35 MB |
+| drift | 2 x 131072 floats | 5.3 MB | 1.1 s | 30 MB |
+| calibration | 2 x 131072 floats | 5.3 MB | 0.8 s | 33 MB |
+| provenance | 131072 floats + 131072 ids | 3.6 MB | 0.9 s | 46 MB |
+| disagreement | 16 models x 131072 test points | 2.7 MB | 0.4 s | 33 MB |
+| concordance | 1024 / 2048 / 4096 / 8192 / 16384 / 32768 samples | | 0.23 / 0.51 / 1.3 / 3.3 / 9.9 / 32 s | |
+| concordance | 131072 samples | | more than 3 minutes (stopped) | |
+| disagreement | 16 / 64 / 256 / 1024 models, 1024 test points | | 0.02 / 0.02 / 0.11 / 1.45 s | |
+
+Concordance and disagreement are super-linear (O(n^2) and O(M^2)), which is why they have their own limits
+(8192 samples, 32 models) in addition to the 131072-per-array limit.
+
+**Overload in a container** (`--memory 512m --cpus 1 --pids-limit 256 --read-only --cap-drop ALL
+--security-opt no-new-privileges`, image built from the combined tree):
+
+| Scenario | Result |
+| --- | --- |
+| 64 concurrent legal fairness requests, 1 MiB each (the scenario that was OOM-killed at 512 MiB before the bounds) | 7 x 200, 57 x 503, peak 204 MiB, OOMKilled false, `/healthz` 46 of 46 answered 200 (median 7.5 ms, p95 1.6 s), a small request afterwards 200 |
+| 64 concurrent fairness requests at the largest legal size (4 x 131072), body limit 8 MiB | 8 x 200, 56 x 503, peak 203 MiB, OOMKilled false |
+| 64 concurrent drift requests with 5.3 MB bodies and 5 x 131072 arrays (body limit 16 MiB) **without** the in-flight body budget | OOM-killed: 64 x connection reset, peak 400 MiB sampled |
+| the same with the in-flight body budget | 5 x 200, 59 x 503, 5 x 413 for the five-array request (total limit), 1 x 503, peak 191 MiB, OOMKilled false, `/healthz` 44 of 44 answered 200 (p95 0.5 s), 0.09 % CPU three seconds after the clients left |
+
+The third row is why `REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES` exists: the per-request body limit alone allows
+`connections x body limit` bytes to be buffered before any gate can refuse a request.

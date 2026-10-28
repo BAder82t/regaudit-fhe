@@ -205,6 +205,13 @@ tune them for your deployment.
    read and parsed (strictly, on the event loop) *before* the structure limits and the concurrency gate can
    refuse it. A large accepted body therefore still costs parse time and memory first; only a proxy in front can
    refuse it earlier.
+   **In-flight body bytes.** The body limit applies per request; `REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES` (default:
+   the larger of 32 MiB and twice the body limit; it must be at least the body limit or the server refuses to
+   start) caps the body bytes being read by all requests at once. A request that would pass it is answered
+   `503 SERVER_BUSY` with `"reason": "ingress_budget"` and `Retry-After`. Without it, 64 concurrent 5 MB bodies
+   (body limit raised to 16 MiB) were buffered before any gate could refuse them and the 512 MiB container was
+   OOM-killed (`docs/RESOURCE_BOUNDS_MEASUREMENTS.md`). The cap counts bytes of bodies still being received; a
+   parsed payload is bounded by the structure limits above.
 2. **Bounded concurrency with backpressure.** At most `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS` audits compute at once
    (on dedicated threads) and at most `REGAUDIT_FHE_MAX_QUEUED_AUDITS` wait, each for at most
    `REGAUDIT_FHE_QUEUE_WAIT_S`. Everything else is refused immediately:
