@@ -92,7 +92,7 @@ from . import __version__ as LIB_VERSION
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
-from .report_v2 import EnvelopeFormatError, parse_envelope
+from .report_v2 import EnvelopeFormatError, parse_envelope_strict
 from .schemas import SchemaError, list_schemas, load_schema
 from .trust import TrustStore
 from .verification import (
@@ -1008,7 +1008,7 @@ def build_app(
             payload = loads_strict(bytes(received), max_bytes=config.max_body_bytes)
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
-            env = parse_envelope(payload["envelope"])
+            env = parse_envelope_strict(payload["envelope"])
         except (CanonicalError, EnvelopeFormatError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
         try:

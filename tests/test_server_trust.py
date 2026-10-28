@@ -558,3 +558,29 @@ def test_server_module_exports_are_stable_and_the_old_model_is_gone():
     server = importlib.import_module("regaudit_fhe.server")
 
     assert hasattr(server, "build_app") and not hasattr(server, "VerifyRequest")
+
+
+# ---------------------------------------------------------------------------
+# Strict parsing on the verification path (0.2.0)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda e: e.update(approved_by="regulator"),
+        lambda e: e.update(regulations="AB"),
+        lambda e: e.pop("backend"),
+        lambda e: e["receipt"].update(note="unsigned"),
+        lambda e: e.update(primitive=["fairness"]),
+    ],
+    ids=["unknown-member", "coerced-list", "defaulted-member", "receipt-extra", "primitive-type"],
+)
+def test_ambiguous_v1_json_is_not_verified_at_all(signer, mutate):
+    env = _signed_env(signer)
+    config = _config(trust_store=_store(signer))
+    with _client(config) as client:
+        assert _verify(client, env).status_code == 200  # the unmodified report is TRUSTED
+        mutate(env)
+        resp = _verify(client, env)
+    assert resp.status_code == 422, resp.text
