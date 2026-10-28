@@ -51,9 +51,11 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_REPLAY_MODE           - off (default) | check | record
     REGAUDIT_FHE_TRUSTED_PROXIES       - comma-separated IPs/CIDRs allowed to vouch for forwarded
                                          clients (development self-signed check only)
-    REGAUDIT_FHE_MAX_ARRAY_ELEMENTS    - longest JSON array/object accepted by /v1/audit (default 32768)
-    REGAUDIT_FHE_MAX_TOTAL_ELEMENTS    - total elements accepted in one audit payload (default 131072)
-    REGAUDIT_FHE_MAX_JSON_DEPTH        - deepest JSON nesting accepted by /v1/audit (default 8)
+    REGAUDIT_FHE_MAX_ARRAY_ELEMENTS    - longest JSON array/object accepted by /v1/audit (default 131072)
+    REGAUDIT_FHE_MAX_TOTAL_ELEMENTS    - total elements accepted in one audit payload (default 524288)
+    REGAUDIT_FHE_MAX_JSON_DEPTH        - deepest JSON nesting accepted by /v1/audit (default 4)
+    REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES - longest concordance risk/time/event array (default 8192)
+    REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS - most models in a disagreement audit (default 32)
     REGAUDIT_FHE_MAX_CONCURRENT_AUDITS - audits computed at once (default 2)
     REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
     REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
@@ -469,9 +471,13 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             if p.strip()
         ),
         input_limits=InputLimits(
-            max_array_elements=_env_int("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", 32768, minimum=1),
-            max_total_elements=_env_int("REGAUDIT_FHE_MAX_TOTAL_ELEMENTS", 131072, minimum=1),
-            max_depth=_env_int("REGAUDIT_FHE_MAX_JSON_DEPTH", 8, minimum=2),
+            max_array_elements=_env_int("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", 131072, minimum=1),
+            max_total_elements=_env_int("REGAUDIT_FHE_MAX_TOTAL_ELEMENTS", 524288, minimum=1),
+            max_depth=_env_int("REGAUDIT_FHE_MAX_JSON_DEPTH", 4, minimum=3),
+            max_concordance_samples=_env_int(
+                "REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES", 8192, minimum=1
+            ),
+            max_disagreement_models=_env_int("REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS", 32, minimum=1),
         ),
         max_concurrent_audits=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1),
         max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
@@ -955,6 +961,8 @@ _LIMIT_DETAIL = {
     "max_array_elements": "audit input has an array longer than the configured limit",
     "max_total_elements": "audit input has more elements in total than the configured limit",
     "max_json_depth": "audit input is nested deeper than the configured limit",
+    "max_concordance_samples": "concordance input has more samples than the configured limit",
+    "max_disagreement_models": "disagreement input has more models than the configured limit",
 }
 
 
@@ -1175,7 +1183,7 @@ def build_app(
             raise HTTPException(404, f"unknown primitive {primitive!r}")
         # Refuse inputs that would make schema validation and the primitive expensive, before any of it runs.
         try:
-            check_input_bounds(payload, config.input_limits)
+            check_input_bounds(payload, config.input_limits, primitive)
         except InputLimitError as exc:
             logger.warning(
                 "audit_input_limit_exceeded", extra={"key_id": caller.key_id, "limit": exc.limit}

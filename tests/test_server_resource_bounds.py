@@ -155,12 +155,17 @@ def test_limits_come_from_the_environment_and_bad_values_refuse_to_start(
     cfg = server.load_config_from_env()
     assert cfg.input_limits.max_array_elements == 123
     assert cfg.max_concurrent_audits == 3
-    assert server.load_config_from_env().input_limits.max_total_elements == 131072
+    assert server.load_config_from_env().input_limits.max_total_elements == 524288
     for name, bad in (
         ("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", "0"),
         ("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", "x"),
         ("REGAUDIT_FHE_QUEUE_WAIT_S", "nan"),
         ("REGAUDIT_FHE_MAX_QUEUED_AUDITS", "-1"),
+        ("REGAUDIT_FHE_MAX_JSON_DEPTH", "2"),
+        ("REGAUDIT_FHE_MAX_TOTAL_ELEMENTS", "0"),
+        ("REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES", "0"),
+        ("REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS", "-3"),
+        ("REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES", "many"),
     ):
         monkeypatch.setenv(name, bad)
         with pytest.raises(server.PolicyError):

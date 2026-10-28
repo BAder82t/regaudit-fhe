@@ -32,13 +32,32 @@ class InputLimits:
     """Structural limits applied to a parsed audit payload before schema validation.
 
     ``max_array_elements`` bounds every JSON array (and the member count of every object) on its own,
-    ``max_total_elements`` bounds the sum of all array lengths in the payload, and ``max_depth`` bounds the nesting. The defaults keep the worst accepted
-    payload to roughly half a second of validation on a reference laptop (see docs/DEPLOYMENT.md).
+    ``max_total_elements`` bounds the sum of all array lengths in the payload, and ``max_depth`` bounds the
+    nesting (the document root is depth 1). Two further limits bound *work*, not size, for the two
+    primitives whose cost is super-linear in the input: ``max_concordance_samples`` (the concordance
+    circuit does O(n^2) vector work) and ``max_disagreement_models`` (O(M^2) pairwise terms). The defaults
+    and their derivation are in docs/DEPLOYMENT.md, "Resource bounds".
+
+    Every limit must be a positive integer: a value that would disable a bound is refused, not accepted.
     """
 
-    max_array_elements: int = 32768
-    max_total_elements: int = 131072
-    max_depth: int = 8
+    max_array_elements: int = 131072
+    max_total_elements: int = 524288
+    max_depth: int = 4
+    max_concordance_samples: int = 8192
+    max_disagreement_models: int = 32
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_array_elements",
+            "max_total_elements",
+            "max_depth",
+            "max_concordance_samples",
+            "max_disagreement_models",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
 
 
 class InputLimitError(ValueError):
@@ -50,12 +69,16 @@ class InputLimitError(ValueError):
         self.maximum = maximum
 
 
-def check_input_bounds(payload: Any, limits: InputLimits) -> None:
+def _length(value: Any) -> int | None:
+    return len(value) if isinstance(value, list) else None
+
+
+def check_input_bounds(payload: Any, limits: InputLimits, primitive: str | None = None) -> None:
     """Raise :class:`InputLimitError` if ``payload`` exceeds ``limits``.
 
     Iterative (no recursion). A container is counted before its children are visited, so the work is
     bounded by about ``max_total_elements`` plus the object members, each object capped at
-    ``max_array_elements``.
+    ``max_array_elements``. When ``primitive`` is given, the cost limit of that primitive is applied too.
     """
     total = 0
     stack: list[tuple[Any, int]] = [(payload, 1)]
@@ -79,6 +102,16 @@ def check_input_bounds(payload: Any, limits: InputLimits) -> None:
         for child in children:
             if isinstance(child, (dict, list)):
                 stack.append((child, depth + 1))
+    if isinstance(payload, dict):
+        if primitive == "concordance":
+            for key in ("risk", "time", "event"):
+                n_c = _length(payload.get(key))
+                if n_c is not None and n_c > limits.max_concordance_samples:
+                    raise InputLimitError("max_concordance_samples", limits.max_concordance_samples)
+        elif primitive == "disagreement":
+            n_m = _length(payload.get("model_polynomials"))
+            if n_m is not None and n_m > limits.max_disagreement_models:
+                raise InputLimitError("max_disagreement_models", limits.max_disagreement_models)
 
 
 class GateRefused(Exception):
