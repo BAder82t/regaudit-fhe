@@ -675,8 +675,11 @@ class VerificationOutcome:
     def valid(self) -> bool:
         """Deprecated alias; branch on ``trust_status`` instead."""
         warnings.warn(
-            "VerificationOutcome.valid is deprecated; branch on `trust_status` (or use "
-            "regaudit_fhe.verify_report(...).accepted). It is kept for compatibility.",
+            "VerificationOutcome.valid is deprecated: it is True for a SELF-SIGNED report "
+            "(integrity holds, but nobody authenticated the issuer; trust_status is "
+            "'SELF_SIGNED_ONLY') as well as for a trusted one. Branch on `trust_status == "
+            "'TRUSTED'`, or use regaudit_fhe.verify_trusted(...).trusted. The value is "
+            "unchanged and kept for compatibility.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -977,6 +980,11 @@ def verify_receipt(
 ) -> bool:
     """Return True iff the envelope verifies.
 
+    **Deprecated without trust material.** That call emits a ``DeprecationWarning``: a bare
+    ``True`` then covers a self-signed report whose issuer nobody authenticated. Prefer
+    :func:`regaudit_fhe.trusted.verify_trusted`. The return value is unchanged, and a call
+    that supplies trust material does not warn.
+
     By default this checks the SHA-256 receipt and the embedded
     Ed25519 signature against the embedded public key. **It does not
     validate that the embedded public key belongs to a trusted
@@ -1001,6 +1009,17 @@ def verify_receipt(
     has_material = trust_store is not None or trusted_keys is not None
     if strict and not has_material:
         return False
+    if not has_material:
+        warnings.warn(
+            "verify_receipt() without trust material is deprecated: it returns a bare bool, "
+            "and True then means only that the report is intact and matches the key embedded "
+            "in it (SELF-SIGNED), not that a trusted issuer signed it. Use "
+            "regaudit_fhe.verify_trusted(report, trust_store).trusted, or verify_report(...) "
+            "and branch on trust_status == 'TRUSTED'. The return value is unchanged and kept "
+            "for compatibility.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if not has_material and _WEAK_WARNING.first():
         warnings.warn(
             "verify_receipt() called without trust material: this verifies "
