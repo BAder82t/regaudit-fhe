@@ -12,3 +12,13 @@ dist
 *.egg-info
 docs/rc
 .claude
+# never let credentials or key material reach a build context
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.coverage
+coverage.xml
+htmlcov
