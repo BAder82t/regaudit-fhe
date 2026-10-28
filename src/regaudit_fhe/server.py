@@ -77,7 +77,7 @@ from datetime import timedelta
 from typing import Any
 
 try:
-    from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response, status
+    from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
@@ -797,6 +797,40 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
 # ---------------------------------------------------------------------------
 
 
+def _strict_body_dependency(max_bytes: int) -> Callable[[Request], Any]:
+    """Body dependency parsed under the strict policy of /v1/verify.
+
+    A duplicate key, NaN/Infinity, a BOM or trailing data would otherwise be resolved silently by
+    the lenient parser, so the signed report could describe other data than the caller sent.
+    """
+
+    async def dependency(request: Request) -> dict[str, Any]:
+        return await _read_strict_json_object(request, max_bytes)
+
+    return dependency
+
+
+async def _read_strict_json_object(request: Request, max_bytes: int) -> dict[str, Any]:
+    """Read the request body (bounded, chunked bodies included) and parse it strictly."""
+    received = bytearray()
+    async for chunk in request.stream():
+        received.extend(chunk)
+        if len(received) > max_bytes:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"request body exceeds limit {max_bytes} bytes",
+            )
+    try:
+        payload = loads_strict(bytes(received), max_bytes=max_bytes)
+    except CanonicalError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "request body is not strict JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "request body must be an object")
+    return payload
+
+
 def build_app(
     *,
     config: ServerConfig | None = None,
@@ -935,10 +969,20 @@ def build_app(
 
     # ----- Audit (run scope) ----------------------------------------------
 
-    @app.post("/v1/audit/{primitive}")
+    @app.post(
+        "/v1/audit/{primitive}",
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            }
+        },
+    )
     def audit(
         primitive: str,
-        payload: dict[str, Any] = Body(...),
+        # Declared before the caller so the body is still read (and size-limited) before
+        # authentication, exactly as the former ``Body(...)`` parameter was.
+        payload: dict[str, Any] = Depends(_strict_body_dependency(config.max_body_bytes)),
         caller: Caller = Depends(authed_with(SCOPE_RUN)),
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
@@ -1009,6 +1053,9 @@ def build_app(
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
             env = parse_envelope(payload["envelope"])
+            if not isinstance(env.primitive, str):
+                # A report.v1 is not type-checked on parse; a non-string primitive is not a report.
+                raise EnvelopeFormatError("BAD_TYPE", "primitive must be a string")
         except (CanonicalError, EnvelopeFormatError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
         try:

@@ -52,6 +52,7 @@ import dataclasses
 import datetime as _dt
 import hashlib
 import json
+import math
 import os
 import threading
 import warnings
@@ -109,6 +110,24 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {k: _to_jsonable(v) for k, v in value.items()}
     return value
+
+
+def _require_finite(value: Any, where: str) -> None:
+    """Refuse NaN/Infinity anywhere in ``value``.
+
+    ``canonical_json`` would sign the non-standard literals ``NaN``/``Infinity``, but every
+    standards-conforming JSON writer (including the HTTP layer) delivers ``null`` instead, so the
+    delivered report could no longer match its own signature.
+    """
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{where} contains a non-finite number; refusing to sign it")
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            _require_finite(item, where)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _require_finite(item, where)
 
 
 def report_to_dict(report: Any) -> dict[str, Any]:
@@ -575,6 +594,8 @@ def envelope(
         "consumed": int(depth_consumed),
     }
     dp_block: dict[str, Any] | None = _to_jsonable(dict(dp)) if dp is not None else None
+    _require_finite(result_dict, "the audit result")
+    _require_finite(dp_block, "the dp block")
     body: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "schema_version": SCHEMA_VERSION,
@@ -732,7 +753,9 @@ def _v1_entry_scope_ok(entry: Any, env: AuditEnvelope) -> bool:
         return False
     if entry.deployments is not None:  # v1 carries no deployment_id, so it cannot match
         return False
-    if entry.primitives is not None and env.primitive not in entry.primitives:
+    if entry.primitives is not None and (
+        not isinstance(env.primitive, str) or env.primitive not in entry.primitives
+    ):
         return False
     if entry.not_before is not None:
         try:

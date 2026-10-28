@@ -150,7 +150,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
     try:
         env = _audit_dispatch(args.primitive, payload)
-    except SchemaError as exc:
+    except (SchemaError, ValueError) as exc:
         sys.stderr.write(f"input rejected: {exc}\n")
         return 2
     out = env.to_json()

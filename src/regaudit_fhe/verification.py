@@ -506,7 +506,11 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         ):
             block("DEPLOYMENT_NOT_ALLOWED")
             identity_ok = False
-        if entry.primitives is not None and env.primitive not in entry.primitives:
+        if entry.primitives is not None and (
+            not isinstance(env.primitive, str) or env.primitive not in entry.primitives
+        ):
+            # A report.v1 is not type-checked on parse: an unhashable primitive must be refused,
+            # not raise TypeError out of the engine.
             block("PRIMITIVE_NOT_ALLOWED")
             identity_ok = False
         if (
