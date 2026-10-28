@@ -345,3 +345,104 @@ def test_invalid_resource_settings_refuse_to_start(
     with pytest.raises(server.PolicyError):
         server.load_config_from_env()
         server.uvicorn_options_from_env()
+
+
+# ---- the shared in-flight body budget -------------------------------------------------------------------
+
+
+def test_ingress_budget_unit() -> None:
+    from regaudit_fhe._limits import IngressBudget
+
+    b = IngressBudget(100)
+    assert b.charge(60) and not b.charge(41) and b.charge(40)
+    b.release(100)
+    assert b.held == 0
+    with pytest.raises(ValueError, match="positive integer"):
+        IngressBudget(0)
+
+
+def test_stalled_large_bodies_cannot_buffer_more_than_the_shared_budget() -> None:
+    import asyncio
+
+    app = build_app(
+        config=ServerConfig(
+            api_keys={"t": frozenset({"admin"})},
+            dev_mode=False,
+            max_body_bytes=1000,
+            max_inflight_body_bytes=1000,
+            rate_limit_per_min=10**6,
+            request_timeout_s=30.0,
+            cors_origins=(),
+        )
+    )
+
+    def scope() -> dict[str, Any]:
+        return {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+            "scheme": "http", "path": "/v1/audit/drift", "raw_path": b"/v1/audit/drift",
+            "query_string": b"", "root_path": "",
+            "headers": [(b"host", b"t"), (b"content-type", b"application/json"),
+                        (b"authorization", b"Bearer t")],
+            "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 80),
+        }  # fmt: skip
+
+    async def go() -> tuple[int, bytes, dict[str, str]]:
+        first_chunk_sent = asyncio.Event()
+        stall = asyncio.Event()
+
+        async def recv_a() -> dict[str, Any]:
+            if not first_chunk_sent.is_set():
+                first_chunk_sent.set()
+                return {"type": "http.request", "body": b" " * 700, "more_body": True}
+            await stall.wait()
+            return {"type": "http.disconnect"}
+
+        async def send_a(message: dict[str, Any]) -> None:
+            return None
+
+        task_a = asyncio.create_task(app(scope(), recv_a, send_a))
+        await first_chunk_sent.wait()
+        await asyncio.sleep(0.05)  # A now holds 700 of the 1000 budgeted bytes
+
+        sent: list[dict[str, Any]] = []
+        chunks = iter([{"type": "http.request", "body": b" " * 700, "more_body": False}])
+
+        async def recv_b() -> dict[str, Any]:
+            return next(chunks, {"type": "http.disconnect"})
+
+        async def send_b(message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        await app(scope(), recv_b, send_b)
+        stall.set()
+        task_a.cancel()
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        return start["status"], body, {k.decode(): v.decode() for k, v in start["headers"]}
+
+    status_code, body, headers = asyncio.run(go())
+    assert status_code == 503
+    assert headers["retry-after"] == "1"
+    assert json.loads(body) == {
+        "detail": "the server is at capacity; retry later",
+        "code": "SERVER_BUSY",
+        "operation": "audit",
+        "reason": "ingress_budget",
+    }
+
+
+def test_budget_smaller_than_the_body_limit_refuses_to_start() -> None:
+    with pytest.raises(server.PolicyError):
+        build_app(
+            config=ServerConfig(
+                api_keys={}, dev_mode=True, max_body_bytes=2000, max_inflight_body_bytes=1000,
+                rate_limit_per_min=10, request_timeout_s=30.0, cors_origins=(),
+            )
+        )  # fmt: skip
+
+
+def test_invalid_budget_environment_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    for bad in ("0", "-5", "lots"):
+        monkeypatch.setenv("REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES", bad)
+        with pytest.raises(server.PolicyError):
+            server.load_config_from_env()

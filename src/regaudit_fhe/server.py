@@ -60,6 +60,8 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
     REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
     REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES - verifications computed at once (default 4)
+    REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES - request-body bytes buffered at once across requests
+                                         (default: the larger of 32 MiB and twice the body limit)
     REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S, REGAUDIT_FHE_HEADER_TIMEOUT_S,
     REGAUDIT_FHE_LIMIT_CONCURRENCY, REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S,
     REGAUDIT_FHE_SWITCH_INTERVAL_S
@@ -105,7 +107,14 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
-from ._limits import AdmissionGate, GateRefused, InputLimitError, InputLimits, check_input_bounds
+from ._limits import (
+    AdmissionGate,
+    GateRefused,
+    IngressBudget,
+    InputLimitError,
+    InputLimits,
+    check_input_bounds,
+)
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -186,6 +195,9 @@ class ServerConfig:
     max_queued_audits: int = 4
     queue_wait_s: float = 5.0
     max_concurrent_verifies: int = 4
+    # Request-body bytes that may be buffered at once across all requests (None: the larger of 32 MiB and twice
+    # the body limit). Must be at least ``max_body_bytes``.
+    max_inflight_body_bytes: int | None = None
 
     def verification_policy(self) -> VerificationPolicy:
         """The single verification policy for this deployment (raises PolicyError)."""
@@ -423,6 +435,12 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
     return value
 
 
+def _env_optional_int(name: str, *, minimum: int) -> int | None:
+    if not os.environ.get(name, "").strip():
+        return None
+    return _env_int(name, minimum, minimum=minimum)
+
+
 def _env_seconds(name: str, default: float, *, minimum: float = 0.0) -> float:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -483,6 +501,9 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
         max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
         queue_wait_s=_env_seconds("REGAUDIT_FHE_QUEUE_WAIT_S", 5.0),
         max_concurrent_verifies=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES", 4, minimum=1),
+        max_inflight_body_bytes=_env_optional_int(
+            "REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES", minimum=1
+        ),
     )
     validate_trust_config(config)
     return config
@@ -902,40 +923,6 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
 # ---------------------------------------------------------------------------
 
 
-def _strict_body_dependency(max_bytes: int) -> Callable[[Request], Any]:
-    """Body dependency parsed under the strict policy of /v1/verify.
-
-    A duplicate key, NaN/Infinity, a BOM or trailing data would otherwise be resolved silently by
-    the lenient parser, so the signed report could describe other data than the caller sent.
-    """
-
-    async def dependency(request: Request) -> dict[str, Any]:
-        return await _read_strict_json_object(request, max_bytes)
-
-    return dependency
-
-
-async def _read_strict_json_object(request: Request, max_bytes: int) -> dict[str, Any]:
-    """Read the request body (bounded, chunked bodies included) and parse it strictly."""
-    received = bytearray()
-    async for chunk in request.stream():
-        received.extend(chunk)
-        if len(received) > max_bytes:
-            raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                f"request body exceeds limit {max_bytes} bytes",
-            )
-    try:
-        payload = loads_strict(bytes(received), max_bytes=max_bytes)
-    except CanonicalError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "request body is not strict JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "request body must be an object")
-    return payload
-
-
 class _Refusal(Exception):
     """A deterministic resource refusal; rendered as a JSON body with a stable ``code``."""
 
@@ -956,6 +943,64 @@ class _Refusal(Exception):
 
 # Seconds a refused client is told to wait. The gate drains in about the time one audit takes.
 RETRY_AFTER_BUSY_S = "1"
+
+
+async def _read_body(
+    request: Request, max_bytes: int, budget: IngressBudget, operation: str
+) -> bytes:
+    """Read the request body (chunked bodies included) within the per-request and the shared byte budget."""
+    received = bytearray()
+    charged = 0
+    try:
+        async for chunk in request.stream():
+            received.extend(chunk)
+            if len(received) > max_bytes:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"request body exceeds limit {max_bytes} bytes",
+                )
+            if not budget.charge(len(chunk)):
+                raise _Refusal(
+                    503,
+                    "SERVER_BUSY",
+                    "the server is at capacity; retry later",
+                    headers={"Retry-After": RETRY_AFTER_BUSY_S},
+                    operation=operation,
+                    reason="ingress_budget",
+                )
+            charged += len(chunk)
+        return bytes(received)
+    finally:
+        budget.release(charged)
+
+
+def _strict_body_dependency(
+    max_bytes: int, budget: IngressBudget, operation: str
+) -> Callable[[Request], Any]:
+    """Body dependency parsed under the strict policy of /v1/verify.
+
+    A duplicate key, NaN/Infinity, a BOM or trailing data would otherwise be resolved silently by
+    the lenient parser, so the signed report could describe other data than the caller sent.
+    """
+
+    async def dependency(request: Request) -> dict[str, Any]:
+        raw = await _read_body(request, max_bytes, budget, operation)
+        return _parse_strict_json_object(raw, max_bytes)
+
+    return dependency
+
+
+def _parse_strict_json_object(raw: bytes, max_bytes: int) -> dict[str, Any]:
+    try:
+        payload = loads_strict(raw, max_bytes=max_bytes)
+    except CanonicalError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "request body is not strict JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "request body must be an object")
+    return payload
+
 
 _LIMIT_DETAIL = {
     "max_array_elements": "audit input has an array longer than the configured limit",
@@ -1057,6 +1102,14 @@ def build_app(
     async def _refusal_handler(request: Request, exc: _Refusal) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content=exc.body, headers=exc.headers)
 
+    inflight = (
+        config.max_inflight_body_bytes
+        if config.max_inflight_body_bytes is not None
+        else max(32 << 20, 2 * config.max_body_bytes)
+    )
+    if inflight < config.max_body_bytes:
+        raise PolicyError("max_inflight_body_bytes must be at least max_body_bytes")
+    ingress_budget = IngressBudget(inflight)
     audit_gate = AdmissionGate(
         config.max_concurrent_audits, config.max_queued_audits, config.queue_wait_s
     )
@@ -1175,7 +1228,9 @@ def build_app(
         primitive: str,
         # Declared before the caller so the body is still read (and size-limited) before
         # authentication, exactly as the former ``Body(...)`` parameter was.
-        payload: dict[str, Any] = Depends(_strict_body_dependency(config.max_body_bytes)),
+        payload: dict[str, Any] = Depends(
+            _strict_body_dependency(config.max_body_bytes, ingress_budget, "audit")
+        ),
         caller: Caller = Depends(authed_with(SCOPE_RUN)),
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
@@ -1260,16 +1315,9 @@ def build_app(
                 )
         # Read the body ourselves so the size limit also covers chunked uploads
         # that carry no Content-Length, then parse it strictly.
-        received = bytearray()
-        async for chunk in request.stream():
-            received.extend(chunk)
-            if len(received) > config.max_body_bytes:
-                raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    f"request body exceeds limit {config.max_body_bytes} bytes",
-                )
+        raw = await _read_body(request, config.max_body_bytes, ingress_budget, "verify")
         try:
-            payload = loads_strict(bytes(received), max_bytes=config.max_body_bytes)
+            payload = loads_strict(raw, max_bytes=config.max_body_bytes)
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
             env = parse_envelope(payload["envelope"])

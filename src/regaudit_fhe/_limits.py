@@ -21,6 +21,7 @@ from typing import Any
 __all__ = [
     "AdmissionGate",
     "GateRefused",
+    "IngressBudget",
     "InputLimitError",
     "InputLimits",
     "check_input_bounds",
@@ -112,6 +113,31 @@ def check_input_bounds(payload: Any, limits: InputLimits, primitive: str | None 
             n_m = _length(payload.get("model_polynomials"))
             if n_m is not None and n_m > limits.max_disagreement_models:
                 raise InputLimitError("max_disagreement_models", limits.max_disagreement_models)
+
+
+class IngressBudget:
+    """A cap on the request-body bytes held in memory across all requests being read at once.
+
+    The per-request body limit alone allows ``connections x limit`` bytes to be buffered before any gate can
+    refuse a request. A request charges every chunk it has read; if the shared total would pass ``limit`` the
+    chunk is refused (the caller answers 503) and whatever the request already holds is released by the caller.
+    Single event loop only.
+    """
+
+    def __init__(self, limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("the in-flight body budget must be a positive integer")
+        self.limit = limit
+        self.held = 0
+
+    def charge(self, nbytes: int) -> bool:
+        if self.held + nbytes > self.limit:
+            return False
+        self.held += nbytes
+        return True
+
+    def release(self, nbytes: int) -> None:
+        self.held = max(0, self.held - nbytes)
 
 
 class GateRefused(Exception):

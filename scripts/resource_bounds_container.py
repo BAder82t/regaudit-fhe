@@ -60,6 +60,12 @@ def main() -> int:
     ap.add_argument("--label", default="org.regaudit.prep=agent3")
     ap.add_argument("--client-timeout", type=float, default=45.0)
     ap.add_argument("--env", action="append", default=[])
+    ap.add_argument(
+        "--run-arg",
+        action="append",
+        default=[],
+        help="extra `docker run` flag, repeatable (for example --run-arg=--read-only)",
+    )
     ap.add_argument("--out")
     a = ap.parse_args()
 
@@ -74,6 +80,7 @@ def main() -> int:
     ]  # fmt: skip
     for kv in a.env:
         cmd += ["-e", kv]
+    cmd += a.run_arg
     cmd.append(a.image)
     report: dict = {"image": a.image, "memory": a.memory, "cpus": a.cpus, "n_per_array": a.n}
     cid = docker(*cmd, timeout=120)
