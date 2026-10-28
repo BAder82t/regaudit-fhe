@@ -101,7 +101,7 @@ Concordance and disagreement are super-linear (O(n^2) and O(M^2)), which is why 
 
 | Scenario | Result |
 | --- | --- |
-| 64 concurrent legal fairness requests, 1 MiB each (the scenario that was OOM-killed at 512 MiB before the bounds) | 7 x 200, 57 x 503, peak 204 MiB, OOMKilled false, `/healthz` 46 of 46 answered 200 (median 7.5 ms, p95 1.6 s), a small request afterwards 200 |
+| 64 concurrent legal fairness requests, 1 MiB each (the scenario that was OOM-killed at 512 MiB before the bounds) | 6 x 200, 58 x 503, peak 223 MiB, OOMKilled false, `/healthz` 45 of 45 answered 200 (median 11 ms, p95 2.3 s, max 7.5 s on a one-CPU container under load), a small request afterwards 200 |
 | 64 concurrent fairness requests at the largest legal size (4 x 131072), body limit 8 MiB | 8 x 200, 56 x 503, peak 203 MiB, OOMKilled false |
 | 64 concurrent drift requests with 5.3 MB bodies and 5 x 131072 arrays (body limit 16 MiB) **without** the in-flight body budget | OOM-killed: 64 x connection reset, peak 400 MiB sampled |
 | the same with the in-flight body budget | 5 x 200, 59 x 503, 5 x 413 for the five-array request (total limit), 1 x 503, peak 191 MiB, OOMKilled false, `/healthz` 44 of 44 answered 200 (p95 0.5 s), 0.09 % CPU three seconds after the clients left |

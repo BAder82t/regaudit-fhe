@@ -258,9 +258,12 @@ tune them for your deployment.
 - **CPU.** Give the container 1 to 2 CPUs. At the default limits one worst-case accepted audit costs on the
   order of 0.3 to 0.6 s of one CPU on a recent laptop-class core; budget `rate_limit x that` per key per
   minute.
-- **Memory.** The parsed payload dominates: at the default limits the container peaked near 130 MB RSS under a
-  64-way burst (Python 3.12, host measurement); allow 256 MiB at least, 512 MiB comfortably. Before the bounds, a
-  64-way burst of 1 MiB payloads reached about 800 MB to 1 GB RSS and was OOM-killed at `--memory 512m`.
+- **Memory.** One maximum-size request (4 x 131072 elements) peaks about 30 to 50 MB above the idle process
+  (about 80 MB, Python 3.12). Six requests are admitted at once by default (2 running + 4 waiting). In a
+  `--memory 512m` container the peak was 223 MiB under a 64-way burst of 1 MiB bodies and 191 MiB under a 64-way
+  burst of 5.3 MB bodies with the body limit raised to 16 MiB (`docs/RESOURCE_BOUNDS_MEASUREMENTS.md`). Allow 512
+  MiB; if you raise the body limit, size the memory for `REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES` plus six parsed
+  payloads. Before the bounds, a 64-way burst of 1 MiB payloads was OOM-killed at `--memory 512m`.
 - **Probes.** Use a readiness/liveness timeout of at least 2 s and a failure threshold of 3 or more; the
   image's `HEALTHCHECK` allows 5 s.
 
