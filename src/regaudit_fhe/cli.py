@@ -189,13 +189,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
     import dataclasses
 
-    from .server import assert_safe_bind, build_app, load_config_from_env, validate_trust_config
+    from .server import (
+        apply_switch_interval_from_env,
+        assert_safe_bind,
+        build_app,
+        load_config_from_env,
+        uvicorn_options_from_env,
+        validate_trust_config,
+    )
 
     try:
         config = load_config_from_env(trust_store_path=args.trust_store)
         if args.allow_self_signed:
             config = dataclasses.replace(config, allow_self_signed=True)
         validate_trust_config(config)
+        server_options = uvicorn_options_from_env()
+        apply_switch_interval_from_env()
     except (TrustStoreError, RuntimeError) as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
@@ -206,7 +215,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
-    uvicorn.run(build_app(config=config), host=args.host, port=args.port, log_level="info")
+    uvicorn.run(
+        build_app(config=config),
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        **server_options,
+    )
     return 0
 
 

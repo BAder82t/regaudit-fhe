@@ -8,6 +8,7 @@ come from ``scripts/resource_bounds_probe.py``.
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 import time
 from typing import Any
@@ -479,3 +480,102 @@ def test_timeout_leaves_fast_responses_and_errors_alone() -> None:
     assert asyncio.run(_drive(server.TimeoutMiddleware(ok, 5))) == (200, b"ok")
     with pytest.raises(RuntimeError, match="downstream failure"):
         asyncio.run(_drive(server.TimeoutMiddleware(boom, 5)))
+
+
+# ---------------------------------------------------------------------------
+# Connection-level settings
+# ---------------------------------------------------------------------------
+
+
+def test_uvicorn_options_defaults_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("uvicorn")
+    opts = server.uvicorn_options_from_env()
+    assert opts["timeout_keep_alive"] == 5
+    assert opts["limit_concurrency"] == 256
+    assert opts["timeout_graceful_shutdown"] == 20
+    assert "http" in opts  # the header-deadline protocol
+    monkeypatch.setenv("REGAUDIT_FHE_LIMIT_CONCURRENCY", "0")
+    monkeypatch.setenv("REGAUDIT_FHE_HEADER_TIMEOUT_S", "0")
+    monkeypatch.setenv("REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S", "0")
+    opts = server.uvicorn_options_from_env()
+    assert (
+        "limit_concurrency" not in opts
+        and "http" not in opts
+        and "timeout_graceful_shutdown" not in opts
+    )
+    monkeypatch.setenv("REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S", "abc")
+    with pytest.raises(server.PolicyError):
+        server.uvicorn_options_from_env()
+
+
+def _serve(protocol: Any) -> tuple[Any, int, threading.Thread]:
+    import uvicorn
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    config = uvicorn.Config(
+        build_app(config=_cfg()),
+        host="127.0.0.1",
+        port=port,
+        log_level="error",
+        lifespan="off",
+        http=protocol,
+    )
+    srv = uvicorn.Server(config)
+    thread = threading.Thread(target=srv.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            break
+        except OSError:
+            time.sleep(0.05)
+    return srv, port, thread
+
+
+def _closed(sock: socket.socket, within: float) -> bool:
+    sock.settimeout(within)
+    try:
+        return sock.recv(1) == b""
+    except TimeoutError:
+        return False
+    except OSError:
+        return True
+
+
+@pytest.mark.parametrize("deadline", [True, False])
+def test_header_deadline_closes_stalled_header_connections(deadline: bool) -> None:
+    pytest.importorskip("uvicorn")
+    protocol = server.header_deadline_protocol(0.5) if deadline else "auto"
+    assert protocol is not None
+    srv, port, thread = _serve(protocol)
+    try:
+        silent = socket.create_connection(("127.0.0.1", port))
+        partial = socket.create_connection(("127.0.0.1", port))
+        partial.sendall(
+            b"GET /healthz HTTP/1.1\r\nHost: x\r\nX-Slow: 1\r\n"
+        )  # header block never completed
+        # a normal request, then a second one on the same kept-alive connection, both still work
+        ok = socket.create_connection(("127.0.0.1", port))
+        for _ in range(2):
+            ok.sendall(b"GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n")
+            ok.settimeout(3)
+            got = b""
+            while b'"ok"}' not in got:
+                got += ok.recv(4096)
+            assert got.startswith(b"HTTP/1.1 200")
+        # slow BODY after complete headers is not a header stall: the deadline must not fire
+        body = socket.create_connection(("127.0.0.1", port))
+        body.sendall(
+            b"POST /v1/audit/fairness HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n{"
+        )
+        # stalled-header sockets are closed by the deadline (only when it is installed)
+        assert _closed(silent, 2.0) is deadline
+        assert _closed(partial, 0.5) is deadline
+        assert _closed(body, 0.1) is False
+        for s in (silent, partial, ok, body):
+            s.close()
+    finally:
+        srv.should_exit = True
+        thread.join(10)

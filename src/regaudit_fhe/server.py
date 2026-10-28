@@ -58,6 +58,10 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
     REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
     REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES - verifications computed at once (default 4)
+    REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S, REGAUDIT_FHE_HEADER_TIMEOUT_S,
+    REGAUDIT_FHE_LIMIT_CONCURRENCY, REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S,
+    REGAUDIT_FHE_SWITCH_INTERVAL_S
+                                       - process and connection settings of ``regaudit-fhe serve``
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -1296,3 +1300,107 @@ def build_app(
         return response
 
     return app
+
+
+# ---------------------------------------------------------------------------
+# Connection-level settings for ``regaudit-fhe serve``
+# ---------------------------------------------------------------------------
+
+
+def header_deadline_protocol(timeout_s: float) -> Any:
+    """An uvicorn HTTP protocol class that closes a connection which has not finished sending request headers.
+
+    uvicorn has no header-read deadline: ``--timeout-keep-alive`` starts only after a response, so a client
+    that connects and sends nothing, or stops in the middle of a header block, holds its connection (and its
+    file descriptor) forever. The deadline starts when the connection is made, and again with the first byte
+    of every later request on a kept-alive connection, and is cleared once the request line and headers are
+    complete. It is **not** a body-read timeout (``REGAUDIT_FHE_REQUEST_TIMEOUT_S`` covers the whole
+    request). Returns ``None`` if uvicorn's protocol classes cannot be imported.
+    """
+    try:
+        from uvicorn.protocols.http.auto import AutoHTTPProtocol
+    except Exception:
+        return None
+
+    base: Any = AutoHTTPProtocol
+
+    class HeaderDeadlineProtocol(base):
+        _header_timer: asyncio.TimerHandle | None = None
+
+        def _arm_header_timer(self) -> None:
+            self._header_timer = asyncio.get_running_loop().call_later(
+                timeout_s, self._header_expired
+            )
+
+        def _disarm_header_timer(self) -> None:
+            if self._header_timer is not None:
+                self._header_timer.cancel()
+                self._header_timer = None
+
+        def _header_expired(self) -> None:
+            self._header_timer = None
+            transport = getattr(self, "transport", None)
+            if transport is not None and not transport.is_closing():
+                transport.close()
+
+        def connection_made(self, transport: Any) -> None:
+            super().connection_made(transport)
+            self._arm_header_timer()
+
+        def data_received(self, data: bytes) -> None:
+            super().data_received(data)
+            cycle = getattr(self, "cycle", None)
+            if cycle is not None and not getattr(cycle, "response_complete", False):
+                self._disarm_header_timer()  # headers are complete, a request is in progress
+            elif self._header_timer is None:
+                self._arm_header_timer()
+
+        def connection_lost(self, exc: Exception | None) -> None:
+            self._disarm_header_timer()
+            super().connection_lost(exc)
+
+    return HeaderDeadlineProtocol
+
+
+def uvicorn_options_from_env() -> dict[str, Any]:
+    """Keyword arguments for ``uvicorn.run`` that bound connection-level resource use.
+
+    ``REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S`` (5), ``REGAUDIT_FHE_LIMIT_CONCURRENCY`` (256; ``0`` disables),
+    ``REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S`` (20; ``0`` waits forever) and
+    ``REGAUDIT_FHE_HEADER_TIMEOUT_S`` (10; ``0`` disables the header deadline).
+    Invalid values raise :class:`PolicyError`, so the server refuses to start rather than ignoring them.
+    """
+    options: dict[str, Any] = {
+        "timeout_keep_alive": max(
+            1, math.ceil(_env_seconds("REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S", 5.0))
+        ),
+    }
+    limit = _env_int("REGAUDIT_FHE_LIMIT_CONCURRENCY", 256, minimum=0)
+    if limit:
+        options["limit_concurrency"] = limit
+    graceful = _env_int("REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S", 20, minimum=0)
+    if graceful:
+        options["timeout_graceful_shutdown"] = graceful
+    header_s = _env_seconds("REGAUDIT_FHE_HEADER_TIMEOUT_S", 10.0)
+    if header_s > 0:
+        protocol = header_deadline_protocol(header_s)
+        if protocol is not None:
+            options["http"] = protocol
+    return options
+
+
+def apply_switch_interval_from_env() -> float | None:
+    """Lower the interpreter's thread switch interval for ``regaudit-fhe serve`` (process-wide).
+
+    Audit work is CPU-bound Python on worker threads; the event loop that answers ``/healthz`` competes with
+    it for the GIL, and with CPython's default 5 ms interval each hand-over costs the probe several
+    milliseconds. ``REGAUDIT_FHE_SWITCH_INTERVAL_S`` (default 0.001, ``0`` leaves the interpreter default)
+    trades a little throughput for probe latency. Only the ``serve`` command calls this, never
+    :func:`build_app`, so an embedding application's interpreter settings are left alone.
+    Returns the interval applied, or ``None``.
+    """
+    seconds = _env_seconds("REGAUDIT_FHE_SWITCH_INTERVAL_S", 0.001)
+    if seconds <= 0:
+        return None
+    sys.setswitchinterval(seconds)
+    return seconds
