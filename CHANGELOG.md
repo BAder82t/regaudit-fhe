@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.1.1 — defensive patch (candidate, NOT PUBLISHED)
+## 0.1.1 — 2026-10-28
+
+Defensive patch.
 
 Defensive fixes and resource bounds from an AI-assisted security and resilience review of 0.1.0. This is not an
 audit and gives no production assurance. No change to signing formats, schemas, `report.v1` / `report.v2`
@@ -8,6 +10,22 @@ verification results for well-formed reports, trust semantics or crypto backends
 verify identically under 0.1.1 and the reverse. The only change in a freshly signed report is
 `algorithm_version` (`"0.1.1"`). **Read "Changed" before upgrading a deployed server: some requests that 0.1.0
 accepted are now refused.**
+
+### Known limitations (not fixed in 0.1.1)
+
+The new limits reduce denial-of-service exposure; they do not eliminate it, and they do not replace a reverse proxy
+that limits request-body size, connections, timeouts and request rates. Known and still open:
+
+- Request bodies are read, and strictly parsed, before the admission gate or the structure limits can refuse them;
+  the strict parse of a large body before authentication costs tens of milliseconds on the event loop.
+- A few slow clients that send a partial body can hold the shared in-flight body budget until the request timeout
+  (default 30 s) ends; there is no separate body-inactivity deadline.
+- The in-flight body budget bounds bytes being read, not the total memory of a request (copies and the parsed
+  payload live on while a request waits for or holds a worker).
+- A `/v1/verify` job already submitted keeps running after a timeout; in replay-record mode a client retry can then
+  be flagged as a replay.
+- Schema-validation 422 messages echo parts of the request, and uvicorn's own `limit_concurrency` 503 is plain text
+  without `Retry-After`.
 
 ### Fixed
 
