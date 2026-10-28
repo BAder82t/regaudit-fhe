@@ -41,7 +41,7 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_DEV_MODE`               | `0`           | `1` disables auth. Use only on a development workstation.               |
 | `REGAUDIT_FHE_MAX_BODY_BYTES`         | `1048576`     | HTTP body size limit (1 MiB default).                                   |
 | `REGAUDIT_FHE_RATE_LIMIT_PER_MIN`     | `60`          | Per-key tokens-per-minute for the in-process token bucket.              |
-| `REGAUDIT_FHE_REQUEST_TIMEOUT_S`      | `30`          | Per-request timeout. Exceeding returns 504.                             |
+| `REGAUDIT_FHE_REQUEST_TIMEOUT_S`      | `30`          | Per-request timeout. Exceeding returns 504 and cancels the request (see "Resource bounds"). |
 | `REGAUDIT_FHE_CORS_ORIGINS`           | (empty)       | Comma-separated CORS allow-list. Empty = no cross-origin response.      |
 | `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
 | `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
@@ -51,6 +51,18 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
 | `REGAUDIT_FHE_REPLAY_MODE`            | `off`         | `off`, `check` (look up only) or `record` (record at verification time). Required, with a persistent cache, outside development. |
 | `REGAUDIT_FHE_TRUSTED_PROXIES`        | (empty)       | IPs/CIDRs allowed to vouch for a forwarded client. Used only by the development self-signed exposure check. |
+| `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS`     | `32768`       | Longest JSON array (and member count of any object) `/v1/audit` accepts. Over it: 413 `INPUT_LIMIT_EXCEEDED`. |
+| `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS`     | `131072`      | Sum of all array lengths in one `/v1/audit` payload.                    |
+| `REGAUDIT_FHE_MAX_JSON_DEPTH`         | `8`           | Deepest JSON nesting `/v1/audit` accepts (the schemas need 4).          |
+| `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS`  | `2`           | Audits computed at the same time (dedicated worker threads).            |
+| `REGAUDIT_FHE_MAX_QUEUED_AUDITS`      | `4`           | Audits allowed to wait for a free slot (also the verify queue). Beyond it: 503 at once. |
+| `REGAUDIT_FHE_QUEUE_WAIT_S`           | `5`           | Longest wait for a slot before a 503 `queue_wait_timeout`.              |
+| `REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES`| `4`           | Verifications computed at the same time.                                |
+| `REGAUDIT_FHE_HEADER_TIMEOUT_S`       | `10`          | `serve` only. Close a connection that has not finished its request headers in this time. `0` disables. |
+| `REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S`   | `5`           | `serve` only. Idle keep-alive timeout.                                  |
+| `REGAUDIT_FHE_LIMIT_CONCURRENCY`      | `256`         | `serve` only. uvicorn `--limit-concurrency`: connections/tasks beyond it get an immediate 503. `0` disables. |
+| `REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S` | `20`     | `serve` only. Seconds to let in-flight requests finish on shutdown. `0` waits forever. |
+| `REGAUDIT_FHE_SWITCH_INTERVAL_S`      | `0.001`       | `serve` only. Interpreter thread switch interval (default CPython: 0.005). `0` leaves it unchanged. |
 
 ### Scopes
 
@@ -82,7 +94,7 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | GET    | `/version`                        | none          | Library + Python + TenSEAL versions.            |
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
-| POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope.|
+| POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope. Refusals: `413` (body or input limit), `422`, `429` (per-key rate), `503` (`SERVER_BUSY`, with `Retry-After`), `504` (timeout). See "Resource bounds". |
 | POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured (unless the development-only self-signed check is enabled, which can never accept a report) or if the replay store is unavailable outside development. |
 
 `/v1/verify` fails closed: with no trust store it returns **503** rather
@@ -154,6 +166,102 @@ in-process token bucket for a Redis-backed counter; the
 
 ---
 
+## Resource bounds
+
+The audit primitives are CPU-bound pure Python, and JSON Schema validation of a large array cannot be
+interrupted. A 1 MiB body (the body limit) holds up to about 500 000 array elements, which cost seconds of CPU
+per request before these bounds existed (see `docs/RESOURCE_BOUNDS_MEASUREMENTS.md`, AI-assisted measurements,
+not an audit). The server now bounds the work at four points. Defaults are safe for a single small replica;
+tune them for your deployment.
+
+1. **Input structure (`/v1/audit` only).** Before schema validation the parsed payload is checked against
+   `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` (per array, and members per object), `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS` (sum of
+   array lengths) and `REGAUDIT_FHE_MAX_JSON_DEPTH`. A violation is refused with `413`:
+
+   ```json
+   {"detail": "audit input has an array longer than the configured limit",
+    "code": "INPUT_LIMIT_EXCEEDED", "limit": "max_array_elements", "maximum": 32768}
+   ```
+
+   `limit` is one of `max_array_elements`, `max_total_elements`, `max_json_depth`. The refusal never echoes keys
+   or values from the request. The CLI (`regaudit-fhe audit ...`) is not limited. To restore the previous
+   behaviour for trusted callers, raise the three limits; the body limit still applies.
+2. **Bounded concurrency with backpressure.** At most `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS` audits compute at once
+   (on dedicated threads) and at most `REGAUDIT_FHE_MAX_QUEUED_AUDITS` wait, each for at most
+   `REGAUDIT_FHE_QUEUE_WAIT_S`. Everything else is refused immediately:
+
+   ```http
+   HTTP/1.1 503 Service Unavailable
+   Retry-After: 1
+
+   {"detail": "the server is at capacity; retry later", "code": "SERVER_BUSY",
+    "operation": "audit", "reason": "queue_full"}
+   ```
+
+   `reason` is `queue_full` or `queue_wait_timeout`. `/v1/verify` has its own gate
+   (`REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES`, same queue length and wait). `503 SERVER_BUSY` is not the per-key
+   `429` rate limit: clients should back off and retry, and operators should scale out or raise the limits.
+   Because the work is pure Python, more than one or two concurrent audits do not add throughput on one CPU
+   (measured); raise `MAX_CONCURRENT_AUDITS` only if you run the `[fhe]` backend on spare cores and have
+   measured a gain.
+3. **Timeouts cancel.** When `REGAUDIT_FHE_REQUEST_TIMEOUT_S` expires the request is answered `504` and
+   cancelled; a request waiting for a slot leaves the queue. A computation that is already running on its thread
+   cannot be interrupted, so its slot stays taken until it ends: after a timeout at most
+   `MAX_CONCURRENT_AUDITS` jobs, each bounded by the input limits, keep running. Before this change every
+   queued request still ran to completion after its 504.
+4. **Probes.** `/healthz` and `/readyz` are coroutines served on the event loop, never on a worker thread.
+   `regaudit-fhe serve` also lowers the interpreter thread-switch interval (`REGAUDIT_FHE_SWITCH_INTERVAL_S`,
+   default 1 ms) so the loop gets the GIL back quickly while audits compute. They stay available while every audit
+   slot is busy, but they are not isolated from a saturated CPU: on a one-CPU container, size
+   the probe timeouts (below) for a few hundred milliseconds under full load.
+
+### Connection-level settings (`regaudit-fhe serve`)
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `REGAUDIT_FHE_HEADER_TIMEOUT_S` | `10` | Closes a connection that has not completed its request headers (silent, or stalled mid-header). uvicorn has no such timer; this is a small protocol subclass (`server.header_deadline_protocol`) and does not apply to slow bodies, which `REGAUDIT_FHE_REQUEST_TIMEOUT_S` covers. |
+| `REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S` | `5` | uvicorn `--timeout-keep-alive`: idle time between requests. |
+| `REGAUDIT_FHE_LIMIT_CONCURRENCY` | `256` | uvicorn `--limit-concurrency`: beyond it new requests get an immediate `503` from uvicorn (plain text, no `Retry-After`) **including probes**. Size it above the reverse proxy's connection pool. |
+| `REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S` | `20` | uvicorn `--timeout-graceful-shutdown`. Keep it below the orchestrator's kill grace period. |
+
+### Sizing guidance (indicative; measure your own workload)
+
+- **One process per container.** The rate limiter, the gates and the replay cache are per process, and the work is
+  CPU-bound under the GIL, so `uvicorn --workers N` adds memory and splits the gates without making one request
+  faster. Scale with replicas behind the proxy. (`serve` runs a single process; it has no `--workers` flag.)
+- **CPU.** Give the container 1 to 2 CPUs. At the default limits one worst-case accepted audit costs on the
+  order of 0.3 to 0.6 s of one CPU on a recent laptop-class core; budget `rate_limit x that` per key per
+  minute.
+- **Memory.** The parsed payload dominates: at the default limits the container peaked near 130 MB RSS under a
+  64-way burst (Python 3.12, host measurement); allow 256 MiB at least, 512 MiB comfortably. Before the bounds, a
+  64-way burst of 1 MiB payloads reached about 800 MB to 1 GB RSS and was OOM-killed at `--memory 512m`.
+- **Probes.** Use a readiness/liveness timeout of at least 2 s and a failure threshold of 3 or more; the
+  image's `HEALTHCHECK` allows 5 s.
+
+### Reverse-proxy requirements
+
+The application bounds work per process; it does not replace a proxy. Configure the proxy (nginx, Envoy, HAProxy,
+a cloud load balancer) to:
+
+- terminate TLS and enforce a **request-header read timeout** (nginx `client_header_timeout`), a **body read
+  timeout** (`client_body_timeout`) and a **maximum body size** (`client_max_body_size`) at or below
+  `REGAUDIT_FHE_MAX_BODY_BYTES`;
+- limit connections and request rate **per client address**, including failed authentication (the in-process
+  limiter counts only authenticated audit and verify calls, so unauthenticated floods are not throttled by the
+  application);
+- keep a bounded upstream connection pool to the server (below `REGAUDIT_FHE_LIMIT_CONCURRENCY`) and set an
+  upstream timeout a little above `REGAUDIT_FHE_REQUEST_TIMEOUT_S`;
+- retry `503` only with backoff and honour `Retry-After`; never retry `504` on a non-idempotent path blindly;
+- restrict `/docs`, `/openapi.json`, `/version` and the probes to the networks that need them.
+
+### Container limits
+
+Always run the container with explicit limits, for example
+`docker run --memory 512m --cpus 1 --pids-limit 128 ...`. The server's own memory use is bounded by the settings
+above, but only a cgroup limit protects the host from a mistake in them.
+
+---
+
 ## Docker
 
 A multi-stage `Dockerfile` is shipped at the repository root. Build:
@@ -179,9 +287,9 @@ when `/readyz` answers 503, so a failing readiness probe removes an instance fro
 restarting it.
 
 **Do not expose the server directly to untrusted clients.** The request body is limited (1 MiB by default,
-including chunked bodies), but the audit primitives have no per-input resource caps and the request timeout does
-not cancel the worker; terminate TLS, authenticate, and enforce size, rate and time limits on every route in a
-reverse proxy. Revoking a key in the trust store needs a server restart.
+including chunked bodies), audit inputs are bounded in structure and concurrency (next section), and a request
+timeout cancels the request; terminate TLS, authenticate, and enforce size, rate and time limits on every route in a
+reverse proxy anyway (see "Reverse-proxy requirements"). Revoking a key in the trust store needs a server restart.
 
 `/healthz`, `/readyz`, `/version`, `/docs` and `/openapi.json` are served without authentication by design
 (`/version` discloses the library, Python and TenSEAL versions). Put them behind your ingress policy if
@@ -267,6 +375,12 @@ limits egress to the destinations the deployment actually requires
   decides which `key_id` to trust.
 - Hold the CKKS secret key. That key MUST live in a separate KMS
   account / HSM, accessed only by the auditor decryption host.
+- Isolate probes from CPU saturation. `/healthz` runs on the event loop and stays prompt while audit slots are
+  busy, but a computation on a worker thread shares one interpreter (and one GIL) with it.
+- Interrupt a running computation. A timeout cancels the request and removes it from the queue; a job already
+  computing runs to its end (bounded by the input limits and `MAX_CONCURRENT_AUDITS`).
+- Throttle unauthenticated traffic or share capacity fairly between keys: the gates are first-come first-served per
+  process, and one key can use all slots within its rate limit. Do both at the proxy.
 - Replace your incident-response or vulnerability-management programme.
 
 Each of those gaps is operator-side: TLS, KMS, and runbooks live with
