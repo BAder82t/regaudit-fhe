@@ -51,6 +51,10 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_REPLAY_MODE           - off (default) | check | record
     REGAUDIT_FHE_TRUSTED_PROXIES       - comma-separated IPs/CIDRs allowed to vouch for forwarded
                                          clients (development self-signed check only)
+    REGAUDIT_FHE_MAX_CONCURRENT_AUDITS - audits computed at once (default 2)
+    REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
+    REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
+    REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES - verifications computed at once (default 4)
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -59,6 +63,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -68,10 +73,12 @@ import math
 import os
 import platform
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -89,6 +96,7 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
+from ._limits import AdmissionGate, GateRefused
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -163,6 +171,11 @@ class ServerConfig:
     # IPs / CIDRs allowed to vouch for a forwarded client address. Used only by
     # the development self-signed exposure check.
     trusted_proxies: tuple[str, ...] = ()
+    # Resource bounds (docs/DEPLOYMENT.md, "Resource bounds").
+    max_concurrent_audits: int = 2
+    max_queued_audits: int = 4
+    queue_wait_s: float = 5.0
+    max_concurrent_verifies: int = 4
 
     def verification_policy(self) -> VerificationPolicy:
         """The single verification policy for this deployment (raises PolicyError)."""
@@ -387,6 +400,32 @@ def _env_float(name: str) -> float | None:
     return value
 
 
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise PolicyError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise PolicyError(f"{name} must be at least {minimum}")
+    return value
+
+
+def _env_seconds(name: str, default: float, *, minimum: float = 0.0) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise PolicyError(f"{name} must be a number of seconds") from exc
+    if not math.isfinite(value) or value < minimum:
+        raise PolicyError(f"{name} must be a finite number of seconds >= {minimum}")
+    return value
+
+
 def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
     """Build a :class:`ServerConfig` from the environment.
 
@@ -421,6 +460,10 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             for p in os.environ.get("REGAUDIT_FHE_TRUSTED_PROXIES", "").split(",")
             if p.strip()
         ),
+        max_concurrent_audits=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1),
+        max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
+        queue_wait_s=_env_seconds("REGAUDIT_FHE_QUEUE_WAIT_S", 5.0),
+        max_concurrent_verifies=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES", 4, minimum=1),
     )
     validate_trust_config(config)
     return config
@@ -622,16 +665,59 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class TimeoutMiddleware(BaseHTTPMiddleware):
+class TimeoutMiddleware:
+    """Pure ASGI. Answers 504 when the application has not responded within ``timeout_s``, and **cancels** it.
+
+    The earlier implementation wrapped ``call_next`` of a ``BaseHTTPMiddleware`` in ``wait_for``. That
+    abandons only the wait for the response head: the downstream endpoint kept running (and kept its place
+    in any queue) after the client had its 504. Here the whole downstream call is the awaited unit, so the
+    timeout cancels it. A computation already running on a worker thread cannot be interrupted; the
+    admission gate (see ``_run_gated``) keeps such work bounded.
+    """
+
     def __init__(self, app, timeout_s: float) -> None:
-        super().__init__(app)
+        self.app = app
         self.timeout_s = timeout_s
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        task = asyncio.ensure_future(self.app(scope, receive, tracking_send))
         try:
-            return await asyncio.wait_for(call_next(request), timeout=self.timeout_s)
-        except asyncio.TimeoutError:
-            return JSONResponse(status_code=504, content={"detail": "request timed out"})
+            done, _ = await asyncio.wait({task}, timeout=self.timeout_s)
+        except BaseException:
+            task.cancel()  # the server cancelled us (shutdown): do not leave the request running
+            raise
+        if task in done:
+            task.result()
+            return
+        if started:
+            await task  # the response head is out; let the body finish rather than truncate it
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        body = json.dumps({"detail": "request timed out"}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 504,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
@@ -831,6 +917,69 @@ async def _read_strict_json_object(request: Request, max_bytes: int) -> dict[str
     return payload
 
 
+class _Refusal(Exception):
+    """A deterministic resource refusal; rendered as a JSON body with a stable ``code``."""
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **extra: Any,
+    ) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.body: dict[str, Any] = {"detail": detail, "code": code, **extra}
+        self.headers = headers or {}
+
+
+# Seconds a refused client is told to wait. The gate drains in about the time one audit takes.
+RETRY_AFTER_BUSY_S = "1"
+
+
+async def _run_gated(
+    gate: AdmissionGate,
+    submit: Callable[[], Any],
+    cancelled: threading.Event,
+    operation: str,
+) -> Any:
+    """Admit through ``gate``, run the job started by ``submit()`` (an awaitable future) and return its result.
+
+    The slot is released when the *job* finishes, not when the request is cancelled: a request that times
+    out (or whose client leaves) neither frees capacity for more work nor lets the job pile up behind it.
+    """
+    try:
+        await gate.acquire()
+    except GateRefused as exc:
+        raise _Refusal(
+            503,
+            "SERVER_BUSY",
+            "the server is at capacity; retry later",
+            headers={"Retry-After": RETRY_AFTER_BUSY_S},
+            operation=operation,
+            reason=exc.reason,
+        ) from exc
+    try:
+        job = submit()
+    except BaseException:
+        gate.release()
+        raise
+
+    def _done(fut: Any) -> None:
+        gate.release()
+        if not fut.cancelled():
+            fut.exception()  # mark retrieved; the abandoned request cannot
+
+    job.add_done_callback(_done)
+    try:
+        return await asyncio.shield(job)
+    except asyncio.CancelledError:
+        cancelled.set()  # a job that has not begun skips its work
+        raise
+
+
 def build_app(
     *,
     config: ServerConfig | None = None,
@@ -877,6 +1026,21 @@ def build_app(
         version=LIB_VERSION,
     )
 
+    @app.exception_handler(_Refusal)
+    async def _refusal_handler(request: Request, exc: _Refusal) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=exc.body, headers=exc.headers)
+
+    audit_gate = AdmissionGate(
+        config.max_concurrent_audits, config.max_queued_audits, config.queue_wait_s
+    )
+    verify_gate = AdmissionGate(
+        config.max_concurrent_verifies, config.max_queued_audits, config.queue_wait_s
+    )
+    # A dedicated pool: audit CPU work can never occupy the threads that serve auth and the probes.
+    audit_pool = ThreadPoolExecutor(
+        max_workers=config.max_concurrent_audits, thread_name_prefix="regaudit-audit"
+    )
+
     app.add_middleware(StructuredAccessLogMiddleware, logger=logger)
     app.add_middleware(TimeoutMiddleware, timeout_s=config.request_timeout_s)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=config.max_body_bytes)
@@ -909,12 +1073,14 @@ def build_app(
 
     # ----- Probes (no auth) ------------------------------------------------
 
+    # The probes are coroutines on purpose: they run on the event loop, never in a worker thread, so a
+    # saturated thread pool cannot delay them.
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> Any:
+    async def readyz() -> Any:
         try:
             load_schema("envelope")
             ready = True
@@ -978,7 +1144,7 @@ def build_app(
             }
         },
     )
-    def audit(
+    async def audit(
         primitive: str,
         # Declared before the caller so the body is still read (and size-limited) before
         # authentication, exactly as the former ``Body(...)`` parameter was.
@@ -988,8 +1154,20 @@ def build_app(
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
             raise HTTPException(404, f"unknown primitive {primitive!r}")
+        cancelled = threading.Event()
+
+        def work() -> Any:
+            if cancelled.is_set():  # the request is gone before the job began
+                return None
+            return _audit_dispatch(primitive, payload)
+
         try:
-            env = _audit_dispatch(primitive, payload)
+            env = await _run_gated(
+                audit_gate,
+                lambda: asyncio.get_running_loop().run_in_executor(audit_pool, work),
+                cancelled,
+                "audit",
+            )
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
         except (ValueError, OverflowError) as exc:
@@ -1010,7 +1188,8 @@ def build_app(
                 "envelope_digest": env.receipt["sha256"],
             },
         )
-        return env.to_dict()
+        result_dict: dict[str, Any] = env.to_dict()
+        return result_dict
 
     # ----- Verify (verify scope) ------------------------------------------
 
@@ -1059,8 +1238,13 @@ def build_app(
         except (CanonicalError, EnvelopeFormatError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
         try:
-            # verify() may block (sqlite replay store), so keep it off the event loop.
-            result = await run_in_threadpool(verify, env, policy)
+            # verify() may block (sqlite replay store), so keep it off the event loop, and bound how many run.
+            result = await _run_gated(
+                verify_gate,
+                lambda: asyncio.ensure_future(run_in_threadpool(verify, env, policy)),
+                threading.Event(),
+                "verify",
+            )
         except VerificationUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
