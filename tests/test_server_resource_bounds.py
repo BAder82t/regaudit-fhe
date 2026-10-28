@@ -20,7 +20,13 @@ pytest.importorskip("httpx")
 import httpx
 
 from regaudit_fhe import server
-from regaudit_fhe._limits import AdmissionGate, GateRefused
+from regaudit_fhe._limits import (
+    AdmissionGate,
+    GateRefused,
+    InputLimitError,
+    InputLimits,
+    check_input_bounds,
+)
 from regaudit_fhe.server import ServerConfig, build_app
 from tests._asgi import WithPeer
 
@@ -56,6 +62,110 @@ def _wide(n: int) -> dict[str, Any]:
         k: ([1, 0] * n)[:n] if k != "threshold" else v
         for k, v in {**GOOD, "threshold": 0.1}.items()
     }
+
+
+# ---------------------------------------------------------------------------
+# Input limits
+# ---------------------------------------------------------------------------
+
+
+def test_bounds_accept_exact_limit_and_refuse_one_more() -> None:
+    lim = InputLimits(max_array_elements=10, max_total_elements=20, max_depth=3)
+    check_input_bounds({"a": [0] * 10, "b": [0] * 10}, lim)  # exactly at both limits
+    with pytest.raises(InputLimitError) as one:
+        check_input_bounds({"a": [0] * 11}, lim)
+    assert (one.value.limit, one.value.maximum) == ("max_array_elements", 10)
+    with pytest.raises(InputLimitError) as tot:
+        check_input_bounds({"a": [0] * 10, "b": [0] * 10, "c": [0]}, lim)
+    assert tot.value.limit == "max_total_elements"
+    with pytest.raises(InputLimitError) as deep:
+        check_input_bounds({"a": [[[0]]]}, lim)  # depth 4 > 3
+    assert deep.value.limit == "max_json_depth"
+    with pytest.raises(InputLimitError) as members:
+        check_input_bounds(
+            {str(i): 0 for i in range(11)}, lim
+        )  # object members count against the array limit
+    assert members.value.limit == "max_array_elements"
+
+
+def test_bounds_handle_very_deep_nesting_without_recursion() -> None:
+    node: Any = []
+    for _ in range(5000):
+        node = [node]
+    with pytest.raises(InputLimitError):
+        check_input_bounds({"x": node}, InputLimits())
+
+
+def test_oversized_array_is_refused_with_a_stable_body() -> None:
+    app = build_app(
+        config=_cfg(input_limits=InputLimits(max_array_elements=8, max_total_elements=64))
+    )
+
+    async def go() -> Any:
+        async with _client(app) as c:
+            return await c.post("/v1/audit/fairness", json=_wide(9))
+
+    r = asyncio.run(go())
+    assert r.status_code == 413
+    assert r.json() == {
+        "detail": "audit input has an array longer than the configured limit",
+        "code": "INPUT_LIMIT_EXCEEDED",
+        "limit": "max_array_elements",
+        "maximum": 8,
+    }
+
+
+def test_refusal_does_not_echo_caller_keys() -> None:
+    app = build_app(config=_cfg(input_limits=InputLimits(max_array_elements=8)))
+
+    async def go() -> Any:
+        async with _client(app) as c:
+            return await c.post("/v1/audit/fairness", json={"SECRET-KEY-NAME": [0] * 9})
+
+    r = asyncio.run(go())
+    assert r.status_code == 413
+    assert "SECRET-KEY-NAME" not in r.text
+
+
+def test_legitimate_request_is_unchanged_by_the_limits() -> None:
+    app = build_app(config=_cfg())
+
+    async def go() -> Any:
+        async with _client(app) as c:
+            return await c.post("/v1/audit/fairness", json=GOOD)
+
+    r = asyncio.run(go())
+    assert r.status_code == 200
+    assert r.json()["primitive"] == "fairness"
+
+
+def test_default_limits_admit_the_largest_default_payload_shape() -> None:
+    n = InputLimits().max_array_elements
+    check_input_bounds(
+        {k: [0, 1] * (n // 2) for k in ("y_true", "y_pred", "group_a", "group_b")}, InputLimits()
+    )
+
+
+def test_limits_come_from_the_environment_and_bad_values_refuse_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", "123")
+    monkeypatch.setenv("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", "3")
+    cfg = server.load_config_from_env()
+    assert cfg.input_limits.max_array_elements == 123
+    assert cfg.max_concurrent_audits == 3
+    assert server.load_config_from_env().input_limits.max_total_elements == 131072
+    for name, bad in (
+        ("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", "0"),
+        ("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", "x"),
+        ("REGAUDIT_FHE_QUEUE_WAIT_S", "nan"),
+        ("REGAUDIT_FHE_MAX_QUEUED_AUDITS", "-1"),
+    ):
+        monkeypatch.setenv(name, bad)
+        with pytest.raises(server.PolicyError):
+            server.load_config_from_env()
+        monkeypatch.delenv(name)
+        monkeypatch.setenv("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", "123")
 
 
 # ---------------------------------------------------------------------------

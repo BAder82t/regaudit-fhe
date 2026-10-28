@@ -51,6 +51,9 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_REPLAY_MODE           - off (default) | check | record
     REGAUDIT_FHE_TRUSTED_PROXIES       - comma-separated IPs/CIDRs allowed to vouch for forwarded
                                          clients (development self-signed check only)
+    REGAUDIT_FHE_MAX_ARRAY_ELEMENTS    - longest JSON array/object accepted by /v1/audit (default 32768)
+    REGAUDIT_FHE_MAX_TOTAL_ELEMENTS    - total elements accepted in one audit payload (default 131072)
+    REGAUDIT_FHE_MAX_JSON_DEPTH        - deepest JSON nesting accepted by /v1/audit (default 8)
     REGAUDIT_FHE_MAX_CONCURRENT_AUDITS - audits computed at once (default 2)
     REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
     REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
@@ -79,7 +82,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
@@ -96,7 +99,7 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
-from ._limits import AdmissionGate, GateRefused
+from ._limits import AdmissionGate, GateRefused, InputLimitError, InputLimits, check_input_bounds
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -171,7 +174,8 @@ class ServerConfig:
     # IPs / CIDRs allowed to vouch for a forwarded client address. Used only by
     # the development self-signed exposure check.
     trusted_proxies: tuple[str, ...] = ()
-    # Resource bounds (docs/DEPLOYMENT.md, "Resource bounds").
+    # Resource bounds (docs/DEPLOYMENT.md, "Resource bounds"). The input limits apply to /v1/audit only.
+    input_limits: InputLimits = field(default_factory=InputLimits)
     max_concurrent_audits: int = 2
     max_queued_audits: int = 4
     queue_wait_s: float = 5.0
@@ -459,6 +463,11 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             p.strip()
             for p in os.environ.get("REGAUDIT_FHE_TRUSTED_PROXIES", "").split(",")
             if p.strip()
+        ),
+        input_limits=InputLimits(
+            max_array_elements=_env_int("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", 32768, minimum=1),
+            max_total_elements=_env_int("REGAUDIT_FHE_MAX_TOTAL_ELEMENTS", 131072, minimum=1),
+            max_depth=_env_int("REGAUDIT_FHE_MAX_JSON_DEPTH", 8, minimum=2),
         ),
         max_concurrent_audits=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1),
         max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
@@ -938,6 +947,12 @@ class _Refusal(Exception):
 # Seconds a refused client is told to wait. The gate drains in about the time one audit takes.
 RETRY_AFTER_BUSY_S = "1"
 
+_LIMIT_DETAIL = {
+    "max_array_elements": "audit input has an array longer than the configured limit",
+    "max_total_elements": "audit input has more elements in total than the configured limit",
+    "max_json_depth": "audit input is nested deeper than the configured limit",
+}
+
 
 async def _run_gated(
     gate: AdmissionGate,
@@ -1154,6 +1169,20 @@ def build_app(
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
             raise HTTPException(404, f"unknown primitive {primitive!r}")
+        # Refuse inputs that would make schema validation and the primitive expensive, before any of it runs.
+        try:
+            check_input_bounds(payload, config.input_limits)
+        except InputLimitError as exc:
+            logger.warning(
+                "audit_input_limit_exceeded", extra={"key_id": caller.key_id, "limit": exc.limit}
+            )
+            raise _Refusal(
+                413,
+                "INPUT_LIMIT_EXCEEDED",
+                _LIMIT_DETAIL[exc.limit],
+                limit=exc.limit,
+                maximum=exc.maximum,
+            ) from exc
         cancelled = threading.Event()
 
         def work() -> Any:
