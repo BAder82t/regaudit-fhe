@@ -33,6 +33,7 @@ from . import (
     audit_fairness,
     audit_provenance,
 )
+from ._limits import active_limits, check_primitive_cost
 from .canonical import MAX_INPUT_BYTES, CanonicalError
 from .replay import ReplayStateError, SqliteReplayCache
 from .report_v2 import EnvelopeFormatError, parse_envelope
@@ -94,6 +95,9 @@ SCHEMAS: dict[str, dict[str, Any]] = {
 
 
 def _audit_dispatch(primitive: str, payload: dict[str, Any]) -> AuditEnvelope:
+    # Before schema validation and before any allocation: the same cost limits the server applies, so
+    # the CLI and library path cannot reach an excessive allocation either.
+    check_primitive_cost(primitive, payload, active_limits())
     validate_input(primitive, payload)
     report: Any
     if primitive == "fairness":
@@ -215,8 +219,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
+    try:
+        app = build_app(config=config)
+    except RuntimeError as exc:  # PolicyError: an invalid numeric or budget setting
+        sys.stderr.write(f"refusing to start: {exc}\n")
+        return 2
     uvicorn.run(
-        build_app(config=config),
+        app,
         host=args.host,
         port=args.port,
         log_level="info",

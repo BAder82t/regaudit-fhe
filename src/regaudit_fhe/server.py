@@ -56,6 +56,8 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_MAX_JSON_DEPTH        - deepest JSON nesting accepted by /v1/audit (default 4)
     REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES - longest concordance risk/time/event array (default 8192)
     REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS - most models in a disagreement audit (default 32)
+    REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS - most buckets in a provenance audit (default 1024)
+    REGAUDIT_FHE_MAX_PROVENANCE_CELLS  - largest provenance bucket matrix, buckets x slots (default 8388608)
     REGAUDIT_FHE_MAX_CONCURRENT_AUDITS - audits computed at once (default 2)
     REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
     REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
@@ -83,6 +85,7 @@ import logging
 import math
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -114,6 +117,7 @@ from ._limits import (
     InputLimitError,
     InputLimits,
     check_input_bounds,
+    use_limits,
 )
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
@@ -409,49 +413,100 @@ def assert_safe_bind(host: str, *, dev_mode: bool, allow_self_signed: bool = Fal
         )
 
 
+# Strict numeric syntax for every numeric environment setting: ASCII digits only. No sign, no whitespace, no
+# underscores, no non-ASCII digits, and no nan/inf. An unset or empty variable means "use the default".
+_ENV_INT = re.compile(r"[0-9]+")
+_ENV_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?(?:[eE][0-9]+)?")
+
+# Upper bounds that keep a typo (an extra zero, a unit mix-up) from becoming "effectively unlimited".
+MAX_SECONDS_SETTING = 3600.0
+MAX_COUNT_SETTING = 10**9
+
+
+def _env_raw(name: str) -> str | None:
+    raw = os.environ.get(name, "")
+    return None if raw == "" else raw
+
+
 def _env_float(name: str) -> float | None:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
+    raw = _env_raw(name)
+    if raw is None:
         return None
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise PolicyError(f"{name} must be a number of seconds") from exc
-    if not value > 0:
-        raise PolicyError(f"{name} must be positive")
+    if not _ENV_NUMBER.fullmatch(raw):
+        raise PolicyError(f"{name} must be a positive number of seconds (ASCII digits, no sign)")
+    value = float(raw)
+    if not math.isfinite(value) or not value > 0:
+        raise PolicyError(f"{name} must be a finite, positive number of seconds")
     return value
 
 
-def _env_int(name: str, default: int, *, minimum: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
+def _env_int(name: str, default: int, *, minimum: int, maximum: int = MAX_COUNT_SETTING) -> int:
+    raw = _env_raw(name)
+    if raw is None:
         return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise PolicyError(f"{name} must be an integer") from exc
+    if not _ENV_INT.fullmatch(raw):
+        raise PolicyError(f"{name} must be a whole number (ASCII digits, no sign or spaces)")
+    value = int(raw)
     if value < minimum:
         raise PolicyError(f"{name} must be at least {minimum}")
+    if value > maximum:
+        raise PolicyError(f"{name} must be at most {maximum}")
     return value
 
 
 def _env_optional_int(name: str, *, minimum: int) -> int | None:
-    if not os.environ.get(name, "").strip():
+    if _env_raw(name) is None:
         return None
     return _env_int(name, minimum, minimum=minimum)
 
 
-def _env_seconds(name: str, default: float, *, minimum: float = 0.0) -> float:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
+def _env_seconds(
+    name: str,
+    default: float,
+    *,
+    minimum: float = 0.0,
+    maximum: float = MAX_SECONDS_SETTING,
+    positive: bool = False,
+) -> float:
+    raw = _env_raw(name)
+    if raw is None:
         return default
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise PolicyError(f"{name} must be a number of seconds") from exc
-    if not math.isfinite(value) or value < minimum:
-        raise PolicyError(f"{name} must be a finite number of seconds >= {minimum}")
+    if not _ENV_NUMBER.fullmatch(raw):
+        raise PolicyError(f"{name} must be a number of seconds (ASCII digits, no sign or spaces)")
+    value = float(raw)
+    if not math.isfinite(value) or value < minimum or (positive and value <= 0):
+        what = "positive" if positive else f">= {minimum}"
+        raise PolicyError(f"{name} must be a finite number of seconds, {what}")
+    if value > maximum:
+        raise PolicyError(f"{name} must be at most {maximum:g} seconds")
     return value
+
+
+def validate_numeric_config(config: ServerConfig) -> None:
+    """Refuse numeric settings that would disable or break the server (also for embedded use).
+
+    ``request_timeout_s <= 0`` or NaN would answer every request, probes included, with 504; a body limit
+    below one byte rejects every request; a rate limit below one per minute was silently raised to one by
+    the limiter. None of these ever meant "disabled", so they are refused rather than guessed at.
+    """
+    body = config.max_body_bytes
+    if isinstance(body, bool) or not isinstance(body, int) or not 1 <= body <= 1 << 30:
+        raise PolicyError("max_body_bytes must be a whole number between 1 and 1073741824")
+    rate = config.rate_limit_per_min
+    if isinstance(rate, bool) or not isinstance(rate, int) or not 1 <= rate <= MAX_COUNT_SETTING:
+        raise PolicyError(
+            f"rate_limit_per_min must be a whole number between 1 and {MAX_COUNT_SETTING}"
+        )
+    timeout = config.request_timeout_s
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or not 0 < timeout <= MAX_SECONDS_SETTING
+    ):
+        raise PolicyError(
+            f"request_timeout_s must be a finite number of seconds between 0 and {MAX_SECONDS_SETTING:g}"
+        )
 
 
 def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
@@ -468,9 +523,9 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
     config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
-        max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20)),
-        rate_limit_per_min=int(os.environ.get("REGAUDIT_FHE_RATE_LIMIT_PER_MIN", "60")),
-        request_timeout_s=float(os.environ.get("REGAUDIT_FHE_REQUEST_TIMEOUT_S", "30")),
+        max_body_bytes=_env_int("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20, minimum=1, maximum=1 << 30),
+        rate_limit_per_min=_env_int("REGAUDIT_FHE_RATE_LIMIT_PER_MIN", 60, minimum=1),
+        request_timeout_s=_env_seconds("REGAUDIT_FHE_REQUEST_TIMEOUT_S", 30.0, positive=True),
         cors_origins=tuple(
             s.strip()
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
@@ -496,16 +551,25 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
                 "REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES", 8192, minimum=1
             ),
             max_disagreement_models=_env_int("REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS", 32, minimum=1),
+            max_provenance_buckets=_env_int("REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS", 1024, minimum=1),
+            max_provenance_cells=_env_int(
+                "REGAUDIT_FHE_MAX_PROVENANCE_CELLS", 8388608, minimum=1, maximum=1 << 31
+            ),
         ),
-        max_concurrent_audits=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1),
+        max_concurrent_audits=_env_int(
+            "REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1, maximum=256
+        ),
         max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
         queue_wait_s=_env_seconds("REGAUDIT_FHE_QUEUE_WAIT_S", 5.0),
-        max_concurrent_verifies=_env_int("REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES", 4, minimum=1),
+        max_concurrent_verifies=_env_int(
+            "REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES", 4, minimum=1, maximum=256
+        ),
         max_inflight_body_bytes=_env_optional_int(
             "REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES", minimum=1
         ),
     )
     validate_trust_config(config)
+    validate_numeric_config(config)
     return config
 
 
@@ -1008,6 +1072,8 @@ _LIMIT_DETAIL = {
     "max_json_depth": "audit input is nested deeper than the configured limit",
     "max_concordance_samples": "concordance input has more samples than the configured limit",
     "max_disagreement_models": "disagreement input has more models than the configured limit",
+    "max_provenance_buckets": "provenance input has more buckets than the configured limit",
+    "max_provenance_cells": "provenance input needs a larger bucket matrix than the configured limit",
 }
 
 
@@ -1078,6 +1144,7 @@ def build_app(
     if not HAVE_FASTAPI:
         raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
     config = config or load_config_from_env()
+    validate_numeric_config(config)
     policy = config.verification_policy()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
@@ -1255,7 +1322,8 @@ def build_app(
         def work() -> Any:
             if cancelled.is_set():  # the request is gone before the job began
                 return None
-            return _audit_dispatch(primitive, payload)
+            with use_limits(config.input_limits):
+                return _audit_dispatch(primitive, payload)
 
         try:
             env = await _run_gated(
@@ -1431,10 +1499,10 @@ def uvicorn_options_from_env() -> dict[str, Any]:
             1, math.ceil(_env_seconds("REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S", 5.0))
         ),
     }
-    limit = _env_int("REGAUDIT_FHE_LIMIT_CONCURRENCY", 256, minimum=0)
+    limit = _env_int("REGAUDIT_FHE_LIMIT_CONCURRENCY", 256, minimum=0, maximum=1_000_000)
     if limit:
         options["limit_concurrency"] = limit
-    graceful = _env_int("REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S", 20, minimum=0)
+    graceful = _env_int("REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S", 20, minimum=0, maximum=3600)
     if graceful:
         options["timeout_graceful_shutdown"] = graceful
     header_s = _env_seconds("REGAUDIT_FHE_HEADER_TIMEOUT_S", 10.0)
@@ -1455,7 +1523,7 @@ def apply_switch_interval_from_env() -> float | None:
     :func:`build_app`, so an embedding application's interpreter settings are left alone.
     Returns the interval applied, or ``None``.
     """
-    seconds = _env_seconds("REGAUDIT_FHE_SWITCH_INTERVAL_S", 0.001)
+    seconds = _env_seconds("REGAUDIT_FHE_SWITCH_INTERVAL_S", 0.001, maximum=1.0)
     if seconds <= 0:
         return None
     sys.setswitchinterval(seconds)

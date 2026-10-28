@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 from collections import deque
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,7 +27,10 @@ __all__ = [
     "IngressBudget",
     "InputLimitError",
     "InputLimits",
+    "active_limits",
     "check_input_bounds",
+    "check_primitive_cost",
+    "use_limits",
 ]
 
 
@@ -47,6 +53,10 @@ class InputLimits:
     max_depth: int = 4
     max_concordance_samples: int = 8192
     max_disagreement_models: int = 32
+    # The provenance primitive allocates a dense (n_buckets, n_slots) float64 mask matrix, where
+    # n_slots = max(next power of two >= number of rows, n_buckets). 2**23 cells is 64 MiB.
+    max_provenance_buckets: int = 1024
+    max_provenance_cells: int = 8388608
 
     def __post_init__(self) -> None:
         for name in (
@@ -55,6 +65,8 @@ class InputLimits:
             "max_depth",
             "max_concordance_samples",
             "max_disagreement_models",
+            "max_provenance_buckets",
+            "max_provenance_cells",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -103,16 +115,59 @@ def check_input_bounds(payload: Any, limits: InputLimits, primitive: str | None 
         for child in children:
             if isinstance(child, (dict, list)):
                 stack.append((child, depth + 1))
-    if isinstance(payload, dict):
-        if primitive == "concordance":
-            for key in ("risk", "time", "event"):
-                n_c = _length(payload.get(key))
-                if n_c is not None and n_c > limits.max_concordance_samples:
-                    raise InputLimitError("max_concordance_samples", limits.max_concordance_samples)
-        elif primitive == "disagreement":
-            n_m = _length(payload.get("model_polynomials"))
-            if n_m is not None and n_m > limits.max_disagreement_models:
-                raise InputLimitError("max_disagreement_models", limits.max_disagreement_models)
+    if primitive is not None:
+        check_primitive_cost(primitive, payload, limits)
+
+
+def check_primitive_cost(primitive: str, payload: Any, limits: InputLimits) -> None:
+    """Refuse parameters that would make one primitive allocate or compute far beyond its input size.
+
+    Tolerant of any JSON type: a value of the wrong type is left for the schema to refuse with its own
+    error, so this runs before schema validation and before any allocation. Raises
+    :class:`InputLimitError`; never echoes a payload value.
+    """
+    if not isinstance(payload, dict):
+        return
+    if primitive == "concordance":
+        for key in ("risk", "time", "event"):
+            n_c = _length(payload.get(key))
+            if n_c is not None and n_c > limits.max_concordance_samples:
+                raise InputLimitError("max_concordance_samples", limits.max_concordance_samples)
+    elif primitive == "disagreement":
+        n_m = _length(payload.get("model_polynomials"))
+        if n_m is not None and n_m > limits.max_disagreement_models:
+            raise InputLimitError("max_disagreement_models", limits.max_disagreement_models)
+    elif primitive == "provenance":
+        buckets = payload.get("n_buckets")
+        if isinstance(buckets, bool) or not isinstance(buckets, (int, float)):
+            return
+        if isinstance(buckets, float) and not math.isfinite(buckets):
+            return
+        if buckets < 1:
+            return
+        if buckets > limits.max_provenance_buckets:
+            raise InputLimitError("max_provenance_buckets", limits.max_provenance_buckets)
+        n_rows = _length(payload.get("attributions")) or 1
+        n_slots = max(1 << (n_rows - 1).bit_length(), math.ceil(buckets))
+        if math.ceil(buckets) * n_slots > limits.max_provenance_cells:
+            raise InputLimitError("max_provenance_cells", limits.max_provenance_cells)
+
+
+_ACTIVE: ContextVar[InputLimits | None] = ContextVar("regaudit_active_limits", default=None)
+
+
+def active_limits() -> InputLimits:
+    """The limits the shared audit dispatch applies: the server's configured ones, else the defaults."""
+    return _ACTIVE.get() or InputLimits()
+
+
+@contextlib.contextmanager
+def use_limits(limits: InputLimits) -> Iterator[None]:
+    token = _ACTIVE.set(limits)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(token)
 
 
 class IngressBudget:

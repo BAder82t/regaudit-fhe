@@ -36,7 +36,11 @@ accepted are now refused.**
   - Input limits on `/v1/audit`, refused with `413` and a stable `INPUT_LIMIT_EXCEEDED` body:
     `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` (131072 per array and per object), `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS`
     (524288 array elements in total), `REGAUDIT_FHE_MAX_JSON_DEPTH` (4), `REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES`
-    (8192; the concordance circuit is O(n^2)) and `REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS` (32; O(M^2) pairs).
+    (8192; the concordance circuit is O(n^2)), `REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS` (32; O(M^2) pairs),
+    `REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS` (1024) and `REGAUDIT_FHE_MAX_PROVENANCE_CELLS` (8388608). The last two bound
+    the dense `(n_buckets, n_slots)` matrix the provenance primitive allocates: `n_buckets=8192` in a 100-byte request
+    took about 520 MB. They are checked before schema validation on the HTTP route and in the shared dispatch used by
+    the CLI and the library (`regaudit-fhe audit` exits 2).
   - A bounded admission gate: `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS` (2) running, `REGAUDIT_FHE_MAX_QUEUED_AUDITS` (4)
     waiting for at most `REGAUDIT_FHE_QUEUE_WAIT_S` (5); everything else is answered `503` with code `SERVER_BUSY`
     and `Retry-After`. `/v1/verify` has its own gate (`REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES`, 4).
@@ -46,6 +50,12 @@ accepted are now refused.**
     `REGAUDIT_FHE_HEADER_TIMEOUT_S` (10), `REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S` (5), `REGAUDIT_FHE_LIMIT_CONCURRENCY`
     (256), `REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S` (20), `REGAUDIT_FHE_SWITCH_INTERVAL_S` (0.001).
   - Every one of these settings refuses to start the server on an invalid value; none can be silently disabled.
+    This now includes `REGAUDIT_FHE_MAX_BODY_BYTES`, `REGAUDIT_FHE_RATE_LIMIT_PER_MIN` and
+    `REGAUDIT_FHE_REQUEST_TIMEOUT_S`, which 0.1.0 parsed with a bare `int()`/`float()`: zero, negative, NaN,
+    infinite, malformed, padded, signed, underscored or non-ASCII values, and absurdly large ones, are refused (a
+    timeout of 0 or NaN answered every request, probes included, with 504; a rate limit of 0 meant 1 per minute).
+    Valid values and unset variables behave as before. `regaudit-fhe serve` reports an invalid setting or in-flight
+    budget as one `refusing to start:` line and exit code 2, not a traceback.
 
 ### Changed
 

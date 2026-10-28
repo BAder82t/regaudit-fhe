@@ -183,7 +183,7 @@ tune them for your deployment.
    ```
 
    `limit` is one of `max_array_elements`, `max_total_elements`, `max_json_depth`, `max_concordance_samples`,
-   `max_disagreement_models`. The refusal never echoes keys or values from the request. The CLI
+   `max_disagreement_models`, `max_provenance_buckets`, `max_provenance_cells`. The refusal never echoes keys or values from the request. The CLI
    (`regaudit-fhe audit ...`) is not limited. Every setting must be a positive integer; an invalid value makes the
    server refuse to start, and there is no value that turns a limit off.
 
@@ -194,6 +194,8 @@ tune them for your deployment.
    | `REGAUDIT_FHE_MAX_JSON_DEPTH` | `4` | The root object is depth 1. The deepest valid input is `disagreement` (`model_polynomials` is an array of 4-number arrays): depth 3. One level of headroom; anything deeper is invalid under the schemas anyway (every input schema has `additionalProperties: false`). Minimum accepted setting: 3. |
    | `REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES` | `8192` | The concordance circuit does O(n^2) vector work: measured 0.5 s at 2048 samples, 3.3 s at 8192, 9.9 s at 16384, 32 s at 32768 (loaded host, directional), and minutes at 131072, which would hold an audit slot far past any request timeout. |
    | `REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS` | `32` | The disagreement circuit sums M(M-1)/2 pairwise terms over the test input. 32 models is 496 pairs (about 2 s at 131072 test points); 1024 models measured 1.45 s with only 1024 test points. |
+   | `REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS` | `1024` | `provenance` allocates a dense `(n_buckets, n_slots)` float64 mask matrix, `n_slots = max(next power of two >= rows, n_buckets)`; 8192 buckets took about 520 MB from a 100-byte request. The largest value any shipped example, test or benchmark uses is 16. Only powers of two work when `n_buckets` exceeds the padded row count, so 1024 is the largest useful value below the cell cap. |
+   | `REGAUDIT_FHE_MAX_PROVENANCE_CELLS` | `8388608` | `n_buckets x n_slots` (2**23 cells, a 64 MiB matrix; measured peak about 65 to 75 MB above idle, so two audits running at once add about 150 MB inside a 512 MiB container). Catches many buckets combined with many rows, for example 128 buckets x 131072 rows (1 GiB), which the bucket cap alone does not. |
 
    **Compatibility.** The previous server accepted any payload that fit the body limit. Requests that exceeded
    the limits above now get `413` (for example a `concordance` request with more than 8192 samples, which on the
@@ -240,6 +242,30 @@ tune them for your deployment.
    default 1 ms) so the loop gets the GIL back quickly while audits compute. They stay available while every audit
    slot is busy, but they are not isolated from a saturated CPU: on a one-CPU container, size
    the probe timeouts (below) for a few hundred milliseconds under full load.
+
+### Numeric settings are validated strictly
+
+Every numeric `REGAUDIT_FHE_*` setting must be written with ASCII digits only (a decimal point or an `e` exponent
+is allowed for seconds). A value with a sign, spaces, underscores, non-ASCII digits, `nan`/`inf`, or one that is
+malformed, out of range or absurdly large makes the server refuse to start (`regaudit-fhe serve` prints one line,
+`refusing to start: ...`, and exits 2). An unset or empty variable means "use the default", exactly as before.
+
+| Setting | Default | Accepted |
+| --- | --- | --- |
+| `REGAUDIT_FHE_MAX_BODY_BYTES` | `1048576` | 1 to 1073741824 |
+| `REGAUDIT_FHE_RATE_LIMIT_PER_MIN` | `60` | 1 to 1000000000 |
+| `REGAUDIT_FHE_REQUEST_TIMEOUT_S` | `30` | greater than 0, at most 3600 |
+| `REGAUDIT_FHE_QUEUE_WAIT_S`, `..._HEADER_TIMEOUT_S`, `..._TIMEOUT_KEEP_ALIVE_S` | `5`, `10`, `5` | 0 to 3600 |
+| `REGAUDIT_FHE_SWITCH_INTERVAL_S` | `0.001` | 0 to 1 |
+| `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS`, `..._VERIFIES` | `2`, `4` | 1 to 256 |
+
+**Zero.** Zero is refused for the body limit, the rate limit and the request timeout. In 0.1.0 a rate limit of 0
+was silently raised to one request a minute and a timeout of 0 (or NaN, or a negative value) answered every
+request, probes included, with 504; neither was ever documented as "off". Zero is a supported, documented value only
+where it names a real mode: `REGAUDIT_FHE_MAX_QUEUED_AUDITS=0` (no waiting room), `REGAUDIT_FHE_QUEUE_WAIT_S=0`,
+`REGAUDIT_FHE_HEADER_TIMEOUT_S=0` (header deadline off), `REGAUDIT_FHE_LIMIT_CONCURRENCY=0` (uvicorn limit off),
+`REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S=0` and `REGAUDIT_FHE_SWITCH_INTERVAL_S=0` (interpreter default). An
+embedding application that builds `ServerConfig` itself gets the same checks from `build_app()` (`PolicyError`).
 
 ### Connection-level settings (`regaudit-fhe serve`)
 
