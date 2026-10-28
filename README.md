@@ -196,10 +196,13 @@ import regaudit_fhe as rf
 from regaudit_fhe.fhe import build_d6_context
 from regaudit_fhe.fhe import primitives as enc
 
-ctx = build_d6_context()                       # CKKS context; takes a few seconds
-y_true = np.array([1, 0, 1, 1, 0, 1, 0, 0.]); y_pred = np.array([1, 0, 1, 0, 0, 1, 1, 0.])
-a = np.array([1, 1, 1, 1, 0, 0, 0, 0.])
-report = enc.fairness_encrypted(ctx, y_true, y_pred, a, 1.0 - a)   # same report type as audit_fairness
+ctx = build_d6_context()  # CKKS context; takes a few seconds
+y_true = np.array([1, 0, 1, 1, 0, 1, 0, 0.0])
+y_pred = np.array([1, 0, 1, 0, 0, 1, 1, 0.0])
+a = np.array([1, 1, 1, 1, 0, 0, 0, 0.0])
+report = enc.fairness_encrypted(
+    ctx, y_true, y_pred, a, 1.0 - a
+)  # same report type as audit_fairness
 ```
 
 `ctx` holds the secret key and the call decrypts the aggregate scalars, so in this form the
@@ -219,8 +222,8 @@ sign an encrypted-path result.
 import numpy as np
 import regaudit_fhe as rf
 
-y_true  = np.array([1, 0, 1, 1, 0, 1, 0, 0], dtype=float)
-y_pred  = np.array([1, 0, 1, 0, 0, 1, 1, 0], dtype=float)
+y_true = np.array([1, 0, 1, 1, 0, 1, 0, 0], dtype=float)
+y_pred = np.array([1, 0, 1, 0, 0, 1, 1, 0], dtype=float)
 group_a = np.array([1, 1, 1, 1, 0, 0, 0, 0], dtype=float)
 group_b = 1.0 - group_a
 
@@ -230,7 +233,7 @@ print(report.demographic_parity_diff, report.threshold_breached)
 # Long-lived issuer key in production; ephemeral for demos.
 signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")
 envelope = rf.envelope("fairness", report, signer=signer)
-print(envelope.to_json())                     # ship this to the regulator
+print(envelope.to_json())  # ship this to the regulator
 ```
 
 ### How a report becomes trusted (in plain English)
@@ -262,7 +265,8 @@ signed. Only a key the verifier registered beforehand can answer that.
 | `rf.verify_report(env, VerificationPolicy(trust_store=...))` / `regaudit-fhe verify --trusted-keys` | `trust_status == "TRUSTED"`, `accepted` is `True` (CLI exit 0) | **Yes**, within the key's registered scope. |
 | `VerificationPolicy(allow_self_signed=True)` / `--allow-self-signed` | `integrity_valid` is `True`, `trust_status == "SELF_SIGNED_ONLY"`, `accepted` is `False` (CLI exit 1) | No. Development only. |
 | `VerificationPolicy()` with no trust store | raises `VerificationUnavailable` (CLI exit 2) | n/a: refuses rather than trusting the embedded key. |
-| `rf.verify_receipt(env)` | returns `True` for an intact report **signed by anyone** (one-time `UserWarning`) | **No.** Do not use it as an accept/reject decision. |
+| `rf.verify_trusted(report, trust_store)` (new in 0.2.0) | `.verdict` is `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`; `.trusted` is `True` only for `TRUSTED`. The report is parsed strictly first. | **Yes**, same rules as `verify_report`; refuses a trust store of `None`. |
+| `rf.verify_receipt(env)` | returns `True` for an intact report **signed by anyone** (`DeprecationWarning` and a one-time `UserWarning`) | **No.** Do not use it as an accept/reject decision. |
 | `rf.verify_envelope(env)` with no `trusted_keys`/`trust_store` | `.trust_status == "SELF_SIGNED_ONLY"`, but the deprecated `.valid` is `True` | **No.** Branch on `trust_status`, never on `valid`. |
 
 Rules of thumb: decide on `result.accepted` (or the CLI exit code `0`), never on
@@ -301,16 +305,16 @@ flat format with `keys` / `revoked` / `parameter_set_pins` still works.)
 ```python
 import regaudit_fhe as rf
 
-trust_store = rf.TrustStore.from_json("trust_store.json")   # refuses to load if unusable
+trust_store = rf.TrustStore.from_json("trust_store.json")  # refuses to load if unusable
 policy = rf.VerificationPolicy(trust_store=trust_store, verifier_id="regulator-a")
 
-env = rf.parse_envelope(received_text)       # reads v1 or v2; rejects malformed JSON
+env = rf.parse_envelope(received_text)  # reads v1 or v2; rejects malformed JSON
 result = rf.verify_report(env, policy)
 
-if result.accepted:                          # the single yes/no decision
+if result.accepted:  # the single yes/no decision
     print("trusted:", result.issuer, result.key_id)
 else:
-    print(result.trust_status, result.blocking_reasons)   # e.g. INVALID ['ISSUER_UNKNOWN']
+    print(result.trust_status, result.blocking_reasons)  # e.g. INVALID ['ISSUER_UNKNOWN']
 ```
 
 Use `result.accepted` (or `result.trust_status`). Do not use `valid`; it is deprecated
@@ -338,10 +342,13 @@ and, without a trust store, only means "the file is intact".
 and fingerprint, deployment, a unique run id, and the intended audience.
 
 ```python
-signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")   # a KMS/HSM in production
+signer = rf.Signer.generate(issuer="acme-bank", key_id="acme-2026-04")  # a KMS/HSM in production
 env = rf.envelope_v2(
-    "fairness", report, signer=signer,
-    deployment_id="prod-eu-1", audience=["regulator-a"],
+    "fairness",
+    report,
+    signer=signer,
+    deployment_id="prod-eu-1",
+    audience=["regulator-a"],
 )
 print(env.to_json())
 ```
@@ -388,24 +395,25 @@ trust_store = rf.TrustStore.from_json("trust_store.json")
 env = rf.AuditEnvelope.from_dict(received_payload)
 try:
     outcome = rf.verify_envelope_or_raise(env, trust_store=trust_store)
-except rf.UntrustedIssuer:        # unknown key_id, or the report is outside the key's registered scope
+except rf.UntrustedIssuer:  # unknown key_id, or the report is outside the key's registered scope
     ...
-except rf.RevokedIssuer:          # revoked, retired or compromised key
+except rf.RevokedIssuer:  # revoked, retired or compromised key
     ...
-except rf.WrongParameterSet:      # parameter_set_hash != pinned value
+except rf.WrongParameterSet:  # parameter_set_hash != pinned value
     ...
-except rf.HashMismatch:           # body changed since signing
+except rf.HashMismatch:  # body changed since signing
     ...
-except rf.InvalidSignature:       # Ed25519 verify failed
+except rf.InvalidSignature:  # Ed25519 verify failed
     ...
-except rf.TimestampInvalid:       # an attached timestamp failed validation
+except rf.TimestampInvalid:  # an attached timestamp failed validation
     ...
 # All subclass rf.EnvelopeVerificationError.
 ```
 
 * `verify_receipt(env)` with no trust material only checks that the hash and embedded
   signature agree. That proves the bytes did not change; it does **not** prove an
-  approved auditor produced them, and it emits a one-time `UserWarning`. Pass
+  approved auditor produced them, and it emits a `DeprecationWarning` (plus a one-time
+  `UserWarning`). Pass
   `trust_store=` (recommended: it enforces revocation, pins and scope) or
   `trusted_keys=` (registration only). An empty `trusted_keys={}` trusts nobody.
 * `valid` is deprecated and kept through the first `report.v2` release; reading it
@@ -433,18 +441,32 @@ over non-loopback or Unix-socket transports, and behind forwarding headers. See
 ### Same flow, command line
 
 ```bash
-# Client
+# Issuer, once: a long-lived key (the private file is created 0600 and never overwritten)
+regaudit-fhe keygen --key-id acme-2026 --issuer acme \
+  --private-key acme.pem --public-key acme.pub      # prints the key's SHA-256 fingerprint
+
+# Issuer, per audit: report.v2 signed by that key
 echo '{"y_true":[1,0,1,1],"y_pred":[1,0,0,0],"group_a":[1,1,0,0],"group_b":[0,0,1,1]}' \
   > input.json
-regaudit-fhe audit fairness -i input.json -o envelope.json
+regaudit-fhe audit fairness -i input.json -o report.json \
+  --signing-key acme.pem --key-id acme-2026 --issuer acme --deployment-id prod-1
 
-# Regulator
-regaudit-fhe verify -i envelope.json --trusted-keys trust_store.json
+# Verifier, once: enrol the issuer's key. Send acme.pub and the fingerprint over a channel
+# you trust; the fingerprint you pass is checked against the file, and nothing is ever
+# enrolled from a report.
+regaudit-fhe trust add --store trust_store.json --key-id acme-2026 --issuer acme \
+  --public-key acme.pub --fingerprint <fingerprint from the issuer>
+
+# Verifier, per report: exit 0 only for TRUSTED
+regaudit-fhe verify -i report.json --trusted-keys trust_store.json
 ```
 
-`regaudit-fhe audit` currently emits `report.v1` signed by an ephemeral key, so its
-output can only ever verify as `SELF_SIGNED_ONLY` until you sign with a long-lived
-key; `report.v2` is produced through the library API. Useful `verify` options:
+Without the `--signing-key` options, `regaudit-fhe audit` still emits `report.v1` signed by
+an ephemeral key, which can only ever verify as `SELF_SIGNED_ONLY`. The CLI key file is an
+unencrypted PEM for evaluation; for production use a KMS/HSM-backed signer through the
+library. `regaudit-fhe verify` reads the report strictly: duplicate keys, `NaN`, unknown or
+missing members in a `report.v1`, and anything else that would let the JSON you hold differ
+from the bytes that were signed, are refused with exit 2. Useful `verify` options:
 
 | Option | Purpose |
 | --- | --- |
@@ -635,11 +657,12 @@ field. Programmatic access:
 
 ```python
 import regaudit_fhe as rf
-rf.list_schemas()                      # all 14 names
-rf.load_schema("fairness.input")       # raw schema dict
-rf.validate_input("fairness", payload) # raises rf.SchemaError on bad input
-rf.validate_envelope(env_dict)         # check a report.v1 envelope
-rf.validate_envelope_v2(env_dict)      # check a report.v2 envelope
+
+rf.list_schemas()  # all 14 names
+rf.load_schema("fairness.input")  # raw schema dict
+rf.validate_input("fairness", payload)  # raises rf.SchemaError on bad input
+rf.validate_envelope(env_dict)  # check a report.v1 envelope
+rf.validate_envelope_v2(env_dict)  # check a report.v2 envelope
 ```
 
 ---
