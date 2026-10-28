@@ -51,6 +51,23 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_REPLAY_MODE           - off (default) | check | record
     REGAUDIT_FHE_TRUSTED_PROXIES       - comma-separated IPs/CIDRs allowed to vouch for forwarded
                                          clients (development self-signed check only)
+    REGAUDIT_FHE_MAX_ARRAY_ELEMENTS    - longest JSON array/object accepted by /v1/audit (default 131072)
+    REGAUDIT_FHE_MAX_TOTAL_ELEMENTS    - total elements accepted in one audit payload (default 524288)
+    REGAUDIT_FHE_MAX_JSON_DEPTH        - deepest JSON nesting accepted by /v1/audit (default 4)
+    REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES - longest concordance risk/time/event array (default 8192)
+    REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS - most models in a disagreement audit (default 32)
+    REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS - most buckets in a provenance audit (default 1024)
+    REGAUDIT_FHE_MAX_PROVENANCE_CELLS  - largest provenance bucket matrix, buckets x slots (default 8388608)
+    REGAUDIT_FHE_MAX_CONCURRENT_AUDITS - audits computed at once (default 2)
+    REGAUDIT_FHE_MAX_QUEUED_AUDITS     - audits allowed to wait for a slot (default 4)
+    REGAUDIT_FHE_QUEUE_WAIT_S          - longest wait for a slot before a 503 (default 5)
+    REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES - verifications computed at once (default 4)
+    REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES - request-body bytes buffered at once across requests
+                                         (default: the larger of 32 MiB and twice the body limit)
+    REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S, REGAUDIT_FHE_HEADER_TIMEOUT_S,
+    REGAUDIT_FHE_LIMIT_CONCURRENCY, REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S,
+    REGAUDIT_FHE_SWITCH_INTERVAL_S
+                                       - process and connection settings of ``regaudit-fhe serve``
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -59,6 +76,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -67,17 +85,20 @@ import logging
 import math
 import os
 import platform
+import re
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
 try:
-    from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response, status
+    from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
@@ -89,6 +110,15 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
+from ._limits import (
+    AdmissionGate,
+    GateRefused,
+    IngressBudget,
+    InputLimitError,
+    InputLimits,
+    check_input_bounds,
+    use_limits,
+)
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -163,6 +193,15 @@ class ServerConfig:
     # IPs / CIDRs allowed to vouch for a forwarded client address. Used only by
     # the development self-signed exposure check.
     trusted_proxies: tuple[str, ...] = ()
+    # Resource bounds (docs/DEPLOYMENT.md, "Resource bounds"). The input limits apply to /v1/audit only.
+    input_limits: InputLimits = field(default_factory=InputLimits)
+    max_concurrent_audits: int = 2
+    max_queued_audits: int = 4
+    queue_wait_s: float = 5.0
+    max_concurrent_verifies: int = 4
+    # Request-body bytes that may be buffered at once across all requests (None: the larger of 32 MiB and twice
+    # the body limit). Must be at least ``max_body_bytes``.
+    max_inflight_body_bytes: int | None = None
 
     def verification_policy(self) -> VerificationPolicy:
         """The single verification policy for this deployment (raises PolicyError)."""
@@ -374,17 +413,100 @@ def assert_safe_bind(host: str, *, dev_mode: bool, allow_self_signed: bool = Fal
         )
 
 
+# Strict numeric syntax for every numeric environment setting: ASCII digits only. No sign, no whitespace, no
+# underscores, no non-ASCII digits, and no nan/inf. An unset or empty variable means "use the default".
+_ENV_INT = re.compile(r"[0-9]+")
+_ENV_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?(?:[eE][0-9]+)?")
+
+# Upper bounds that keep a typo (an extra zero, a unit mix-up) from becoming "effectively unlimited".
+MAX_SECONDS_SETTING = 3600.0
+MAX_COUNT_SETTING = 10**9
+
+
+def _env_raw(name: str) -> str | None:
+    raw = os.environ.get(name, "")
+    return None if raw == "" else raw
+
+
 def _env_float(name: str) -> float | None:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
+    raw = _env_raw(name)
+    if raw is None:
         return None
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise PolicyError(f"{name} must be a number of seconds") from exc
-    if not value > 0:
-        raise PolicyError(f"{name} must be positive")
+    if not _ENV_NUMBER.fullmatch(raw):
+        raise PolicyError(f"{name} must be a positive number of seconds (ASCII digits, no sign)")
+    value = float(raw)
+    if not math.isfinite(value) or not value > 0:
+        raise PolicyError(f"{name} must be a finite, positive number of seconds")
     return value
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int = MAX_COUNT_SETTING) -> int:
+    raw = _env_raw(name)
+    if raw is None:
+        return default
+    if not _ENV_INT.fullmatch(raw):
+        raise PolicyError(f"{name} must be a whole number (ASCII digits, no sign or spaces)")
+    value = int(raw)
+    if value < minimum:
+        raise PolicyError(f"{name} must be at least {minimum}")
+    if value > maximum:
+        raise PolicyError(f"{name} must be at most {maximum}")
+    return value
+
+
+def _env_optional_int(name: str, *, minimum: int) -> int | None:
+    if _env_raw(name) is None:
+        return None
+    return _env_int(name, minimum, minimum=minimum)
+
+
+def _env_seconds(
+    name: str,
+    default: float,
+    *,
+    minimum: float = 0.0,
+    maximum: float = MAX_SECONDS_SETTING,
+    positive: bool = False,
+) -> float:
+    raw = _env_raw(name)
+    if raw is None:
+        return default
+    if not _ENV_NUMBER.fullmatch(raw):
+        raise PolicyError(f"{name} must be a number of seconds (ASCII digits, no sign or spaces)")
+    value = float(raw)
+    if not math.isfinite(value) or value < minimum or (positive and value <= 0):
+        what = "positive" if positive else f">= {minimum}"
+        raise PolicyError(f"{name} must be a finite number of seconds, {what}")
+    if value > maximum:
+        raise PolicyError(f"{name} must be at most {maximum:g} seconds")
+    return value
+
+
+def validate_numeric_config(config: ServerConfig) -> None:
+    """Refuse numeric settings that would disable or break the server (also for embedded use).
+
+    ``request_timeout_s <= 0`` or NaN would answer every request, probes included, with 504; a body limit
+    below one byte rejects every request; a rate limit below one per minute was silently raised to one by
+    the limiter. None of these ever meant "disabled", so they are refused rather than guessed at.
+    """
+    body = config.max_body_bytes
+    if isinstance(body, bool) or not isinstance(body, int) or not 1 <= body <= 1 << 30:
+        raise PolicyError("max_body_bytes must be a whole number between 1 and 1073741824")
+    rate = config.rate_limit_per_min
+    if isinstance(rate, bool) or not isinstance(rate, int) or not 1 <= rate <= MAX_COUNT_SETTING:
+        raise PolicyError(
+            f"rate_limit_per_min must be a whole number between 1 and {MAX_COUNT_SETTING}"
+        )
+    timeout = config.request_timeout_s
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or not 0 < timeout <= MAX_SECONDS_SETTING
+    ):
+        raise PolicyError(
+            f"request_timeout_s must be a finite number of seconds between 0 and {MAX_SECONDS_SETTING:g}"
+        )
 
 
 def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
@@ -401,9 +523,9 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
     config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
-        max_body_bytes=int(os.environ.get("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20)),
-        rate_limit_per_min=int(os.environ.get("REGAUDIT_FHE_RATE_LIMIT_PER_MIN", "60")),
-        request_timeout_s=float(os.environ.get("REGAUDIT_FHE_REQUEST_TIMEOUT_S", "30")),
+        max_body_bytes=_env_int("REGAUDIT_FHE_MAX_BODY_BYTES", 1 << 20, minimum=1, maximum=1 << 30),
+        rate_limit_per_min=_env_int("REGAUDIT_FHE_RATE_LIMIT_PER_MIN", 60, minimum=1),
+        request_timeout_s=_env_seconds("REGAUDIT_FHE_REQUEST_TIMEOUT_S", 30.0, positive=True),
         cors_origins=tuple(
             s.strip()
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
@@ -421,8 +543,33 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             for p in os.environ.get("REGAUDIT_FHE_TRUSTED_PROXIES", "").split(",")
             if p.strip()
         ),
+        input_limits=InputLimits(
+            max_array_elements=_env_int("REGAUDIT_FHE_MAX_ARRAY_ELEMENTS", 131072, minimum=1),
+            max_total_elements=_env_int("REGAUDIT_FHE_MAX_TOTAL_ELEMENTS", 524288, minimum=1),
+            max_depth=_env_int("REGAUDIT_FHE_MAX_JSON_DEPTH", 4, minimum=3),
+            max_concordance_samples=_env_int(
+                "REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES", 8192, minimum=1
+            ),
+            max_disagreement_models=_env_int("REGAUDIT_FHE_MAX_DISAGREEMENT_MODELS", 32, minimum=1),
+            max_provenance_buckets=_env_int("REGAUDIT_FHE_MAX_PROVENANCE_BUCKETS", 1024, minimum=1),
+            max_provenance_cells=_env_int(
+                "REGAUDIT_FHE_MAX_PROVENANCE_CELLS", 8388608, minimum=1, maximum=1 << 31
+            ),
+        ),
+        max_concurrent_audits=_env_int(
+            "REGAUDIT_FHE_MAX_CONCURRENT_AUDITS", 2, minimum=1, maximum=256
+        ),
+        max_queued_audits=_env_int("REGAUDIT_FHE_MAX_QUEUED_AUDITS", 4, minimum=0),
+        queue_wait_s=_env_seconds("REGAUDIT_FHE_QUEUE_WAIT_S", 5.0),
+        max_concurrent_verifies=_env_int(
+            "REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES", 4, minimum=1, maximum=256
+        ),
+        max_inflight_body_bytes=_env_optional_int(
+            "REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES", minimum=1
+        ),
     )
     validate_trust_config(config)
+    validate_numeric_config(config)
     return config
 
 
@@ -622,16 +769,59 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class TimeoutMiddleware(BaseHTTPMiddleware):
+class TimeoutMiddleware:
+    """Pure ASGI. Answers 504 when the application has not responded within ``timeout_s``, and **cancels** it.
+
+    The earlier implementation wrapped ``call_next`` of a ``BaseHTTPMiddleware`` in ``wait_for``. That
+    abandons only the wait for the response head: the downstream endpoint kept running (and kept its place
+    in any queue) after the client had its 504. Here the whole downstream call is the awaited unit, so the
+    timeout cancels it. A computation already running on a worker thread cannot be interrupted; the
+    admission gate (see ``_run_gated``) keeps such work bounded.
+    """
+
     def __init__(self, app, timeout_s: float) -> None:
-        super().__init__(app)
+        self.app = app
         self.timeout_s = timeout_s
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        task = asyncio.ensure_future(self.app(scope, receive, tracking_send))
         try:
-            return await asyncio.wait_for(call_next(request), timeout=self.timeout_s)
-        except asyncio.TimeoutError:
-            return JSONResponse(status_code=504, content={"detail": "request timed out"})
+            done, _ = await asyncio.wait({task}, timeout=self.timeout_s)
+        except BaseException:
+            task.cancel()  # the server cancelled us (shutdown): do not leave the request running
+            raise
+        if task in done:
+            task.result()
+            return
+        if started:
+            await task  # the response head is out; let the body finish rather than truncate it
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        body = json.dumps({"detail": "request timed out"}).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 504,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 class StructuredAccessLogMiddleware(BaseHTTPMiddleware):
@@ -797,6 +987,137 @@ def _check_scopes(caller: Caller, required: Iterable[str]) -> Caller:
 # ---------------------------------------------------------------------------
 
 
+class _Refusal(Exception):
+    """A deterministic resource refusal; rendered as a JSON body with a stable ``code``."""
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **extra: Any,
+    ) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.body: dict[str, Any] = {"detail": detail, "code": code, **extra}
+        self.headers = headers or {}
+
+
+# Seconds a refused client is told to wait. The gate drains in about the time one audit takes.
+RETRY_AFTER_BUSY_S = "1"
+
+
+async def _read_body(
+    request: Request, max_bytes: int, budget: IngressBudget, operation: str
+) -> bytes:
+    """Read the request body (chunked bodies included) within the per-request and the shared byte budget."""
+    received = bytearray()
+    charged = 0
+    try:
+        async for chunk in request.stream():
+            received.extend(chunk)
+            if len(received) > max_bytes:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"request body exceeds limit {max_bytes} bytes",
+                )
+            if not budget.charge(len(chunk)):
+                raise _Refusal(
+                    503,
+                    "SERVER_BUSY",
+                    "the server is at capacity; retry later",
+                    headers={"Retry-After": RETRY_AFTER_BUSY_S},
+                    operation=operation,
+                    reason="ingress_budget",
+                )
+            charged += len(chunk)
+        return bytes(received)
+    finally:
+        budget.release(charged)
+
+
+def _strict_body_dependency(
+    max_bytes: int, budget: IngressBudget, operation: str
+) -> Callable[[Request], Any]:
+    """Body dependency parsed under the strict policy of /v1/verify.
+
+    A duplicate key, NaN/Infinity, a BOM or trailing data would otherwise be resolved silently by
+    the lenient parser, so the signed report could describe other data than the caller sent.
+    """
+
+    async def dependency(request: Request) -> dict[str, Any]:
+        raw = await _read_body(request, max_bytes, budget, operation)
+        return _parse_strict_json_object(raw, max_bytes)
+
+    return dependency
+
+
+def _parse_strict_json_object(raw: bytes, max_bytes: int) -> dict[str, Any]:
+    try:
+        payload = loads_strict(raw, max_bytes=max_bytes)
+    except CanonicalError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "request body is not strict JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "request body must be an object")
+    return payload
+
+
+_LIMIT_DETAIL = {
+    "max_array_elements": "audit input has an array longer than the configured limit",
+    "max_total_elements": "audit input has more elements in total than the configured limit",
+    "max_json_depth": "audit input is nested deeper than the configured limit",
+    "max_concordance_samples": "concordance input has more samples than the configured limit",
+    "max_disagreement_models": "disagreement input has more models than the configured limit",
+    "max_provenance_buckets": "provenance input has more buckets than the configured limit",
+    "max_provenance_cells": "provenance input needs a larger bucket matrix than the configured limit",
+}
+
+
+async def _run_gated(
+    gate: AdmissionGate,
+    submit: Callable[[], Any],
+    cancelled: threading.Event,
+    operation: str,
+) -> Any:
+    """Admit through ``gate``, run the job started by ``submit()`` (an awaitable future) and return its result.
+
+    The slot is released when the *job* finishes, not when the request is cancelled: a request that times
+    out (or whose client leaves) neither frees capacity for more work nor lets the job pile up behind it.
+    """
+    try:
+        await gate.acquire()
+    except GateRefused as exc:
+        raise _Refusal(
+            503,
+            "SERVER_BUSY",
+            "the server is at capacity; retry later",
+            headers={"Retry-After": RETRY_AFTER_BUSY_S},
+            operation=operation,
+            reason=exc.reason,
+        ) from exc
+    try:
+        job = submit()
+    except BaseException:
+        gate.release()
+        raise
+
+    def _done(fut: Any) -> None:
+        gate.release()
+        if not fut.cancelled():
+            fut.exception()  # mark retrieved; the abandoned request cannot
+
+    job.add_done_callback(_done)
+    try:
+        return await asyncio.shield(job)
+    except asyncio.CancelledError:
+        cancelled.set()  # a job that has not begun skips its work
+        raise
+
+
 def build_app(
     *,
     config: ServerConfig | None = None,
@@ -823,6 +1144,7 @@ def build_app(
     if not HAVE_FASTAPI:
         raise RuntimeError("FastAPI not installed. Run `pip install regaudit-fhe[server]`.")
     config = config or load_config_from_env()
+    validate_numeric_config(config)
     policy = config.verification_policy()
     logger = logger or configure_logging()
     rate_limiter = TokenBucketRateLimiter(config.rate_limit_per_min)
@@ -841,6 +1163,29 @@ def build_app(
             "server module docstring."
         ),
         version=LIB_VERSION,
+    )
+
+    @app.exception_handler(_Refusal)
+    async def _refusal_handler(request: Request, exc: _Refusal) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=exc.body, headers=exc.headers)
+
+    inflight = (
+        config.max_inflight_body_bytes
+        if config.max_inflight_body_bytes is not None
+        else max(32 << 20, 2 * config.max_body_bytes)
+    )
+    if inflight < config.max_body_bytes:
+        raise PolicyError("max_inflight_body_bytes must be at least max_body_bytes")
+    ingress_budget = IngressBudget(inflight)
+    audit_gate = AdmissionGate(
+        config.max_concurrent_audits, config.max_queued_audits, config.queue_wait_s
+    )
+    verify_gate = AdmissionGate(
+        config.max_concurrent_verifies, config.max_queued_audits, config.queue_wait_s
+    )
+    # A dedicated pool: audit CPU work can never occupy the threads that serve auth and the probes.
+    audit_pool = ThreadPoolExecutor(
+        max_workers=config.max_concurrent_audits, thread_name_prefix="regaudit-audit"
     )
 
     app.add_middleware(StructuredAccessLogMiddleware, logger=logger)
@@ -875,12 +1220,14 @@ def build_app(
 
     # ----- Probes (no auth) ------------------------------------------------
 
+    # The probes are coroutines on purpose: they run on the event loop, never in a worker thread, so a
+    # saturated thread pool cannot delay them.
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> Any:
+    async def readyz() -> Any:
         try:
             load_schema("envelope")
             ready = True
@@ -935,17 +1282,56 @@ def build_app(
 
     # ----- Audit (run scope) ----------------------------------------------
 
-    @app.post("/v1/audit/{primitive}")
-    def audit(
+    @app.post(
+        "/v1/audit/{primitive}",
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {"type": "object"}}},
+            }
+        },
+    )
+    async def audit(
         primitive: str,
-        payload: dict[str, Any] = Body(...),
+        # Declared before the caller so the body is still read (and size-limited) before
+        # authentication, exactly as the former ``Body(...)`` parameter was.
+        payload: dict[str, Any] = Depends(
+            _strict_body_dependency(config.max_body_bytes, ingress_budget, "audit")
+        ),
         caller: Caller = Depends(authed_with(SCOPE_RUN)),
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
             raise HTTPException(404, f"unknown primitive {primitive!r}")
+        # Refuse inputs that would make schema validation and the primitive expensive, before any of it runs.
         try:
-            env = _audit_dispatch(primitive, payload)
+            check_input_bounds(payload, config.input_limits, primitive)
+        except InputLimitError as exc:
+            logger.warning(
+                "audit_input_limit_exceeded", extra={"key_id": caller.key_id, "limit": exc.limit}
+            )
+            raise _Refusal(
+                413,
+                "INPUT_LIMIT_EXCEEDED",
+                _LIMIT_DETAIL[exc.limit],
+                limit=exc.limit,
+                maximum=exc.maximum,
+            ) from exc
+        cancelled = threading.Event()
+
+        def work() -> Any:
+            if cancelled.is_set():  # the request is gone before the job began
+                return None
+            with use_limits(config.input_limits):
+                return _audit_dispatch(primitive, payload)
+
+        try:
+            env = await _run_gated(
+                audit_gate,
+                lambda: asyncio.get_running_loop().run_in_executor(audit_pool, work),
+                cancelled,
+                "audit",
+            )
         except SchemaError as exc:
             raise HTTPException(422, str(exc)) from exc
         except (ValueError, OverflowError) as exc:
@@ -966,7 +1352,8 @@ def build_app(
                 "envelope_digest": env.receipt["sha256"],
             },
         )
-        return env.to_dict()
+        result_dict: dict[str, Any] = env.to_dict()
+        return result_dict
 
     # ----- Verify (verify scope) ------------------------------------------
 
@@ -996,24 +1383,25 @@ def build_app(
                 )
         # Read the body ourselves so the size limit also covers chunked uploads
         # that carry no Content-Length, then parse it strictly.
-        received = bytearray()
-        async for chunk in request.stream():
-            received.extend(chunk)
-            if len(received) > config.max_body_bytes:
-                raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    f"request body exceeds limit {config.max_body_bytes} bytes",
-                )
+        raw = await _read_body(request, config.max_body_bytes, ingress_budget, "verify")
         try:
-            payload = loads_strict(bytes(received), max_bytes=config.max_body_bytes)
+            payload = loads_strict(raw, max_bytes=config.max_body_bytes)
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
             env = parse_envelope(payload["envelope"])
+            if not isinstance(env.primitive, str):
+                # A report.v1 is not type-checked on parse; a non-string primitive is not a report.
+                raise EnvelopeFormatError("BAD_TYPE", "primitive must be a string")
         except (CanonicalError, EnvelopeFormatError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
         try:
-            # verify() may block (sqlite replay store), so keep it off the event loop.
-            result = await run_in_threadpool(verify, env, policy)
+            # verify() may block (sqlite replay store), so keep it off the event loop, and bound how many run.
+            result = await _run_gated(
+                verify_gate,
+                lambda: asyncio.ensure_future(run_in_threadpool(verify, env, policy)),
+                threading.Event(),
+                "verify",
+            )
         except VerificationUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
@@ -1036,3 +1424,107 @@ def build_app(
         return response
 
     return app
+
+
+# ---------------------------------------------------------------------------
+# Connection-level settings for ``regaudit-fhe serve``
+# ---------------------------------------------------------------------------
+
+
+def header_deadline_protocol(timeout_s: float) -> Any:
+    """An uvicorn HTTP protocol class that closes a connection which has not finished sending request headers.
+
+    uvicorn has no header-read deadline: ``--timeout-keep-alive`` starts only after a response, so a client
+    that connects and sends nothing, or stops in the middle of a header block, holds its connection (and its
+    file descriptor) forever. The deadline starts when the connection is made, and again with the first byte
+    of every later request on a kept-alive connection, and is cleared once the request line and headers are
+    complete. It is **not** a body-read timeout (``REGAUDIT_FHE_REQUEST_TIMEOUT_S`` covers the whole
+    request). Returns ``None`` if uvicorn's protocol classes cannot be imported.
+    """
+    try:
+        from uvicorn.protocols.http.auto import AutoHTTPProtocol
+    except Exception:
+        return None
+
+    base: Any = AutoHTTPProtocol
+
+    class HeaderDeadlineProtocol(base):
+        _header_timer: asyncio.TimerHandle | None = None
+
+        def _arm_header_timer(self) -> None:
+            self._header_timer = asyncio.get_running_loop().call_later(
+                timeout_s, self._header_expired
+            )
+
+        def _disarm_header_timer(self) -> None:
+            if self._header_timer is not None:
+                self._header_timer.cancel()
+                self._header_timer = None
+
+        def _header_expired(self) -> None:
+            self._header_timer = None
+            transport = getattr(self, "transport", None)
+            if transport is not None and not transport.is_closing():
+                transport.close()
+
+        def connection_made(self, transport: Any) -> None:
+            super().connection_made(transport)
+            self._arm_header_timer()
+
+        def data_received(self, data: bytes) -> None:
+            super().data_received(data)
+            cycle = getattr(self, "cycle", None)
+            if cycle is not None and not getattr(cycle, "response_complete", False):
+                self._disarm_header_timer()  # headers are complete, a request is in progress
+            elif self._header_timer is None:
+                self._arm_header_timer()
+
+        def connection_lost(self, exc: Exception | None) -> None:
+            self._disarm_header_timer()
+            super().connection_lost(exc)
+
+    return HeaderDeadlineProtocol
+
+
+def uvicorn_options_from_env() -> dict[str, Any]:
+    """Keyword arguments for ``uvicorn.run`` that bound connection-level resource use.
+
+    ``REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S`` (5), ``REGAUDIT_FHE_LIMIT_CONCURRENCY`` (256; ``0`` disables),
+    ``REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S`` (20; ``0`` waits forever) and
+    ``REGAUDIT_FHE_HEADER_TIMEOUT_S`` (10; ``0`` disables the header deadline).
+    Invalid values raise :class:`PolicyError`, so the server refuses to start rather than ignoring them.
+    """
+    options: dict[str, Any] = {
+        "timeout_keep_alive": max(
+            1, math.ceil(_env_seconds("REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S", 5.0))
+        ),
+    }
+    limit = _env_int("REGAUDIT_FHE_LIMIT_CONCURRENCY", 256, minimum=0, maximum=1_000_000)
+    if limit:
+        options["limit_concurrency"] = limit
+    graceful = _env_int("REGAUDIT_FHE_TIMEOUT_GRACEFUL_SHUTDOWN_S", 20, minimum=0, maximum=3600)
+    if graceful:
+        options["timeout_graceful_shutdown"] = graceful
+    header_s = _env_seconds("REGAUDIT_FHE_HEADER_TIMEOUT_S", 10.0)
+    if header_s > 0:
+        protocol = header_deadline_protocol(header_s)
+        if protocol is not None:
+            options["http"] = protocol
+    return options
+
+
+def apply_switch_interval_from_env() -> float | None:
+    """Lower the interpreter's thread switch interval for ``regaudit-fhe serve`` (process-wide).
+
+    Audit work is CPU-bound Python on worker threads; the event loop that answers ``/healthz`` competes with
+    it for the GIL, and with CPython's default 5 ms interval each hand-over costs the probe several
+    milliseconds. ``REGAUDIT_FHE_SWITCH_INTERVAL_S`` (default 0.001, ``0`` leaves the interpreter default)
+    trades a little throughput for probe latency. Only the ``serve`` command calls this, never
+    :func:`build_app`, so an embedding application's interpreter settings are left alone.
+    Returns the interval applied, or ``None``.
+    """
+    seconds = _env_seconds("REGAUDIT_FHE_SWITCH_INTERVAL_S", 0.001, maximum=1.0)
+    if seconds <= 0:
+        return None
+    sys.setswitchinterval(seconds)
+    return seconds

@@ -50,6 +50,10 @@ RUN groupadd --system --gid 10001 regaudit \
 
 COPY --from=builder /install /usr/local
 
+# The runtime image installs nothing after the build: drop the package installer so a compromised
+# process cannot `pip install` code.
+RUN python -m pip uninstall -y pip
+
 USER regaudit
 WORKDIR /home/regaudit
 

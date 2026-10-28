@@ -33,6 +33,7 @@ from . import (
     audit_fairness,
     audit_provenance,
 )
+from ._limits import active_limits, check_primitive_cost
 from .canonical import MAX_INPUT_BYTES, CanonicalError
 from .replay import ReplayStateError, SqliteReplayCache
 from .report_v2 import EnvelopeFormatError, parse_envelope
@@ -94,6 +95,9 @@ SCHEMAS: dict[str, dict[str, Any]] = {
 
 
 def _audit_dispatch(primitive: str, payload: dict[str, Any]) -> AuditEnvelope:
+    # Before schema validation and before any allocation: the same cost limits the server applies, so
+    # the CLI and library path cannot reach an excessive allocation either.
+    check_primitive_cost(primitive, payload, active_limits())
     validate_input(primitive, payload)
     report: Any
     if primitive == "fairness":
@@ -150,7 +154,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
     try:
         env = _audit_dispatch(args.primitive, payload)
-    except SchemaError as exc:
+    except (SchemaError, ValueError) as exc:
         sys.stderr.write(f"input rejected: {exc}\n")
         return 2
     out = env.to_json()
@@ -189,13 +193,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 2
     import dataclasses
 
-    from .server import assert_safe_bind, build_app, load_config_from_env, validate_trust_config
+    from .server import (
+        apply_switch_interval_from_env,
+        assert_safe_bind,
+        build_app,
+        load_config_from_env,
+        uvicorn_options_from_env,
+        validate_trust_config,
+    )
 
     try:
         config = load_config_from_env(trust_store_path=args.trust_store)
         if args.allow_self_signed:
             config = dataclasses.replace(config, allow_self_signed=True)
         validate_trust_config(config)
+        server_options = uvicorn_options_from_env()
+        apply_switch_interval_from_env()
     except (TrustStoreError, RuntimeError) as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
@@ -206,7 +219,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
-    uvicorn.run(build_app(config=config), host=args.host, port=args.port, log_level="info")
+    try:
+        app = build_app(config=config)
+    except RuntimeError as exc:  # PolicyError: an invalid numeric or budget setting
+        sys.stderr.write(f"refusing to start: {exc}\n")
+        return 2
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        **server_options,
+    )
     return 0
 
 

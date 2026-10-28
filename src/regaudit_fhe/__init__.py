@@ -91,7 +91,7 @@ from .verification import (
 )
 from .verification import verify as verify_report
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 audit_fairness = fairness_circuit_d6
