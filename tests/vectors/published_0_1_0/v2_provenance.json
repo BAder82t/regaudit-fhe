@@ -1,0 +1,60 @@
+{
+  "algorithm_version": "0.1.0",
+  "audit_run_id": "bb6059e1-440c-48e7-96a0-ce9452390048",
+  "backend": "plaintext",
+  "deployment_id": "vec-deploy",
+  "depth_budget": {
+    "consumed": 6,
+    "declared": 6
+  },
+  "input_commitments": [],
+  "issued_at": "2026-10-28T08:57:22.339589+00:00",
+  "issuer": "vector-issuer-010",
+  "key_id": "vec010-key-1",
+  "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.1.0",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+  },
+  "parameter_set_hash": "c1262015326d48cee3ffb27e5083cb8da9587247afc81c48848d91b23722776d",
+  "primitive": "provenance",
+  "public_key_fingerprint": "eda84490df34242a6c30bf3a41480a6358906b91a5db2317415a294aae00e99b",
+  "receipt": {
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwYndnnrv3XSzOJrh+uxhHPeG9lUFz/tqJ3VcveREaIY=\n-----END PUBLIC KEY-----\n",
+    "sha256": "87db9bbcab2ad1361ef915c28c00d589a017474dddafc3f3631a1e924ac8acc3",
+    "signature_alg": "Ed25519",
+    "signature_b64": "NXhXLo2NvVIHtywzke/sEfEj+J5v6+ow1RPiwM9IJeKAapDjDJLa+LkBLVw25/gwIRhob2vBjb/7He7hvbQYDg=="
+  },
+  "regulations": [
+    "EU_AI_ACT_ART10",
+    "21_CFR_PART_11",
+    "GDPR_ART22",
+    "HIPAA"
+  ],
+  "result": {
+    "bucket_aggregates": [
+      0.0,
+      0.5,
+      1.3,
+      0.6000000000000001
+    ],
+    "topk_indicator": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "topk_indices": [
+      2,
+      3
+    ]
+  },
+  "schema": "regaudit-fhe.report.v2",
+  "schema_version": "regaudit-fhe.report.v2",
+  "trust_policy_version": 1
+}

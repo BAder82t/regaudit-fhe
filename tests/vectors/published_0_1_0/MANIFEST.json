@@ -1,0 +1,26 @@
+{
+  "generated_by": "regaudit-fhe",
+  "version": "0.1.0",
+  "source_commit": "600066fe7f3f4c0b85be057f2e5f1569083862af",
+  "note": "synthetic data; throwaway Ed25519 key whose private half was discarded",
+  "sha256": {
+    "trust_store_entries.json": "1910191c5f65136353f8b54db7bf6bbc4e7def9b390653987651f61e242b1a98",
+    "trust_store_legacy.json": "d440392b506f23c17eaf1cadf784d92f22378ea9c0fe33e07314c043fa6a8c64",
+    "v1_calibration.json": "1aa13a93af62d93c4adeb819df1b2a348fa0286dc3058de78ea357ede6fa136b",
+    "v1_concordance.json": "1d12b5d2ad9ee731e76f24866744c5e968398638eeaed3ea18b83f65106595e4",
+    "v1_disagreement.json": "b80bd81eb77fece0c260231a61380d7590abd511396fabd6eb5fbf34d193eb3b",
+    "v1_drift.json": "3dae84affa1e9c2bb73eaa84acec58695c0494d6ab5ee8df490c7167295ae4ee",
+    "v1_fairness.json": "62bb73e5f2fd01104e934633820187847f2b08d82aa6a0bdfef4fee3aa6194fc",
+    "v1_provenance.json": "70328f31af847b5f94fbe4705cd70c8ece245c241ed15de704ef27de65603925",
+    "v1_with_commitments.json": "1017a5a459d18d474d931d5cfe3723379b10d2ee6626dee5914ba5a9d7984f74",
+    "v1_with_dp.json": "f2604bc677e92540f1767965d2071aeccca5335661912c9206823f11b4c60b56",
+    "v1_with_timestamp_member.json": "2363ec91314a688b54e6b45d1da49f7be0b5deb122c8c3fea35635cadef92ada",
+    "v2_calibration.json": "0514e1de5350f0ccd07266b2a9c83abb8da473af1b6c75704c677afd4af9d7be",
+    "v2_concordance.json": "b855a64d9868d756801943071230d4f9516145425d9e15d916d2679d00c9ed11",
+    "v2_disagreement.json": "6e5345740afe33b976a71d67408b6aceb79faa445d0ce64dd6c453633ab6e9ad",
+    "v2_drift.json": "f958e5497365105fd2f942a8b9d1b135f41f7424c50bf254fa8e79abba3beaa0",
+    "v2_fairness.json": "cc7f257a4c865acdd9e3495851e95b605e878b1ff30b5cb4eb1c3c4e85c719d8",
+    "v2_full.json": "3a4be9c014b6bcb9b69df516bbf2ed9f4bb99e27378b3ec64165739933a3c8fc",
+    "v2_provenance.json": "1cb9000c50b449904a9c466cfcec7d0355432dec2057e114902996cc78b79e95"
+  }
+}
