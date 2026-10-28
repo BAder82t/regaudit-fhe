@@ -416,6 +416,20 @@ each primitive expects.
 > [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) before exposing
 > publicly.
 
+**Resource limits (0.1.1).** `/v1/audit` refuses oversized inputs with `413`
+(`INPUT_LIMIT_EXCEEDED`): 131072 elements per array, 524288 in total, nesting
+depth 4, 8192 concordance samples, 32 disagreement models and 1024 provenance
+buckets. Beyond 2 running and 4 queued audits it answers `503` (`SERVER_BUSY`,
+with `Retry-After`), and the request timeout cancels queued work. Malformed or
+non-strict JSON, non-finite numbers and a non-string `primitive` get `422`.
+Invalid numeric settings stop the server from starting. Every limit is an
+environment setting, listed with its default in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#resource-bounds). These limits reduce
+denial-of-service exposure; they do not remove it. An exposed deployment still
+needs a reverse proxy that limits request-body size, connections, timeouts and
+request rates, and the known open items are listed under "Known limitations"
+in the [changelog](CHANGELOG.md).
+
 ---
 
 ## Audit envelope
@@ -644,7 +658,7 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
 | pytest suite (800+ tests)               | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; currently about 89%.                          |
-| Type checking                           | `mypy` gates CI: zero errors across the 28 source files.                            |
+| Type checking                           | `mypy` gates CI: zero errors across the 29 source files.                            |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
