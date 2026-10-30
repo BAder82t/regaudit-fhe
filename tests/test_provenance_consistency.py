@@ -28,7 +28,7 @@ from regaudit_fhe.verification import VerificationPolicy
 class _Doctored(ParameterSet):
     """A parameter set whose pieces disagree, or have another shape, as a hostile or odd signer could produce."""
 
-    inner_backend: str | None = None
+    inner_backend: Any = None
     wrong_hash: bool = False
     extra: bool = False
     drop_backend: bool = False
@@ -75,6 +75,7 @@ CASES = {
     "hash_contradiction": (_Doctored(wrong_hash=True), CONTRADICTION),
     "consistent": (ParameterSet(backend="tenseal-ckks", poly_modulus_degree=8192), CONSISTENT),
     "default_plaintext": (ParameterSet(), CONSISTENT),
+    "non_string_backend_in_parameter_set": (_Doctored(inner_backend=5), CONTRADICTION),
     "no_backend_in_parameter_set": (_Doctored(drop_backend=True), UNVERIFIABLE),
     "unknown_shape_unknown_hash": (_Doctored(extra=True, wrong_hash=True), UNVERIFIABLE),
 }

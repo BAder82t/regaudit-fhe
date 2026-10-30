@@ -19,7 +19,8 @@ fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.*
   `parameter_set.backend`, or whose `parameter_set_hash` is not the hash of its `parameter_set`, is refused with
   `PROVENANCE_CONTRADICTION`. Evidence that is merely absent (a `parameter_set` without `backend`, or of a shape
   whose hash scheme this library does not know) is not refused; it is reported as `PROVENANCE_UNVERIFIABLE`. This
-  is a self-consistency check on signer-asserted values; it does not prove that an FHE computation ran.
+  is a self-consistency check on signer-asserted values, a bug detector rather than an adversarial control (a
+  `parameter_set` of another shape is only reported as unverifiable); it does not prove that an FHE computation ran.
 
 ### Compatibility changes
 
@@ -32,7 +33,7 @@ fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.*
   this library never contradict themselves.
 - Deprecations, return values unchanged: `verify_receipt` without trust material emits a `DeprecationWarning`
   once per process (in addition to the existing one-time `UserWarning`); `verify_envelope(...).valid` states that `True`
-  includes self-signed reports; `parse_envelope` and `verify_report` documents that they are not a strict acceptance path.
+  includes self-signed reports (a setup that turns `DeprecationWarning` into an error will now raise on the first such call); `parse_envelope` and `verify_report` documents that they are not a strict acceptance path.
 
 ### Known limitations
 

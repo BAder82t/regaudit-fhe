@@ -118,7 +118,7 @@ def verify_trusted(
 
     try:
         result = verify(env, effective)
-    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+    except (TypeError, ValueError, KeyError, AttributeError, RecursionError) as exc:
         # A hostile value the engine did not expect is a refusal, never an exception.
         # (PolicyError / VerificationUnavailable are RuntimeError subclasses and propagate.)
         return _refused("VERIFICATION_ERROR", f"{type(exc).__name__}: {exc}")

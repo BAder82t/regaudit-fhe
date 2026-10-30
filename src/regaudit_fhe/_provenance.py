@@ -33,7 +33,13 @@ _PARAMETER_SET_KEYS = frozenset(ParameterSet().to_dict())
 
 
 def check_provenance(env: Any) -> tuple[str, str]:
-    """Return ``(status, detail)`` for ``env``'s backend and parameter-set evidence."""
+    """Return ``(status, detail)`` for ``env``'s backend and parameter-set evidence.
+
+    Meant for strictly parsed envelopes: a leniently parsed v1 envelope fills a missing ``backend``
+    with ``"plaintext"``, which this function cannot tell from a signed value. The hash comparison is
+    a consistency/bug detector, not an adversarial control: a ``parameter_set`` whose keys differ from
+    this library's shape is reported as unverifiable, and the signer asserts every value anyway.
+    """
     backend = getattr(env, "backend", None)
     pset = getattr(env, "parameter_set", None)
     declared_hash = getattr(env, "parameter_set_hash", None)
@@ -43,6 +49,8 @@ def check_provenance(env: Any) -> tuple[str, str]:
     status = CONSISTENT
     detail = ""
 
+    if "backend" in pset and not isinstance(pset["backend"], str):
+        return CONTRADICTION, "parameter_set.backend is present but not a string"
     inner = pset.get("backend")
     if isinstance(inner, str) and isinstance(backend, str):
         if inner != backend:
@@ -53,7 +61,7 @@ def check_provenance(env: Any) -> tuple[str, str]:
     if isinstance(declared_hash, str) and declared_hash:
         try:
             actual = sha256_hex(canonical_json(pset))
-        except (CanonicalError, TypeError, ValueError):
+        except (CanonicalError, TypeError, ValueError, RecursionError):
             return UNVERIFIABLE, "parameter_set cannot be canonicalised for hashing"
         if actual != declared_hash:
             if set(pset) == _PARAMETER_SET_KEYS:
