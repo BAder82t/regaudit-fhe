@@ -1,0 +1,9 @@
+{
+  "entries": {
+    "vec010-key-1": {
+      "issuer": "vector-issuer-010",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwYndnnrv3XSzOJrh+uxhHPeG9lUFz/tqJ3VcveREaIY=\n-----END PUBLIC KEY-----\n",
+      "status": "active"
+    }
+  }
+}

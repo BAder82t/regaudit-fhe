@@ -263,6 +263,66 @@ def test_installed_wheel_works_outside_the_source_tree(dists, tmp_path):
     assert "SMOKE-OK" in proc.stdout
 
 
+_EXAMPLE_RUNNER = (
+    "import runpy, sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]);"
+    "import regaudit_fhe; assert Path(sys.argv[1]).resolve() in Path(regaudit_fhe.__file__).resolve().parents;"
+    "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+)
+
+
+def _unpack_and_env(dists, tmp_path):
+    target = tmp_path / "site"
+    with zipfile.ZipFile(dists["wheel"]) as zf:
+        zf.extractall(target)  # noqa: S202 - own wheel built a moment ago
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(target),
+    }  # the example's CLI subprocess must see the wheel too
+    return target, cwd, env
+
+
+def test_strict_verification_quickstart_runs_from_an_installed_wheel(dists, tmp_path):
+    """examples/strict_verification_quickstart.py needs nothing from the checkout."""
+    target, cwd, env = _unpack_and_env(dists, tmp_path)
+    example = ROOT / "examples" / "strict_verification_quickstart.py"
+    out = cwd / "files"
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", _EXAMPLE_RUNNER, str(target), str(example), "--out", str(out)],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "FAIL" not in proc.stdout and proc.stdout.count("ok   ") >= 9
+    assert {p.name for p in out.iterdir()} == {"report.json", "trust_store.json"}
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
+def test_cli_roundtrip_example_runs_from_an_installed_wheel(dists, tmp_path):
+    _target, cwd, env = _unpack_and_env(dists, tmp_path)
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    cmd = shim / "regaudit-fhe"
+    cmd.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m regaudit_fhe.cli "$@"\n')
+    cmd.chmod(0o755)
+    env["REGAUDIT_FHE"] = str(cmd)
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [str(shutil.which("bash")), str(ROOT / "examples" / "04_cli_roundtrip.sh")],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "SELF_SIGNED_ONLY" in proc.stdout
+    assert list(cwd.iterdir()) == []  # leaves nothing behind
+
+
 def test_a_wheel_without_schemas_is_detected(dists, tmp_path):
     """Negative control: strip the schemas from an unpacked wheel; the smoke run must fail."""
     target = tmp_path / "site"

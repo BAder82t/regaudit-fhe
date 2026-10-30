@@ -40,7 +40,13 @@ from .esc_cia import CIndexReport, c_index_circuit_d6, c_index_oracle
 from .etk_fpa_hbc import ProvenanceReport, topk_provenance_circuit_d6, topk_provenance_oracle
 from .ew1_cdsf import DriftReport, cvm_oracle, w1_circuit_d6, w1_oracle
 from .replay import InMemoryReplayCache, ReplayStateError, SqliteReplayCache
-from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope
+from .report_v2 import (
+    AuditEnvelopeV2,
+    EnvelopeFormatError,
+    envelope_v2,
+    parse_envelope,
+    parse_envelope_strict,
+)
 from .reports import (
     REGULATION_MAP,
     AuditEnvelope,
@@ -81,6 +87,7 @@ from .trust import (
     UntrustedIssuer,
     WrongParameterSet,
 )
+from .trusted import TrustedVerification, TrustVerdict, verify_trusted
 from .verification import (
     PolicyError,
     TimestampEvidence,
@@ -141,6 +148,8 @@ __all__ = [
     "TrustHistory",
     "TrustStore",
     "TrustStoreError",
+    "TrustVerdict",
+    "TrustedVerification",
     "UntrustedIssuer",
     "VerificationOutcome",
     "VerificationPolicy",
@@ -178,6 +187,7 @@ __all__ = [
     "list_schemas",
     "load_schema",
     "parse_envelope",
+    "parse_envelope_strict",
     "privatize_report",
     "privatize_value",
     "reports",
@@ -193,6 +203,7 @@ __all__ = [
     "verify_envelope_or_raise",
     "verify_receipt",
     "verify_report",
+    "verify_trusted",
     "w1_circuit_d6",
     "w1_oracle",
 ]

@@ -113,6 +113,7 @@ addopts = ["-q", "--strict-markers", "--strict-config"]
 filterwarnings = [
   "ignore:VerificationOutcome.valid is deprecated:DeprecationWarning",
   "ignore:VerificationResult.valid is deprecated:DeprecationWarning",
+  "ignore:verify_receipt\\(\\) without trust material is deprecated:DeprecationWarning",
 ]
 testpaths = ["tests"]
 
