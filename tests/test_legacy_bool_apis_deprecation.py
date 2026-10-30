@@ -22,6 +22,12 @@ def env(signer):
     return rf.envelope("drift", report, signer=signer)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_once_flags():
+    reports._WEAK_WARNING.reset()
+    reports._RECEIPT_DEPRECATION.reset()
+
+
 def _collect(fn):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -39,10 +45,12 @@ def test_verify_receipt_without_trust_material_warns_and_still_returns_true(env)
     assert deprecations[0].filename == __file__  # points at the caller, not at the library
 
 
-def test_verify_receipt_warns_on_every_call_not_just_the_first(env):
-    _, first = _collect(lambda: rf.verify_receipt(env))
-    _, second = _collect(lambda: rf.verify_receipt(env))
-    assert len(first) == 1 and len(second) == 1
+def test_verify_receipt_deprecation_is_once_per_process_not_every_call(env):
+    reports._RECEIPT_DEPRECATION.reset()
+    first_value, first = _collect(lambda: rf.verify_receipt(env))
+    second_value, second = _collect(lambda: rf.verify_receipt(env))
+    assert len(first) == 1 and second == []
+    assert first_value is True and second_value is True  # the return value never changes
 
 
 def test_verify_receipt_with_trust_material_does_not_warn(env, signer):

@@ -217,6 +217,7 @@ class ServerConfig:
             trust_history=self.trust_history,
             replay_cache=self.replay_cache,
             replay_mode=self.replay_mode,
+            check_provenance=True,
         )
 
 

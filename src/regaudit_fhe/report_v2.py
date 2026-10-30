@@ -549,6 +549,10 @@ def parse_envelope(data: Mapping[str, Any] | str | bytes) -> AuditEnvelope | Aud
     numbers, BOM and the like are refused). v1 envelopes keep their original
     lenient field handling and original canonical bytes; v2 envelopes are
     parsed strictly. Unknown schemas are refused.
+
+    This is the lenient reader kept for compatibility. For an envelope that may end in an
+    independently trusted acceptance, use :func:`parse_envelope_strict` (or
+    :func:`regaudit_fhe.verify_trusted`, which does so for you).
     """
     if isinstance(data, str | bytes | bytearray):
         data = loads_strict(data)

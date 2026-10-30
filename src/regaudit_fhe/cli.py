@@ -622,6 +622,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             max_age=timedelta(seconds=args.max_age_seconds) if args.max_age_seconds else None,
             replay_cache=replay_cache,
             replay_mode=args.replay_mode,
+            check_provenance=True,
         )
     except PolicyError as exc:
         # An invalid or incompatible combination of options is a command

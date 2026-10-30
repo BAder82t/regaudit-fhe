@@ -73,7 +73,7 @@ from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
-LIB_VERSION: str = "0.1.1"
+LIB_VERSION: str = "0.2.0"
 SIGNATURE_ALG: str = "Ed25519"
 
 
@@ -992,6 +992,7 @@ class _OnceFlag:
 
 
 _WEAK_WARNING = _OnceFlag()
+_RECEIPT_DEPRECATION = _OnceFlag()
 
 
 def verify_receipt(
@@ -1032,7 +1033,7 @@ def verify_receipt(
     has_material = trust_store is not None or trusted_keys is not None
     if strict and not has_material:
         return False
-    if not has_material:
+    if not has_material and _RECEIPT_DEPRECATION.first():
         warnings.warn(
             "verify_receipt() without trust material is deprecated: it returns a bare bool, "
             "and True then means only that the report is intact and matches the key embedded "

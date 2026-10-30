@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`regaudit-fhe` is currently at `0.1.1`. Only the latest release receives
+`regaudit-fhe` is currently at `0.2.0`. Only the latest release receives
 security updates.
 
 ## Reporting a vulnerability

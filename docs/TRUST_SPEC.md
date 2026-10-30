@@ -577,13 +577,24 @@ report is distinguishable from a forgery.
 `TIMESTAMP_FAILED`, `TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`,
 `TRUST_STORE_ROLLBACK`, `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`,
 `TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
-`LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`.
+`LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`, `PROVENANCE_CONTRADICTION`,
+`PROVENANCE_UNVERIFIABLE`.
 
 Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT` and
 `SELF_SIGNED_NO_TRUST_MATERIAL` are informational unless a policy also refuses on
 them; the result's `blocking_reasons` lists the codes that caused a refusal. The
 `TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
 the held O8 / reserve-commit work and are not emitted in Phase 3A.
+
+`PROVENANCE_CONTRADICTION` and `PROVENANCE_UNVERIFIABLE` are emitted only when the
+policy sets `check_provenance` (`verify_trusted`, `regaudit-fhe verify` and
+`POST /v1/verify` do; the library `verify_report` does not unless asked). The first is
+blocking: a signed `backend` differs from `parameter_set.backend`, or
+`parameter_set_hash` is not the hash of the accompanying `parameter_set`. The second is
+informational: the envelope lacks the evidence for a safe decision (for example a
+`parameter_set` without `backend`, or one whose shape has a hash scheme this library does
+not know) and nothing is invented or refused. Neither proves that an FHE computation ran;
+`backend` remains a signer assertion.
 
 Codes are stable API; new codes may be added, existing codes MUST NOT change
 meaning.

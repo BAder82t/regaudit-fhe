@@ -19,7 +19,7 @@ local candidate; wording and scope are for the maintainer to confirm before any 
 
 | API | Now |
 | --- | --- |
-| `verify_receipt(env)` **without** `trust_store=` / `trusted_keys=` | `DeprecationWarning` on every call, naming the self-signed case, in addition to the existing one-time `UserWarning`. Still returns `True` for an intact self-signed report. |
+| `verify_receipt(env)` **without** `trust_store=` / `trusted_keys=` | `DeprecationWarning` once per process, naming the self-signed case, in addition to the existing one-time `UserWarning`. Still returns `True` for an intact self-signed report. |
 | `verify_receipt(env, trust_store=...)` / `trusted_keys=...` | No warning (unchanged). `True` there already means the issuer key matched your material. |
 | `verify_envelope(...).valid` | `DeprecationWarning` text now says that `True` includes self-signed reports. Value unchanged. |
 
@@ -36,7 +36,8 @@ files produced by the published 0.1.0 source (`tests/vectors/published_0_1_0/`).
 | `verify_trusted`, `parse_envelope_strict`, `keygen`, `trust ...`, `audit --signing-key` | Additive | Nobody. |
 | `DeprecationWarning` on `verify_receipt` (no trust material) and on `.valid` | Warning only | Code run with `-W error` or `filterwarnings = error`. |
 | `regaudit-fhe verify` and `POST /v1/verify` now parse strictly. | **Compatibility change (interpretation of previously accepted evidence).** | Only a report.v1 whose JSON text is not exactly the shape the library writes. See below. |
-| `parse_envelope`, `verify_report`, `verify_envelope*`, `verify_receipt` | Unchanged | Nobody. They still accept the lenient shapes. |
+| `parse_envelope`, `verify_report`, `verify_envelope*`, `verify_receipt` | Unchanged | Nobody. They still accept the lenient shapes. Their docstrings now say they are not a strict acceptance path. |
+| `verify_trusted`, `regaudit-fhe verify` and `POST /v1/verify` refuse an envelope whose signed `backend` or `parameter_set_hash` contradicts its own `parameter_set` (`PROVENANCE_CONTRADICTION`). | Compatibility change (new refusal) | Only an envelope that contradicts itself; none written by this library. Missing evidence is not refused (`PROVENANCE_UNVERIFIABLE`). |
 
 ### What strict parsing refuses (and previously accepted as `TRUSTED`)
 
@@ -79,7 +80,11 @@ call `verify_trusted`, which re-serialises the object and applies the same check
   but not their values (the receipt is recomputed and checked; a timestamp is evidence verified
   separately).
 * The CLI private key file is an unencrypted PEM (mode 0600, refused if group/other readable).
-* The `backend` field is signer-asserted. See the maintainer note on backend provenance: the
-  verifier does not check that `backend` matches `parameter_set.backend` or that
-  `parameter_set_hash` is the hash of `parameter_set`.
+* The `backend` field is signer-asserted. The strict paths now refuse an envelope whose `backend` or
+  `parameter_set_hash` contradicts its own `parameter_set`, but a consistent claim is still only a claim: it does
+  not prove an FHE computation ran, and a default library call signs `plaintext` even on the encrypted path.
+* `trust add` is not a key-lifecycle or revocation system: no retire, revoke or rotation commands.
+* Key custody: whoever can read the CLI private key file can sign as the issuer. Keep it mode 0600 (the CLI
+  refuses a group- or other-readable file), off shared and synced folders, in an encrypted volume, and rotate by
+  issuing a new key and enrolling it. For production use a KMS/HSM-backed signer through the library.
 * No change was made to resource limits, Docker, or any signed field.

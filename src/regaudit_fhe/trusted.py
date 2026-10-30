@@ -104,7 +104,9 @@ def verify_trusted(
             "for development use verify_report(..., VerificationPolicy(allow_self_signed=True))"
         )
     base = policy if policy is not None else VerificationPolicy()
-    effective = dataclasses.replace(base, trust_store=trust_store, allow_self_signed=False)
+    effective = dataclasses.replace(
+        base, trust_store=trust_store, allow_self_signed=False, check_provenance=True
+    )
 
     source: Any = (
         report.to_dict() if isinstance(report, AuditEnvelope | AuditEnvelopeV2) else report

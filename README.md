@@ -464,7 +464,9 @@ regaudit-fhe verify -i report.json --trusted-keys trust_store.json
 Without the `--signing-key` options, `regaudit-fhe audit` still emits `report.v1` signed by
 an ephemeral key, which can only ever verify as `SELF_SIGNED_ONLY`. The CLI key file is an
 unencrypted PEM for evaluation; for production use a KMS/HSM-backed signer through the
-library. `regaudit-fhe verify` reads the report strictly: duplicate keys, `NaN`, unknown or
+library. Whoever can read that file can sign as the issuer: keep it mode 0600 (the CLI refuses a group- or other-readable
+file), off shared or synced folders, and treat `trust add` as enrolment only; it is not a key-lifecycle or revocation system
+(no retire, revoke or rotation commands in 0.2.0). `regaudit-fhe verify` reads the report strictly: duplicate keys, `NaN`, unknown or
 missing members in a `report.v1`, and anything else that would let the JSON you hold differ
 from the bytes that were signed, are refused with exit 2. Useful `verify` options:
 
@@ -537,7 +539,7 @@ An audit result is wrapped into a regulator-facing, signed JSON envelope.
 {
   "schema": "regaudit-fhe.report.v2",
   "schema_version": "regaudit-fhe.report.v2",
-  "algorithm_version": "0.1.1",
+  "algorithm_version": "0.2.0",
   "primitive": "fairness",
   "backend": "plaintext",
   "parameter_set": { "...": "..." },
