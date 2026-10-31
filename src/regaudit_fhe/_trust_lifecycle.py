@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import stat
 import tempfile
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -26,8 +27,8 @@ from typing import Any
 
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
-from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
-from .trust import TrustStore, TrustStoreError
+from .canonical import CanonicalError, loads_strict
+from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
 
 __all__ = ["LifecycleRefused", "retire", "revoke", "status_rows"]
 
@@ -44,12 +45,34 @@ def _utc(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _read(path: str) -> tuple[bytes, dict[str, Any]]:
+def _resolve(path: str) -> tuple[str, int]:
+    """Follow symlinks to the real regular file; return (real path, permission bits).
+
+    A symlinked store is edited THROUGH the link, so the link keeps pointing at the
+    updated file (replacing the link itself would silently detach consumers of it).
+    Directories, FIFOs and devices are refused before anything is read or created.
+    """
     try:
-        raw = Path(path).read_bytes()
-        payload = loads_strict(raw, max_bytes=MAX_INPUT_BYTES)
+        real = os.path.realpath(path, strict=True)
+        info = os.stat(real)
     except FileNotFoundError as exc:
         raise TrustStoreError(f"trust-store {path!r} does not exist") from exc
+    except OSError as exc:
+        raise TrustStoreError(f"trust-store {path!r} is unusable: {exc}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise TrustStoreError(f"trust-store {path!r} is not a regular file")
+    if info.st_size > MAX_TRUST_STORE_BYTES:
+        raise TrustStoreError(
+            f"trust-store {path!r} size {info.st_size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
+        )
+    return real, stat.S_IMODE(info.st_mode)
+
+
+def _read(path: str) -> tuple[str, int, bytes, dict[str, Any]]:
+    real, mode = _resolve(path)
+    try:
+        raw = Path(real).read_bytes()
+        payload = loads_strict(raw, max_bytes=MAX_TRUST_STORE_BYTES)
     except (OSError, CanonicalError, RecursionError) as exc:
         raise TrustStoreError(f"trust-store {path!r} is unusable: {exc}") from exc
     if not isinstance(payload, dict) or "entries" not in payload:
@@ -61,12 +84,34 @@ def _read(path: str) -> tuple[bytes, dict[str, Any]]:
         TrustStore.from_dict(payload)
     except TrustStoreError as exc:
         raise TrustStoreError(f"{path!r} does not validate: {exc}") from exc
-    return raw, payload
+    return real, mode, raw, payload
+
+
+def _store_form(path: str) -> str:
+    """entries | legacy-keys | bare-mapping (from the file's own shape)."""
+    try:
+        payload = loads_strict(Path(path).read_bytes(), max_bytes=MAX_TRUST_STORE_BYTES)
+    except (OSError, CanonicalError, RecursionError):
+        return "unknown"
+    if not isinstance(payload, dict):
+        return "unknown"
+    if "entries" in payload:
+        return "entries"
+    return "legacy-keys" if isinstance(payload.get("keys"), dict) else "bare-mapping"
+
+
+def _warnings(mode: int) -> list[str]:
+    if mode & 0o022:
+        return [
+            f"store is group- or world-writable (mode {mode:04o}): anyone who can write it can change trust"
+        ]
+    return []
 
 
 def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
     """Read-only summary. Works for both the entries form and the legacy form."""
     store = TrustStore.from_json(path)
+    real, mode = _resolve(path)
     rows = []
     for kid in sorted(store.keys):
         if key_id is not None and kid != key_id:
@@ -89,7 +134,9 @@ def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
     if key_id is not None and not rows:
         raise LifecycleRefused(f"key_id {key_id!r} is not in the trust store")
     return {
-        "store_form": "entries" if store.entries else "legacy",
+        "store_form": _store_form(real),
+        "store_mode": f"{mode:04o}",
+        "warnings": _warnings(mode),
         "as_of": _utc(store.as_of) if store.as_of else None,
         "authenticated": False,
         "note": "local file; unauthenticated and not an independent revocation authority",
@@ -97,12 +144,15 @@ def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def _write_atomic(path: str, data: bytes, expected_old: bytes) -> None:
+def _write_atomic(path: str, data: bytes, expected_old: bytes, mode: int) -> None:
     """Back up the old bytes, then replace the store atomically and durably.
 
     Any failure before ``os.replace`` leaves the old store byte-identical. The
     store is re-read just before the replace; if it changed since this edit
     began, nothing is written (narrows, but does not close, a concurrent-writer race).
+    ``path`` must already be the resolved real file. The store AND its ``.prev`` backup
+    get exactly the permission bits the store had (never wider, never narrower); an
+    explicit chmod makes the result independent of the umask. Ownership is not preserved.
     """
     target = Path(path)
     directory = target.parent if str(target.parent) else Path(".")
@@ -120,8 +170,8 @@ def _write_atomic(path: str, data: bytes, expected_old: bytes) -> None:
         return tmp
 
     try:
-        new_tmp = stage(data, 0o644)
-        backup_tmp = stage(expected_old, 0o600)
+        new_tmp = stage(data, mode)
+        backup_tmp = stage(expected_old, mode)
         if target.read_bytes() != expected_old:
             raise LifecycleRefused("the trust store changed while this edit was prepared; retry")
         os.replace(backup_tmp, backup)
@@ -145,7 +195,7 @@ def _mutate(
 ) -> dict[str, Any]:
     if now.tzinfo is None:
         raise LifecycleRefused("the clock must be timezone-aware")
-    raw, payload = _read(path)
+    real, mode, raw, payload = _read(path)
     entries = payload["entries"]
     entry = entries.get(key_id)
     if entry is None:
@@ -164,14 +214,16 @@ def _mutate(
     except TrustStoreError as exc:
         raise LifecycleRefused(f"refused, nothing written: {exc}") from exc
     data = (_dump(payload)).encode("utf-8")
-    _write_atomic(path, data, raw)
+    _write_atomic(real, data, raw, mode)
     return {
         "key_id": key_id,
         "before": before,
         "after": {k: entry.get(k) for k in ("status", "retired_at", "compromised_from")},
         "as_of": payload["as_of"],
         "store": path,
-        "backup": path + BACKUP_SUFFIX,
+        "backup": real + BACKUP_SUFFIX,
+        "store_mode": f"{mode:04o}",
+        "warnings": _warnings(mode),
         "store_sha256": hashlib.sha256(data).hexdigest(),
     }
 

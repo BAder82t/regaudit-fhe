@@ -963,6 +963,11 @@ not an omission.
 * JSON number formatting is Python's `repr`; RFC 8785 is needed before a
   non-Python verifier is supported.
 
+* Local lifecycle editing (`trust status|retire|revoke`) exists for `entries` stores only. It edits an
+  unauthenticated local file; it is not the anchor-authenticated mechanism of 4.5/4.6 and does not make
+  `TrustHistory.authenticated` true. See `docs/TRUST_LIFECYCLE_PROPOSAL.md` and
+  `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
+
 ### C.4 Owner contract decisions for Phase 3A (final)
 
 | # | Question | Decision | Where it lives |

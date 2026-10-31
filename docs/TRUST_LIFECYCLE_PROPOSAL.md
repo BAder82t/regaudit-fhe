@@ -1,136 +1,145 @@
-# Trust lifecycle proposal (post-0.2.0, not part of 0.2.0)
+# Trust lifecycle: local `trust status | retire | revoke` (0.3.0 candidate)
 
-Status: proposal plus a compatible local-file subset on branch `research/0.3-trust-lifecycle`.
-Not a release feature, not an audit, not a production or regulatory assurance. It builds on
-`docs/TRUST_SPEC.md` section 4 and adds no rule that spec does not already contain.
+Status: implemented as a compatible local-file subset; the signed/authenticated part is a proposal in
+`docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`. AI-assisted engineering work. Not an audit, not a production or
+regulatory assurance, and **not authoritative revocation**: these commands edit an unauthenticated local file.
+This document adds no verification rule that `docs/TRUST_SPEC.md` section 4 does not already contain; none of
+`trust.py`, `verification.py`, `trusted.py`, `canonical.py`, `schemas.py`, `_keys.py`, `replay.py` or any report
+schema was changed.
 
-## 1. What the existing format already supports
+## 1. States and what they mean
 
-An `entries` trust store (`TrustStore`) already validates, per key_id: `issuer`, `public_key_pem`,
-`status` in `active | retired | compromised`, `not_before`, `retired_at` (required iff retired),
-`compromised_from` (only if compromised; absent means unknown boundary), `deployments`,
-`primitives`, `parameter_set_pin`, plus a top-level `as_of`. A public key may sit under one key_id
-only. The legacy `keys/revoked/parameter_set_pins` form maps revoked keys to `revoked`
-(compromised with unknown boundary). Verification already reports `key_status`, `chronology`
-(`NONE | SIGNER_ASSERTED | AUTHENTICATED`) and `trust_store_as_of`. `as_of` is informational
-only; nothing compares it with anything.
-
-## 2. Semantics (all already enforced by the engine; restated precisely)
-
-**Retirement** (`retired_at = R`): planned rotation, no belief of exposure. A report is accepted
-only if it is provably signed strictly before `R`. Outside `development`, "provably" means a verified
-RFC 3161 timestamp over the sealed v2 artifact with `genTime + accuracy < R`, and a fresh
-authenticated trust history (which Phase 3A cannot produce, so the default is refusal:
-`KEY_RETIRED_NO_CHRONOLOGY` / `TRUST_STORE_FRESHNESS_UNPROVEN`). Only in the `development`
-profile with `historical_acceptance="signer-asserted"` is `issued_at < R` used.
-Retirement does not invalidate or validate anything retroactively; it stops the key being
-accepted for anything not otherwise proven earlier.
-
-**Revocation / compromise** (`compromised_from = C` or unknown): signature acceptance requires
-authenticated chronology `< C`; unknown `C` refuses everything the key ever signed. There is no
-signer-asserted path, because a compromised key controls its own clock.
-
-**What `issued_at` proves.** It is a field the signer wrote inside the signed body. It proves the
-holder of the key at signing time claimed that time. It does not prove when signing happened, and
-an attacker holding the key can pick any value. It is therefore usable only for development
-convenience (retired keys, never compromised ones) and is labelled `SIGNER_ASSERTED`. Independent
-timestamp evidence proves "this exact sealed artifact existed no later than genTime + accuracy",
-nothing about what happened afterwards, and nothing about who held the key.
-
-**Signed historical evidence vs current trust.** A valid signature proves integrity and key
-possession at some time. Whether the key is trusted now is a property of the verifier's trust
-store at verification time. A report can be authentic history and still not be currently
-acceptable. The two are reported separately (`key_status`, `chronology`, verdict); no rule here
-retroactively invalidates a signature, and none should be invented. A later compromise of a key
-whose interval was accepted is only caught if the verifier's store learns of it, see section 5.
-
-**Rotation / replacement.** Rotation = enrol the new key under a NEW key_id, then retire the old
-one. Rules, mostly already enforced:
-1. A key_id is never reused for a different key. `trust add` refuses an existing key_id and the
-   lifecycle commands never touch `public_key_pem`. Entries are never deleted by any command, so a
-   retired or compromised id cannot be freed and re-bound.
-2. One public key under one key_id (`_require_unique_keys`, SPKI fingerprint), so a revoked key
-   cannot be relabelled to regain trust.
-3. Identity is `(key_id, SPKI fingerprint)`; the report's embedded key must match the store's key
-   for that key_id. Overlap (old key retired, new key active) is unambiguous because the two have
-   different key_ids and each report names its own.
-4. Retiring the old key at the instant the new one is first used is the operator's job; there is
-   no cross-signature or successor link in the format (would be a schema change).
-
-## 3. Durable update and rollback of a local store
-
-Implemented for the new commands (`src/regaudit_fhe/_trust_lifecycle.py`):
-- Validate the edited payload with `TrustStore.from_dict` before any write.
-- Stage new bytes and the previous bytes in temp files in the same directory, `fsync` each, check
-  the store is byte-identical to what was read (narrows a concurrent-writer race; not a lock),
-  `os.replace` the backup to `STORE.prev` then the new file onto the store, `fsync` the directory.
-  Failure before the replace leaves the store byte-identical and removes temps.
-  A crash between the two replaces can leave an updated `.prev` with the old store: harmless.
-- One-way transitions only: active to retired, active or retired to compromised. No re-dating, no
-  un-revoking, no deletion. Retired to compromised drops `retired_at` (the format cannot hold both);
-  the old value remains in `.prev` only.
-- Never loosens: a compromise boundary later than an existing `retired_at` is refused.
-- Future-dated boundaries (beyond 5 minutes of the local clock) are refused.
-- `as_of` is set to the local clock and never moved backwards; a store whose `as_of` is more than
-  5 minutes ahead of the local clock is refused for editing.
-
-Not solved: a verifier reading an older copy of the file. `as_of` is not compared by the verifier,
-so replacing the store with an earlier version (which may predate a revocation) is undetectable
-locally.
-
-## 4. CLI
-
-| Command | Effect | Exit |
+| State (entry `status`) | Meaning | What a verifier accepts |
 |---|---|---|
-| `trust status --store S [--key-id K]` | read-only JSON: form, `as_of`, per-key status, boundaries, fingerprint, `authenticated: false` | 0; 2 unknown key_id; 3 unusable store |
-| `trust retire --store S --key-id K [--at T]` | active to retired; T default now, not future | 0; 2 refused; 3 store unusable |
-| `trust revoke --store S --key-id K [--compromised-from T]` | to compromised; no T = unknown boundary | same |
+| `active` | enrolled, usable | any report that passes identity/integrity checks |
+| `retired` (`retired_at` = R) | planned rotation; no belief of exposure | a report only if provably signed strictly before R (section 2) |
+| `compromised` (`compromised_from` = C, or absent = unknown) | key believed exposed from C | only authenticated chronology strictly before C; unknown C refuses everything |
+| legacy `revoked` (flat `revoked` list) | legacy form of "compromised, unknown boundary" | nothing (`KEY_REVOKED`); cannot be produced by the new commands |
+| unknown key_id | not in the store | refused, `ISSUER_UNKNOWN`; a different key under a known key_id is `KEY_EMBEDDED_MISMATCH` |
 
-Refusals: unknown key_id, wrong source state, legacy-form store (never converted), bad or future
-time, loosening boundary, `as_of` ahead of clock. `trust add` is unchanged.
+`issued_at` is a signer-written field. It is chronology only in `development` with
+`historical_acceptance="signer-asserted"` and only for a retired key (reported `SIGNER_ASSERTED`). A compromised
+key controls its own clock, so signer-asserted time never rescues it.
 
-## 5. Threat and limitations report
+## 2. State-transition matrix (command x state)  [agent-run: `tests/test_trust_lifecycle_qualification.py`]
 
-- **A local file is not a revocation authority.** Anyone who can write the file can set a key back
-  to `active`, delete a `compromised` entry, edit `compromised_from` later, or restore an old copy.
-  The commands guard honest operators, not an attacker. Their one-way rules are CLI policy, not a
-  property the verifier checks.
-- **Edit attacker.** Can also enrol their own key. Everything depends on file permissions and the
-  channel by which the file reached the verifier.
-- **Rollback / replay of an old store.** Undetected (see section 3). An old store makes a revoked
-  key look active.
-- **Signer-asserted time.** See section 2. Retirement boundaries checked against `issued_at` stop
-  a careless old-key signer only; they stop nobody who holds the key.
-- **No distribution.** Nothing pushes a revocation to verifiers. A running server reads its store
-  once at start-up (0.2.0 limitation), so revocation also needs a restart there.
-- **Retirement is not compromise.** Marking a compromised key `retired` makes its pre-retirement
-  history acceptable under the same chronology rules; choosing the wrong command is an operator
-  error the tool cannot detect.
-- **Timestamp coverage.** The engine accepts historical retired-key reports only with timestamp
-  evidence plus an authenticated trust history. This release line cannot produce the latter.
+All transitions are one-way, never re-date, never delete, and never touch `issuer`/`public_key_pem`/other keys.
 
-## 6. Needs an owner decision (not implemented)
+| State | `retire --at T` | `revoke --compromised-from C` | `revoke` (no C) |
+|---|---|---|---|
+| active | -> retired, `retired_at=T` (default now). T not in future (>5 min), not before `not_before` | -> compromised, `compromised_from=C` | -> compromised, unknown boundary |
+| retired (R) | REFUSED (no re-retire, no re-date, earlier or later) | -> compromised if `C <= R` (`retired_at` dropped; old value only in `.prev`); `C > R` REFUSED (would loosen) | -> compromised, unknown boundary (stricter, allowed) |
+| compromised, C unknown | REFUSED | REFUSED (boundary never edited) | REFUSED |
+| compromised, C known | REFUSED | REFUSED (no earlier or later edit) | REFUSED (no widening) |
+| key_id absent | REFUSED | REFUSED | REFUSED |
+| legacy-keys or bare-mapping store | REFUSED (exit 3; never converted) | REFUSED (exit 3) | REFUSED (exit 3) |
 
-| Need | Options | Recommendation |
-|---|---|---|
-| Independently protected revocation | (a) signed, owner-authorised trust-store/revocation list with monotonic `version`, verified against a pinned anchor; (b) keep local file and document it as operator-controlled; (c) transparency log | (a), as a new schema; (b) is today's state |
-| Rollback detection | verifier-side durable high-water mark of `version`/`as_of` (needs a signed `version`); local-only `as_of` high-water file is bypassable by the same attacker | tie to (a) |
-| Preserve `retired_at` after compromise | add `retired_at` coexistence or an append-only `history` list | with the new schema |
-| Successor link / cross-signing for rotation | `replaces: key_id` + fingerprint in the entry | with the new schema |
-| Authenticated TrustHistory producer | anchor-signed snapshots | with (a) |
+Every refusal leaves the store and `.prev` byte-identical. Also refused: boundary beyond now + 5 min,
+unparseable/offset-less RFC 3339, naive clock, store `as_of` more than 5 min ahead of this machine's clock
+(possible rollback or foreign store), non-regular store path (directory, FIFO), dangling/looping symlink,
+store larger than 4 MiB (checked on `stat`, before reading), any store that does not validate with
+`TrustStore.from_dict`, and any edit whose result would not validate (defence in depth).
 
-## 7. Compatibility of existing stores
+`trust status` is read-only for all three store forms (`entries`, `legacy-keys`, `bare-mapping`); it prints
+`store_form`, `store_mode`, `warnings` (group/world-writable), `as_of`, per-key status/boundaries/SPKI fingerprint
+and `authenticated: false`. Exit 0 / 2 unknown key_id / 3 unusable store.
 
-Public-key-only stores (bare mapping), legacy `keys/revoked/pins` stores and `entries` stores load
-and verify exactly as before: no change was made to `trust.py`, `verification.py`, `trusted.py`,
-`canonical.py`, `schemas.py`, `_keys.py`, `replay.py` or any report schema. The lifecycle commands
-refuse legacy-form and bare-mapping stores rather than converting them; migrate by re-enrolling keys
-with `trust add` into an `entries` store (key_ids and fingerprints must be re-confirmed out of band).
-Edited stores gain only the existing `as_of` member, which `TrustStore` already accepts and
-surfaces as `trust_store_as_of`.
+## 3. Verification outcome matrix  [agent-run: 150 parametrised cases, stores produced by the commands]
 
-## 8. Shippable in a minor release without a new schema
+Rules derived from TRUST_SPEC 4.3/4.4 independently of `verification.py`. "TS" = verified RFC 3161-style
+timestamp (injected test verifier; the library bundles none) whose `genTime + accuracy` is before/after the
+boundary; "FH" = a `TrustHistory(authenticated=True)` fresher than 24 h (no code in this release produces one;
+the test injects it as the existing seam). Report issue time = min(TS time, a fixed earlier date).
 
-`trust status`, `trust retire`, `trust revoke` as implemented (additive CLI, same format,
-unchanged verdicts for unedited stores). Everything in section 6 needs owner authority and a new
-schema.
+| Key state | Evidence | development / confidential | high-assurance |
+|---|---|---|---|
+| active | any | accepted | accepted |
+| unknown key_id | any | refused `ISSUER_UNKNOWN` | same |
+| retired, before R | none | refused `KEY_RETIRED_NO_CHRONOLOGY` | same |
+| retired, before R | TS, no/stale/unauthenticated FH | refused `TRUST_STORE_FRESHNESS_UNPROVEN` | same |
+| retired, before R | TS + fresh FH | accepted | refused `TRUST_STORE_FRESHNESS_UNPROVEN` (never ok) |
+| retired, after R | TS (any FH) | refused `SIGNED_AFTER_RETIREMENT` | same |
+| compromised C known, TS before C | TS + fresh FH | accepted | refused `TRUST_STORE_FRESHNESS_UNPROVEN` |
+| compromised C known, no TS | any | refused `KEY_COMPROMISED_NO_CHRONOLOGY` | same |
+| compromised C known, TS after C | any | refused `SIGNED_AFTER_COMPROMISE` | same |
+| compromised C unknown | any | refused `KEY_COMPROMISED_NO_CHRONOLOGY` | same |
+| retired, `development` + `signer-asserted`, issued_at < R | none | accepted, note `CHRONOLOGY_UNAUTHENTICATED` | not selectable (`PolicyError`) |
+| retired, same, issued_at >= R | none | refused `SIGNED_AFTER_RETIREMENT` | not selectable |
+| compromised, `signer-asserted` | none | refused (always) | not selectable |
+
+Consequences stated plainly:
+* In this release line a retired or compromised key's historical report is accepted only if the *caller* supplies
+  both timestamp evidence and a `TrustHistory` marked authenticated. The library cannot produce the latter, so the
+  default outcome for any historical report of a retired/compromised key is **refusal**. Retiring a key therefore
+  effectively stops accepting its reports unless the caller wires those two seams (or runs the `development`
+  signer-asserted mode). That is the 0.2.0 behaviour; the new commands only make editing the store safe.
+* Retire/revoke never invalidates or validates a report retroactively; it changes the verifier's current policy.
+  A report is "authentic history" (integrity + key possession) and "currently acceptable" (store state) separately.
+  Test: with timestamp evidence, a report signed before both a retirement and a later revoke whose boundary is
+  after the timestamp stays acceptable; moving the boundary before the timestamp refuses it; unknown boundary
+  refuses it. The report bytes are never rewritten.
+* Retirement is not compromise. Choosing `retire` for a key that is actually compromised leaves its pre-R history
+  acceptable under the chronology rules; the tool cannot detect that operator error.
+
+## 4. Durable update, permissions, symlinks
+
+Implemented in `src/regaudit_fhe/_trust_lifecycle.py`:
+* Validate, then stage new bytes and the previous bytes in temp files in the store's (resolved) directory,
+  `fsync` each, require the store to be byte-identical to what was read (narrows a concurrent-writer race; not a
+  lock), `os.replace` the backup to `STORE.prev` then the new file onto the store, `fsync` the directory. Failure
+  before the replace leaves the old store byte-identical and removes temp files. A crash between the two replaces
+  can leave a `.prev` equal to the live store (harmless). `kill -9` mid-edit can leave a `.trust-*.tmp` file.
+  Only one backup generation is kept (`.prev` is overwritten by the next edit).
+* **Permissions.** The store and its `.prev` get exactly the permission bits the store had, set with an explicit
+  `chmod` so the result is independent of the umask. This corrects the first draft (research branch), which forced
+  the store to 0644 (could widen a 0600 store) and the backup to 0600. `trust add` writes 0644, so a store created
+  by `trust add` stays 0644 through retire/revoke; a 0600 store stays 0600. Ownership/ACLs/xattrs are **not**
+  preserved (a new inode is created). A group- or world-writable store is edited but reported in `warnings`
+  (never silently "fixed", never refused). `.prev` has the store's sensitivity: both hold only public keys and
+  lifecycle data, no secrets, yet whoever can write either can change trust.
+* **Symlinks.** A symlinked store is edited *through* the link (the real file and `.prev` live next to the target;
+  the link keeps pointing at the updated file). Dangling or looping links, directories and FIFOs are refused before
+  anything is created. Following a link means the operator's path decides which file changes; do not point the
+  command at a path in a directory writable by another user. `trust add` (unchanged) replaces a symlink with a
+  regular file; that existing behaviour was not altered.
+* `as_of` is set to the local clock and never moved backwards (it is informational; no verifier compares it).
+
+## 5. Rotation and replacement design
+
+Rotation = enrol the new key under a NEW key_id (`trust add`, fingerprint-confirmed out of band), switch signers,
+then `trust retire --key-id OLD`. Enforced today: a key_id is never reused (`trust add` refuses an existing id; no
+command deletes an entry, so a retired or compromised id cannot be freed and re-bound); one public key under one
+key_id (SPKI fingerprint uniqueness, so a retired/compromised key cannot be relabelled); report identity is
+`(key_id, SPKI fingerprint)` inside the signed body and must equal the store's entry. Tested: a different key
+presented under the retired key_id is `KEY_EMBEDDED_MISMATCH`; a new key under a never-enrolled key_id is
+`ISSUER_UNKNOWN`; old and new keys coexist with distinct ids. There is **no successor link** in the format, so
+nothing says "B replaces A"; a verifier never treats one key as another. A `replaces` link or cross-signature
+needs a new schema; see the protocol proposal. If the old key is *compromised*, use `revoke`, not `retire`.
+
+## 6. Compatibility  [agent-run]
+
+Fixtures signed by published wheels 0.1.0, 0.1.1 and 0.2.0 (report.v1 and report.v2, six primitives) verified
+under the published 0.2.0 wheel and under this branch against 12 store files per signer: bare mapping, legacy
+keys (active, revoked), entries (active, retired before/after the issue date, compromised unknown/bounded) and the
+same four lifecycle states produced by the new commands. 1368 records (strict `verify_trusted` verdict+reasons,
+engine results in both historical-acceptance modes, and CLI `verify` stdout/stderr/exit) are byte-identical
+(sha256 `9a1eb45ba6b4831a7f8ce23e645905a7b4d55bcc058086c4e15844172f3809b4` for both runs). Edited stores
+differ from a hand-written equivalent only by the existing `as_of` member. The harness lives outside the repo
+(`compat/` scratch scripts); it is not part of the test suite.
+
+## 7. Threat and limitations
+
+* **A local file is not a revocation authority.** Anyone who can write it can set a key back to `active`, remove a
+  `compromised` entry, edit a boundary or restore an old copy. The one-way rules are CLI policy, not something the
+  verifier checks.
+* **Rollback of an old store is undetectable locally** (`as_of` is not compared by any verifier).
+* **No distribution.** Nothing pushes a revocation to verifiers; `serve` reads its store once at start-up, so a
+  revocation also needs a restart there.
+* **Signer-asserted time** stops only careless old-key signers.
+* **Edit attacker** can also enrol their own key. Everything depends on file permissions and the delivery channel.
+* **Concurrency.** A byte-compare before replace narrows but does not close a race between two editors; no lock.
+
+## 8. Owner decisions (not implemented)
+
+See `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md` (signed revocation lists, epochs, high-water marks, successor
+evidence, authenticated trust history) and its section 9 for the exact schema/owner blockers.

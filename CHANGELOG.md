@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — unreleased
+
+AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
+canonicalisation, schemas and verification rules are unchanged (verdicts for 0.1.0/0.1.1/0.2.0-signed fixtures
+are byte-identical to 0.2.0 across bare, legacy and entries stores).
+
+### Added
+
+- CLI `trust status`, `trust retire`, `trust revoke`: read-only lifecycle view, and one-way edits of an `entries`
+  trust store (active to retired, active or retired to compromised; never re-dated, never loosened, never
+  deleted). These edit a **local, unauthenticated file**; they are not authoritative revocation and do not
+  distribute anything. Edits are validated, atomic, keep a one-generation `STORE.prev`, and preserve the store's
+  permission bits (store and backup); symlinked stores are edited through the link. Legacy and bare-mapping stores
+  are refused, not converted. See `docs/TRUST_LIFECYCLE_PROPOSAL.md`; the signed-revocation design is a proposal
+  only (`docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`).
+
 ## 0.2.0 — 2026-10-31
 
 Trust and usability release. AI-assisted engineering work; not an audit and no production assurance. Signing

@@ -77,7 +77,7 @@ def test_status_reads_legacy_store_without_editing(tmp_path):
     path.write_text(json.dumps({"keys": {"k": _pem()}, "revoked": []}))
     before = _sha(path)
     out = lc.status_rows(str(path))
-    assert out["store_form"] == "legacy" and out["keys"][0]["status"] == "active"
+    assert out["store_form"] == "legacy-keys" and out["keys"][0]["status"] == "active"
     assert _sha(path) == before
 
 
@@ -255,9 +255,9 @@ def test_concurrent_change_is_detected_and_not_overwritten(tmp_path, monkeypatch
     path = _store(tmp_path)
     real = lc._write_atomic
 
-    def racing(p, data, expected_old):
+    def racing(p, data, expected_old, mode):
         Path(p).write_text(Path(p).read_text() + " ")  # another writer lands first
-        return real(p, data, expected_old)
+        return real(p, data, expected_old, mode)
 
     monkeypatch.setattr(lc, "_write_atomic", racing)
     with pytest.raises(lc.LifecycleRefused, match="changed"):
