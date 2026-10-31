@@ -122,7 +122,7 @@ from ._limits import (
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
-from .report_v2 import EnvelopeFormatError, parse_envelope
+from .report_v2 import EnvelopeFormatError, parse_envelope_strict
 from .schemas import SchemaError, list_schemas, load_schema
 from .trust import TrustStore
 from .verification import (
@@ -217,6 +217,7 @@ class ServerConfig:
             trust_history=self.trust_history,
             replay_cache=self.replay_cache,
             replay_mode=self.replay_mode,
+            check_provenance=True,
         )
 
 
@@ -1388,9 +1389,9 @@ def build_app(
             payload = loads_strict(raw, max_bytes=config.max_body_bytes)
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
-            env = parse_envelope(payload["envelope"])
+            env = parse_envelope_strict(payload["envelope"])
             if not isinstance(env.primitive, str):
-                # A report.v1 is not type-checked on parse; a non-string primitive is not a report.
+                # Strict parsing already refuses this; kept so the 0.1.1 guarantee stays explicit.
                 raise EnvelopeFormatError("BAD_TYPE", "primitive must be a string")
         except (CanonicalError, EnvelopeFormatError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc

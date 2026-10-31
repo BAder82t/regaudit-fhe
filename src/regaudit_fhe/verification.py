@@ -32,6 +32,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from ._keys import spki_fingerprint
+from ._provenance import CONTRADICTION, UNVERIFIABLE
+from ._provenance import check_provenance as _check_provenance
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, decode_canonical_b64
 from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache
@@ -134,6 +136,9 @@ class VerificationPolicy:
     trust_history_max_age: timedelta = timedelta(hours=24)
     replay_cache: ReplayCache | None = field(default=None, compare=False)
     replay_mode: str = "off"
+    # Trust-bearing paths (verify_trusted, CLI verify, /v1/verify) turn this on: an envelope whose signed backend or
+    # parameter_set_hash contradicts its own parameter_set is refused. Off keeps the legacy library behaviour.
+    check_provenance: bool = False
 
     def __post_init__(self) -> None:
         if self.profile not in PROFILES:
@@ -358,6 +363,13 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     Raises :class:`VerificationUnavailable` when there is no trust material and
     the development self-signed check was not enabled. Never returns
     ``accepted`` for a report that could not be tied to a registered issuer.
+
+    **Not a strict acceptance path on its own.** ``verify_report(parse_envelope(...))`` keeps the
+    lenient legacy parse (a v1 report is read with its original tolerant field handling) and, unless
+    ``policy.check_provenance`` is set, does not compare ``backend`` and ``parameter_set_hash`` with
+    ``parameter_set``. It is unchanged in 0.2.0 for compatibility, but it is not suitable for an
+    independently trusted acceptance decision: use :func:`regaudit_fhe.verify_trusted`, or parse with
+    :func:`regaudit_fhe.report_v2.parse_envelope_strict` and set ``check_provenance=True``.
     """
     now = _aware_now(policy)
     v2 = isinstance(env, AuditEnvelopeV2)
@@ -440,6 +452,12 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     signed_not_after = evidence.gen_time.isoformat() if evidence is not None else None
     if not v2:
         note("LEGACY_V1_FORMAT")
+    if policy.check_provenance:
+        prov_status, _ = _check_provenance(env)
+        if prov_status == CONTRADICTION:
+            block("PROVENANCE_CONTRADICTION")
+        elif prov_status == UNVERIFIABLE:
+            note("PROVENANCE_UNVERIFIABLE")
 
     base: dict[str, Any] = {
         "policy_id": policy.policy_id,

@@ -26,6 +26,7 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -549,6 +550,10 @@ def parse_envelope(data: Mapping[str, Any] | str | bytes) -> AuditEnvelope | Aud
     numbers, BOM and the like are refused). v1 envelopes keep their original
     lenient field handling and original canonical bytes; v2 envelopes are
     parsed strictly. Unknown schemas are refused.
+
+    This is the lenient reader kept for compatibility. For an envelope that may end in an
+    independently trusted acceptance, use :func:`parse_envelope_strict` (or
+    :func:`regaudit_fhe.verify_trusted`, which does so for you).
     """
     if isinstance(data, str | bytes | bytearray):
         data = loads_strict(data)
@@ -563,3 +568,154 @@ def parse_envelope(data: Mapping[str, Any] | str | bytes) -> AuditEnvelope | Aud
         except (KeyError, TypeError, ValueError) as exc:
             raise EnvelopeFormatError("BAD_VALUE", f"malformed v1 envelope: {exc}") from exc
     raise EnvelopeFormatError("BAD_SCHEMA", f"unknown envelope schema {schema!r}")
+
+
+# ---------------------------------------------------------------------------
+# Strict parsing for any path that can end in TRUSTED
+# ---------------------------------------------------------------------------
+
+_V1_STRICT_REQUIRED = frozenset(
+    {
+        "schema",
+        "schema_version",
+        "algorithm_version",
+        "primitive",
+        "backend",
+        "parameter_set",
+        "parameter_set_hash",
+        "regulations",
+        "result",
+        "input_commitments",
+        "depth_budget",
+        "issued_at",
+        "issuer",
+        "receipt",
+    }
+)
+_V1_STRICT_OPTIONAL = frozenset({"timestamp", "dp"})
+_V1_STRICT_STRINGS = (
+    "schema_version",
+    "algorithm_version",
+    "primitive",
+    "backend",
+    "parameter_set_hash",
+    "issued_at",
+    "issuer",
+)
+_V1_RECEIPT_KEYS = frozenset(
+    {"sha256", "signature_alg", "signature_b64", "key_id", "public_key_pem"}
+)
+_V1_TIMESTAMP_KEYS = frozenset({"issuer", "token_b64", "issued_at"})
+_PLAIN_JSON_MAX_DEPTH = 64
+
+
+def _assert_plain_json(value: Any, depth: int = 0) -> None:
+    """Refuse anything that is not exactly what ``json.loads`` of finite JSON produces."""
+    if depth > _PLAIN_JSON_MAX_DEPTH:
+        raise EnvelopeFormatError("BAD_VALUE", "report is nested too deeply")
+    kind = type(value)
+    if value is None or kind in (bool, str, int):
+        return
+    if kind is float:
+        if math.isnan(value) or math.isinf(value):
+            raise EnvelopeFormatError("BAD_VALUE", "report contains a non-finite number")
+        return
+    if kind is list:
+        for item in value:
+            _assert_plain_json(item, depth + 1)
+        return
+    if kind is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise EnvelopeFormatError("BAD_TYPE", "report contains a non-string object key")
+            _assert_plain_json(item, depth + 1)
+        return
+    raise EnvelopeFormatError("BAD_TYPE", f"report contains a non-JSON value ({kind.__name__})")
+
+
+def _require_strict_v1_shape(data: Mapping[str, Any]) -> None:
+    """A report.v1 may carry exactly the members its signature was computed over.
+
+    ``AuditEnvelope.from_dict`` ignores unknown members, supplies defaults for missing
+    ones and coerces containers, so several different JSON texts verify as one signed
+    body. That is harmless for a reader that re-serialises the verified object, and
+    misleading for one that reads the file after the verdict. Every genuine report.v1
+    written by regaudit-fhe 0.0.2 to 0.1.0 has exactly this shape.
+    """
+    unknown = set(data) - _V1_STRICT_REQUIRED - _V1_STRICT_OPTIONAL
+    missing = _V1_STRICT_REQUIRED - set(data)
+    if unknown:
+        raise EnvelopeFormatError(
+            "UNKNOWN_FIELD", f"report.v1 has unknown member(s) {sorted(unknown)}"
+        )
+    if missing:
+        raise EnvelopeFormatError("MISSING_FIELD", f"report.v1 lacks member(s) {sorted(missing)}")
+    for name in _V1_STRICT_STRINGS:
+        if not isinstance(data[name], str):
+            raise EnvelopeFormatError("BAD_TYPE", f"{name} must be a string")
+    for name in ("parameter_set", "result", "depth_budget", "receipt"):
+        if not isinstance(data[name], dict):
+            raise EnvelopeFormatError("BAD_TYPE", f"{name} must be an object")
+    regs = data["regulations"]
+    if not isinstance(regs, list) or not all(isinstance(r, str) for r in regs):
+        raise EnvelopeFormatError("BAD_TYPE", "regulations must be a list of strings")
+    commitments = data["input_commitments"]
+    if not isinstance(commitments, list) or not all(isinstance(c, dict) for c in commitments):
+        raise EnvelopeFormatError("BAD_TYPE", "input_commitments must be a list of objects")
+    for name in _V1_STRICT_OPTIONAL:
+        if name in data and not isinstance(data[name], dict):
+            raise EnvelopeFormatError("BAD_TYPE", f"{name} must be an object when present")
+    if set(data["receipt"]) != _V1_RECEIPT_KEYS:
+        raise EnvelopeFormatError(
+            "UNKNOWN_FIELD", f"receipt must have exactly the members {sorted(_V1_RECEIPT_KEYS)}"
+        )
+    if "timestamp" in data and set(data["timestamp"]) != _V1_TIMESTAMP_KEYS:
+        raise EnvelopeFormatError(
+            "UNKNOWN_FIELD", f"timestamp must have exactly the members {sorted(_V1_TIMESTAMP_KEYS)}"
+        )
+
+
+def _dump_exact(value: Any) -> str:
+    return json.dumps(
+        value, sort_keys=True, allow_nan=False, ensure_ascii=True, separators=(",", ":")
+    )
+
+
+def parse_envelope_strict(
+    data: Mapping[str, Any] | str | bytes,
+) -> AuditEnvelope | AuditEnvelopeV2:
+    """Parse an envelope so that the object verified is exactly the JSON that was read.
+
+    Use this for every path that can end in ``TRUSTED``. Compared with
+    :func:`parse_envelope` it additionally refuses:
+
+    * for ``report.v1``: unknown top-level members, missing members that the lenient
+      parser would default, containers of the wrong type, ``null`` for optional members,
+      and extra members in ``receipt`` / ``timestamp`` (neither is covered by the v1
+      signature);
+    * for both formats: any report whose JSON is not identical, after sorting keys, to
+      the re-serialisation of the object parsed from it (so ``1`` versus ``1.0``,
+      coerced lists, aliased values and defaults all fail), non-finite numbers and
+      non-JSON Python values.
+
+    Text input is additionally refused for duplicate keys, ``NaN``/``Infinity``, a BOM
+    and trailing data (``loads_strict``). A mapping cannot reveal duplicate keys that
+    were dropped before it reached us; pass the text for end-to-end strictness.
+    """
+    if isinstance(data, str | bytes | bytearray):
+        data = loads_strict(data)
+    if not isinstance(data, Mapping):
+        raise EnvelopeFormatError("BAD_TYPE", "envelope must be a JSON object")
+    _assert_plain_json(data)
+    if data.get("schema") == SCHEMA_V1:
+        _require_strict_v1_shape(data)
+    env = parse_envelope(data)
+    try:
+        same = _dump_exact(data) == _dump_exact(env.to_dict())
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise EnvelopeFormatError("BAD_VALUE", f"report is not plain finite JSON: {exc}") from exc
+    if not same:
+        raise EnvelopeFormatError(
+            "BAD_VALUE", "report JSON differs from the object parsed from it (non-canonical form)"
+        )
+    return env

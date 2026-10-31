@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.2.0 — unreleased
+
+Trust and usability release. AI-assisted engineering work; not an audit and no production assurance. Signing
+formats, signed fields, canonicalisation, schemas and crypto backends are unchanged: reports signed by 0.1.0 and
+0.1.1 verify under 0.2.0 (lenient `verify_report` verdicts are identical; checked against published-wheel
+fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.**
+
+### Added
+
+- `verify_trusted(report, trust_store)` returns `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`; only `TRUSTED` is an
+  acceptance (`.trusted`). The result has no truth value, a missing trust store raises `TypeError`, and a malformed
+  report is `INVALID`, not an exception. `parse_envelope_strict` is the parser every acceptance path now uses.
+- CLI: `keygen`, `trust add` (fingerprint-checked), `trust list`, and `audit --signing-key` (signs a `report.v2`
+  with a long-lived key). The 0.1.1 input limits apply on these paths too (regression tests included).
+- Backend and parameter-set consistency in the strict paths (`verify_trusted`, `regaudit-fhe verify`,
+  `POST /v1/verify`, and `VerificationPolicy(check_provenance=True)`): an envelope whose signed `backend` differs from
+  `parameter_set.backend`, or whose `parameter_set_hash` is not the hash of its `parameter_set`, is refused with
+  `PROVENANCE_CONTRADICTION`. Evidence that is merely absent (a `parameter_set` without `backend`, or of a shape
+  whose hash scheme this library does not know) is not refused; it is reported as `PROVENANCE_UNVERIFIABLE`. This
+  is a self-consistency check on signer-asserted values, a bug detector rather than an adversarial control (a
+  `parameter_set` of another shape is only reported as unverifiable); it does not prove that an FHE computation ran.
+
+### Compatibility changes
+
+- `regaudit-fhe verify` and `POST /v1/verify` parse strictly. A `report.v1` whose JSON is not exactly what the
+  library writes (unknown or missing members, coerced containers, duplicate keys, non-finite numbers, extra
+  `receipt`/`timestamp` members) is refused: CLI exit 2 with nothing on stdout, HTTP 422 `malformed envelope`.
+  Previously some of these were accepted. Library callers of `parse_envelope` and `verify_report` keep the lenient
+  behaviour.
+- The same two paths and `verify_trusted` now refuse `PROVENANCE_CONTRADICTION` envelopes (above). Reports written by
+  this library never contradict themselves.
+- Deprecations, return values unchanged: `verify_receipt` without trust material emits a `DeprecationWarning`
+  once per process (in addition to the existing one-time `UserWarning`); `verify_envelope(...).valid` states that `True`
+  includes self-signed reports (a setup that turns `DeprecationWarning` into an error will now raise on the first such call); `parse_envelope` and `verify_report` documents that they are not a strict acceptance path.
+
+### Known limitations
+
+- `trust add` enrols a key; it is not a key-lifecycle or revocation system. There is no retire or revoke command, no
+  rotation workflow and no revocation distribution. A trust store file is edited by hand for status changes.
+- The CLI private key is an unencrypted PEM, written mode 0600 and refused if group- or other-readable. Anyone who
+  can read the file can sign as the issuer; there is no passphrase, environment-variable or KMS option. Protect it
+  with filesystem permissions, an encrypted volume and a custody process, or sign through the library with a KMS/HSM
+  backed signer.
+- `backend` remains signer-asserted: a signer can sign a consistent claim of `tenseal-ckks` over a plaintext run, and a
+  default library call signs `plaintext` even on the encrypted path.
+- The 0.1.1 residual-risk list (body-inactivity deadline, parse before authentication, body budget bounds bytes not
+  memory, verify jobs continue after timeout, echoed 422 values, plain-text uvicorn 503) is unchanged.
+
 ## 0.1.1 — 2026-10-28
 
 Defensive patch.

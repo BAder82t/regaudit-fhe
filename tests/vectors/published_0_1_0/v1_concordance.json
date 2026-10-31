@@ -1,0 +1,42 @@
+{
+  "algorithm_version": "0.1.0",
+  "backend": "plaintext",
+  "depth_budget": {
+    "consumed": 6,
+    "declared": 6
+  },
+  "input_commitments": [],
+  "issued_at": "2026-10-28T08:57:22.336557+00:00",
+  "issuer": "vector-issuer-010",
+  "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.1.0",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+  },
+  "parameter_set_hash": "c1262015326d48cee3ffb27e5083cb8da9587247afc81c48848d91b23722776d",
+  "primitive": "concordance",
+  "receipt": {
+    "key_id": "vec010-key-1",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwYndnnrv3XSzOJrh+uxhHPeG9lUFz/tqJ3VcveREaIY=\n-----END PUBLIC KEY-----\n",
+    "sha256": "8b9bf413eee7ebeaee2b8e99f40aef57ea9b26480eb975a861688b09c8387f2e",
+    "signature_alg": "Ed25519",
+    "signature_b64": "PINrUqOjwS9UvrK64DSi0lTkSa1DhZ6yOwmWXPIIYKfz0NpQG2KhnkFIQBNIdzQHaAlkKn8VGgwCG0FJQWJ7Dw=="
+  },
+  "regulations": [
+    "FDA_SAMD_PCCP",
+    "EU_AI_ACT_ART15",
+    "EMA_AI_GUIDANCE"
+  ],
+  "result": {
+    "c_index": 0.8125720580439968,
+    "comparable_pairs": 4.074074074074074,
+    "concordant_pairs": 3.3104787549940613
+  },
+  "schema": "regaudit-fhe.report.v1",
+  "schema_version": "regaudit-fhe.report.v1"
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "regaudit-fhe"
-version = "0.1.1"
+version = "0.2.0"
 description = "Depth-tracked regulatory audit primitives with a plaintext model and an optional TenSEAL CKKS backend."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -113,6 +113,7 @@ addopts = ["-q", "--strict-markers", "--strict-config"]
 filterwarnings = [
   "ignore:VerificationOutcome.valid is deprecated:DeprecationWarning",
   "ignore:VerificationResult.valid is deprecated:DeprecationWarning",
+  "ignore:verify_receipt\\(\\) without trust material is deprecated:DeprecationWarning",
 ]
 testpaths = ["tests"]
 
