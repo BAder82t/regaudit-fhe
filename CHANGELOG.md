@@ -11,13 +11,14 @@ semantics are unchanged. Defaults of every 0.1.1 resource, concurrency and memor
 - A request body that sends nothing for `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (default 10 s; `0` restores the old
   behaviour) is answered `408` (`code: BODY_TIMEOUT`) and releases its in-flight body budget; it used to hold it until
   the 30 s request timeout and get a `504`. Difference: a client that pauses more than 10 s between two chunks of a
-  body (or between the headers and the body) is now refused with 408 instead of being allowed up to the request
-  timeout. A steady slow drip is still limited only by the request timeout.
+  body (or between the headers and the body) now gets 408 instead of being allowed up to the request timeout. This
+  is an idle timeout, not a minimum-rate policy: a steady drip stays connected until the request timeout, so
+  reverse-proxy limits remain necessary.
 - `POST /v1/verify` refuses a body deeper than `REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH` (16) or with an array or object
   wider than, or arrays totalling more than, `REGAUDIT_FHE_VERIFY_MAX_ELEMENTS` (65536) with
   `422 {"detail": "malformed envelope"}` before the strict envelope parse. Difference: such a body used to be parsed
-  and answered `200` with an `INVALID` verdict. A genuine envelope (depth 4 or less, about 1000 members at most) is
-  unaffected.
+  and answered `200` with an `INVALID` verdict. A genuine envelope (depth 4, at most about 3100 array elements, from the widest legal
+  provenance result) is unaffected; the limits are exact at 16 and 65 536 (see `docs/DEPLOYMENT.md`).
 - A schema `422` from `/v1/audit/{primitive}` truncates its detail at 2048 characters (a 0.5 MB body of 100 000
   wrong-typed elements used to be answered with 9.3 MB). Short details are unchanged.
 - A client that disconnects while its body is read no longer leaves an unhandled exception in the server log.

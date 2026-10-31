@@ -418,3 +418,380 @@ def test_verify_refuses_a_huge_flat_or_deep_body_but_serves_genuine_envelopes(
             "detail": "malformed envelope"
         }
     assert _post(srv.port, "/v1/verify", json.dumps({"envelope": env}).encode())[0] == 200
+
+
+# ---------------------------------------------------------------------------
+# owner-required real-socket cases (0.2.1 qualification)
+# ---------------------------------------------------------------------------
+
+
+def _head_end(wire: bytes) -> int:
+    return wire.index(b"\r\n\r\n") + 4
+
+
+def _trickle(
+    port: int,
+    wire: bytes,
+    *,
+    pieces: int,
+    gap: float,
+    first_gap: float | None = None,
+    limit: float = 60.0,
+) -> tuple[int | None, bytes, float]:
+    """Send the headers, then the body in ``pieces`` equal parts, waiting ``gap`` s between them.
+
+    ``first_gap`` is the wait between the headers and the first part (default: ``gap``). While waiting the
+    client listens, so a response (for instance a 408) is read the moment it arrives.
+    """
+    head, body = wire[: _head_end(wire)], wire[_head_end(wire) :]
+    size = -(-len(body) // pieces)
+    parts = [body[i : i + size] for i in range(0, len(body), size)]
+    s = socket.create_connection(("127.0.0.1", port), timeout=10)
+    t0 = time.perf_counter()
+    answered: bytes = b""
+
+    def wait(seconds: float) -> bool:
+        nonlocal answered
+        s.settimeout(seconds)
+        try:
+            data = s.recv(1 << 16)
+        except (TimeoutError, OSError):
+            return False
+        answered = data
+        return True
+
+    try:
+        s.sendall(head)
+        if wait(gap if first_gap is None else first_gap):
+            return _finish(s, answered, t0)
+        for i, part in enumerate(parts):
+            if time.perf_counter() - t0 > limit:
+                break
+            try:
+                s.sendall(part)
+            except OSError:
+                break
+            if i < len(parts) - 1 and wait(gap):
+                return _finish(s, answered, t0)
+        status, rest = _recv_response(s, 30)
+        return status, rest, time.perf_counter() - t0
+    finally:
+        s.close()
+
+
+def _finish(s: socket.socket, first: bytes, t0: float) -> tuple[int | None, bytes, float]:
+    data = first
+    s.settimeout(2)
+    try:
+        while True:
+            more = s.recv(1 << 16)
+            if not more:
+                break
+            data += more
+    except (TimeoutError, OSError):
+        pass
+    head, _, body = data.partition(b"\r\n\r\n")
+    status = int(head.split(b" ")[1]) if head.startswith(b"HTTP/") else None
+    return status, body, time.perf_counter() - t0
+
+
+def _genuine_envelopes() -> list[tuple[str, str, dict[str, Any]]]:
+    rng = np.random.default_rng(20261031)
+    signer = rf.Signer.generate(issuer="acme", key_id="acme-1")
+    n = 2048
+    reports = {
+        "fairness": rf.audit_fairness(*(np.array(GOOD[k], float) for k in GOOD)),
+        # the widest provenance result that is legal: k <= n_buckets <= 1024
+        "provenance": rf.audit_provenance(
+            np.abs(rng.standard_normal(n)), np.arange(n), n_buckets=1024, k=1024
+        ),
+        "concordance": rf.audit_concordance(
+            rng.standard_normal(32),
+            np.abs(rng.standard_normal(32)) * 100,
+            (rng.uniform(size=32) < 0.7).astype(float),
+        ),
+        "calibration": rf.audit_calibration(rng.uniform(size=8), np.full(8, 0.5)),
+        "drift": rf.audit_drift(np.eye(16)[2], np.eye(16)[12], drift_threshold=0.005),
+        "disagreement": rf.audit_disagreement(
+            [(0, 1, 0, 0), (0, 0.5, 0, 0), (0, 1.5, 0, 0)],
+            np.linspace(-0.5, 0.5, 32),
+            threshold=0.01,
+        ),
+    }
+    out = []
+    for name, rep in reports.items():
+        out.append((name, "v1", rf.envelope(name, rep, signer=signer).to_dict()))
+        out.append((name, "v2", envelope_v2(name, rep, signer=signer, deployment_id="d").to_dict()))
+    return out
+
+
+def _array_elements(obj: Any) -> int:
+    """Sum of the lengths of every JSON array in ``obj`` (the quantity REGAUDIT_FHE_VERIFY_MAX_ELEMENTS caps)."""
+    if isinstance(obj, dict):
+        return sum(_array_elements(v) for v in obj.values())
+    if isinstance(obj, list):
+        return len(obj) + sum(_array_elements(v) for v in obj)
+    return 0
+
+
+def _dump(obj: Any) -> bytes:
+    return json.dumps(obj, separators=(",", ":")).encode()
+
+
+# (1) a VALID slow upload must still succeed -----------------------------------------------------
+
+
+def test_valid_slow_uploads_that_outlast_the_idle_timeout_still_succeed_control(
+    make_server: Any,
+) -> None:
+    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="10", REGAUDIT_FHE_REQUEST_TIMEOUT_S="40")
+    # legal 1 MiB audit: 8 parts, 2 s apart, ~14 s in all (more than the 10 s idle timeout, gaps well under it)
+    audit = _request_bytes(PATH, _padded(MAX_BODY - 10))
+    status, data, took = _trickle(srv.port, audit, pieces=8, gap=2.0)
+    _evidence("slow_valid_audit", status=status, seconds=round(took, 1))
+    assert status == 200 and json.loads(data)["primitive"] == "fairness"
+    assert took > 12
+    signer = rf.Signer.generate(issuer="acme", key_id="acme-1")
+    rep = rf.audit_fairness(*(np.array(GOOD[k], float) for k in GOOD))
+    env = rf.envelope("fairness", rep, signer=signer).to_dict()
+    verify = _request_bytes("/v1/verify", _dump({"envelope": env}))
+    status, data, took = _trickle(srv.port, verify, pieces=7, gap=2.0)
+    _evidence("slow_valid_verify", status=status, seconds=round(took, 1))
+    assert status == 200 and json.loads(data)["integrity_valid"] is True and took > 12
+
+
+# (2) idle-timeout boundary ---------------------------------------------------------------------
+
+
+def test_idle_timeout_boundary_gap_under_succeeds_gap_over_gets_408(make_server: Any) -> None:
+    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="2", REGAUDIT_FHE_REQUEST_TIMEOUT_S="20")
+    wire = _request_bytes(PATH, _padded(4000))
+    under = _trickle(srv.port, wire, pieces=3, gap=1.5)
+    over = _trickle(srv.port, wire, pieces=3, gap=2.5)
+    # headers sent, then the body only after a pause
+    under_h = _trickle(srv.port, wire, pieces=1, gap=1.5)
+    over_h = _trickle(srv.port, wire, pieces=1, gap=2.5)
+    _evidence(
+        "idle_boundary_idle2s",
+        gap_1_5=under[0],
+        gap_2_5=over[0],
+        headers_then_1_5=under_h[0],
+        headers_then_2_5=over_h[0],
+    )
+    assert under[0] == 200
+    assert over[0] == 408 and json.loads(over[1])["code"] == "BODY_TIMEOUT"
+    assert under_h[0] == 200
+    assert over_h[0] == 408
+
+
+def test_with_the_idle_timeout_off_a_long_pause_is_allowed_as_before(make_server: Any) -> None:
+    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="0", REGAUDIT_FHE_REQUEST_TIMEOUT_S="12")
+    wire = _request_bytes(PATH, _padded(4000))
+    status, _, took = _trickle(srv.port, wire, pieces=2, gap=3.0)
+    _evidence("idle_off_gap_3s", status=status, seconds=round(took, 1))
+    assert status == 200 and took > 2.9
+
+
+# (3) chunked transfer-encoding upload that stalls / disconnects ---------------------------------
+
+
+def _chunked_head() -> bytes:
+    return (
+        f"POST {PATH} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\n"
+        "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    ).encode()
+
+
+def _chunk(data: bytes) -> bytes:
+    return f"{len(data):x}\r\n".encode() + data + b"\r\n"
+
+
+def test_chunked_upload_works_and_a_stalled_one_is_cut_off_and_recovers(make_server: Any) -> None:
+    srv = make_server()
+    body = _padded(LEGAL_BYTES)
+    with socket.create_connection(("127.0.0.1", srv.port), timeout=10) as s:  # control
+        s.sendall(_chunked_head())
+        for i in range(0, len(body), 50_000):
+            s.sendall(_chunk(body[i : i + 50_000]))
+        s.sendall(b"0\r\n\r\n")
+        assert _recv_response(s, 20)[0] == 200
+    stalled = socket.create_connection(("127.0.0.1", srv.port), timeout=10)
+    try:
+        stalled.sendall(
+            _chunked_head() + _chunk(_padded(STALL_BYTES))
+        )  # a chunk, no terminator, silence
+        _wait_until_budget_is_held(srv.port)
+        t0 = time.perf_counter()
+        status, _ = _recv_response(stalled, REQUEST_TIMEOUT_S + 4)
+        cut = time.perf_counter() - t0
+        recovered = _recovers(srv.port, 10)
+        _evidence(
+            "chunked_stall",
+            status=status,
+            cut_after_s=round(cut, 2),
+            recovered_after_s=None if recovered is None else round(recovered, 2),
+        )
+        assert status == 408 and cut < IDLE_S + 2.5
+        assert recovered is not None and recovered < 1.0
+    finally:
+        stalled.close()
+    # a chunked upload that disconnects: budget freed, no traceback
+    s = socket.create_connection(("127.0.0.1", srv.port), timeout=10)
+    s.sendall(_chunked_head() + _chunk(_padded(STALL_BYTES)))
+    _wait_until_budget_is_held(srv.port)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    s.close()
+    assert _recovers(srv.port, 3) is not None
+    assert "Traceback" not in srv.log_text()
+
+
+def test_twenty_abandoned_mid_body_clients_then_a_full_legal_body_succeeds(
+    make_server: Any,
+) -> None:
+    srv = make_server(
+        REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="0"
+    )  # only the disconnect can free the budget
+    for i in range(20):
+        s = _open_partial(srv.port, STALL_BYTES // 2)
+        if i % 2:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        s.close()
+    assert _recovers(srv.port, 4) is not None
+    assert _post(srv.port, PATH, _padded(MAX_BODY - 10))[0] == 200
+    assert "Traceback" not in srv.log_text()
+
+
+# (4) error-response sizes ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("n", [1_000, 10_000, 100_000])
+def test_422_for_thousands_of_validation_errors_is_bounded_by_bytes(
+    make_server: Any, n: int
+) -> None:
+    srv = make_server(
+        REGAUDIT_FHE_REQUEST_TIMEOUT_S="60"
+    )  # collecting 200 000 errors takes seconds
+    bad = _dump({**GOOD, "y_true": ["a"] * n, "y_pred": [None] * n})
+    status, data, took = _post(srv.port, PATH, bad, 60)
+    _evidence(
+        "422_size", n=n, request_bytes=len(bad), response_bytes=len(data), seconds=round(took, 2)
+    )
+    assert status == 422
+    assert len(data) <= 2048 + 256, len(
+        data
+    )  # 2048-character detail plus the marker and JSON framing
+    # short details are unchanged: an exact, small, untruncated message
+    status, data, _ = _post(srv.port, PATH, _dump({"y_true": [1, 0]}))
+    assert status == 422 and b"truncated" not in data and len(data) < 1024
+
+
+# (5) legitimate reports near the new verify limits ----------------------------------------------
+
+
+def test_genuine_v1_and_v2_envelopes_of_all_six_primitives_verify_control(make_server: Any) -> None:
+    srv = make_server()
+    envs = _genuine_envelopes()
+    assert len(envs) == 12
+    widest = 0
+    for name, version, env in envs:
+        body = _dump({"envelope": env})
+        widest = max(widest, _array_elements(env))
+        status, data, _ = _post(srv.port, "/v1/verify", body)
+        got = json.loads(data)
+        assert status == 200 and got["integrity_valid"] is True, (name, version, status, got)
+    _evidence("genuine_envelopes", count=len(envs), widest_array_elements=widest)
+    assert widest > 3000  # the provenance result at n_buckets=1024 really was the widest
+
+
+def test_verify_structure_limits_are_exact_at_the_boundaries(make_server: Any) -> None:
+    """Depth counts nested JSON containers with the body object as depth 1 (so the envelope is 2 and its
+    ``result`` 3); the element limit counts the lengths of all arrays in the body (and, separately, the
+    members of any one object). 16 / 65 536 are accepted, 17 / 65 537 refused with 422."""
+    srv = make_server()
+    base = _genuine_envelopes()[0][2]  # fairness v1
+
+    def post(result: Any) -> tuple[int | None, str]:
+        status, data, _ = _post(
+            srv.port, "/v1/verify", _dump({"envelope": {**base, "result": result}})
+        )
+        return status, data.decode(errors="replace")
+
+    def nest(levels: int) -> Any:
+        node: Any = []
+        for _ in range(levels - 1):
+            node = [node]
+        return node
+
+    refused = (422, '{"detail":"malformed envelope"}')
+    rows: dict[str, Any] = {}
+    # depth: body 1, envelope 2, result 3, then ``levels`` nested arrays -> depth = 3 + levels
+    rows["depth16"] = post({"x": nest(13)})[0]
+    rows["depth17"] = post({"x": nest(14)})
+    # elements: other arrays in the body count too; pad to the exact total
+    others = _array_elements({"envelope": {**base, "result": {"x": []}}})
+    rows["elements65536"] = post({"x": [1] * (65_536 - others)})[0]
+    rows["elements65537"] = post({"x": [1] * (65_537 - others)})
+    # width of one object: 65 536 members accepted, 65 537 refused
+    rows["members65536"] = post({f"k{i}": 0 for i in range(65_536)})[0]
+    rows["members65537"] = post({f"k{i}": 0 for i in range(65_537)})
+    _evidence(
+        "verify_boundaries",
+        **{k: (list(v) if isinstance(v, tuple) else v) for k, v in rows.items()},
+    )
+    assert rows["depth16"] == 200 and rows["elements65536"] == 200 and rows["members65536"] == 200
+    for k in ("depth17", "elements65537", "members65537"):
+        assert (rows[k][0], rows[k][1]) == (refused[0], refused[1]), (k, rows[k])
+
+
+# (6) auth-before-body, default and opt-in ---------------------------------------------------------
+
+KEY = "kQualSynthetic0123456789abcdefABCDEFG"
+AUTH = {"REGAUDIT_FHE_DEV_MODE": "0", "REGAUDIT_FHE_API_KEYS": f"{KEY}:admin"}
+
+
+def _post_auth(port: int, body: bytes, key: str | None) -> int | None:
+    wire = _request_bytes(PATH, body)
+    if key:
+        i = wire.index(b"\r\n") + 2
+        wire = wire[:i] + f"Authorization: Bearer {key}\r\n".encode() + wire[i:]
+    with socket.create_connection(("127.0.0.1", port), timeout=20) as s:
+        s.sendall(wire)
+        return _recv_response(s, 20)[0]
+
+
+def test_auth_before_body_default_is_unchanged_over_real_sockets(make_server: Any) -> None:
+    srv = make_server(**AUTH)
+    good, bad = json.dumps(GOOD).encode(), b'{"y_true": [1,'
+    answers = {
+        "authed_good": _post_auth(srv.port, good, KEY),
+        "unauth_good": _post_auth(srv.port, good, None),
+        "unauth_malformed": _post_auth(srv.port, bad, None),
+        "authed_malformed": _post_auth(srv.port, bad, KEY),
+    }
+    _evidence("auth_default_off", **answers)
+    assert answers == {
+        "authed_good": 200,
+        "unauth_good": 401,
+        "unauth_malformed": 422,  # the body is still parsed before authentication (0.2.0 order)
+        "authed_malformed": 422,
+    }
+
+
+def test_auth_before_body_opt_in_refuses_before_parsing_over_real_sockets(
+    make_server: Any,
+) -> None:
+    srv = make_server(REGAUDIT_FHE_AUTH_BEFORE_BODY="1", **AUTH)
+    good, bad = json.dumps(GOOD).encode(), b'{"y_true": [1,'
+    answers = {
+        "authed_good": _post_auth(srv.port, good, KEY),
+        "unauth_good": _post_auth(srv.port, good, None),
+        "unauth_malformed": _post_auth(srv.port, bad, None),
+        "authed_malformed": _post_auth(srv.port, bad, KEY),
+    }
+    _evidence("auth_opt_in", **answers)
+    assert answers == {
+        "authed_good": 200,
+        "unauth_good": 401,
+        "unauth_malformed": 401,
+        "authed_malformed": 422,
+    }

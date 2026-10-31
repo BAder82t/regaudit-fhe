@@ -228,15 +228,22 @@ tune them for your deployment.
    enforce a body rate. A client that disconnects mid-body is ended quietly (no unhandled exception in the log).
    The budget is released on every exit path (success, refusal, deadline, disconnect, cancellation, timeout).
 
-   **Compatibility of the 0.2.1 availability settings.** Three requests that 0.2.0 answered differently are now
-   refused: a body that stops for more than `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (`504` after the request timeout
-   before, `408` now; set `0` for the old behaviour), a `/v1/verify` body deeper than 16 or wider than 65536
-   elements (`200` with an `INVALID` verdict before, `422` now; no genuine envelope comes near these values: depth
-   4, at most about 1000 members), and an oversized schema `422` detail (cut at 2048 characters). Nothing else
-   changes, and the 0.1.1 limits and defaults above are untouched. Measured over real sockets (loopback, one run,
-   1 MiB in-flight budget): a stalled 900 kB body released its budget after 0.95 s instead of 5.95 s (request
-   timeout 6 s in that test); a 0.5 MB body of 100 000 wrong-typed elements was answered with 2.1 kB instead of
-   9.3 MB. These are engineering measurements on one machine, not guarantees.
+   **Compatibility of the 0.2.1 availability settings.** Disclosure for upgraders from 0.2.0:
+   - A client that pauses longer than 10 s between two chunks of a request body (or between the headers and the
+     body) now gets `408` (`BODY_TIMEOUT`). Before, it was allowed up to `REGAUDIT_FHE_REQUEST_TIMEOUT_S` and then
+     got `504`. `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S=0` restores the old behaviour.
+   - `/v1/verify` bodies deeper than 16 or wider than 65 536 now get `422 {"detail": "malformed envelope"}` instead
+     of a `200` with an `INVALID` verdict. Depth counts nested JSON containers with the body object as depth 1 (the
+     envelope is 2, its `result` 3). The element limit counts the lengths of all arrays in the body, and separately
+     the member count of any one object or the length of any one array. A genuine envelope is depth 4 with at most
+     about 3100 array elements (the widest legal provenance result, `n_buckets` 1024); every v1 and v2 envelope of
+     all six primitives was verified through a real socket.
+   - Schema `422` details are truncated at 2048 characters.
+   The 0.1.1 limits and defaults are untouched; authentication before the body stays opt-in.
+
+   **An idle timeout is not a minimum-rate policy.** A client that sends one byte every few seconds, or a chunk
+   every 9 s, stays connected until the request timeout and holds its share of the body budget for that long. A
+   reverse proxy in front of the server still has to enforce a minimum upload rate and its own body limits.
 
    **Authentication order (`REGAUDIT_FHE_AUTH_BEFORE_BODY`).** By default `/v1/audit` still reads and strictly
    parses the body *before* it checks the bearer token, so an unauthenticated 1 MiB body costs the event loop its
