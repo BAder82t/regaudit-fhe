@@ -58,6 +58,10 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_MAX_QUEUED_AUDITS`      | `4`           | Audits allowed to wait for a free slot (also the verify queue). Beyond it: 503 at once. |
 | `REGAUDIT_FHE_QUEUE_WAIT_S`           | `5`           | Longest wait for a slot before a 503 `queue_wait_timeout`.              |
 | `REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES`| `4`           | Verifications computed at the same time.                                |
+| `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S`    | `10`          | Longest gap between two chunks of a request body (also before the first). A stalled body gets `408` (`code: BODY_TIMEOUT`) and releases its in-flight budget. `0` disables. |
+| `REGAUDIT_FHE_AUTH_BEFORE_BODY`       | `0`           | `1` authenticates `/v1/audit` callers before the body is read and parsed (see "Order of checks"). |
+| `REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH`  | `16`          | Deepest nesting `/v1/verify` accepts (the `{"envelope": ...}` wrapper is depth 1; a genuine envelope is depth 4 or less). Minimum 8. |
+| `REGAUDIT_FHE_VERIFY_MAX_ELEMENTS`    | `65536`       | Longest array / widest object, and total array elements, in a `/v1/verify` body (a genuine envelope has fewer than 20 members per container). Minimum 1024. |
 | `REGAUDIT_FHE_HEADER_TIMEOUT_S`       | `10`          | `serve` only. Close a connection that has not finished its request headers in this time. `0` disables. |
 | `REGAUDIT_FHE_TIMEOUT_KEEP_ALIVE_S`   | `5`           | `serve` only. Idle keep-alive timeout.                                  |
 | `REGAUDIT_FHE_LIMIT_CONCURRENCY`      | `256`         | `serve` only. uvicorn `--limit-concurrency`: connections/tasks beyond it get an immediate 503. `0` disables. |
@@ -214,6 +218,38 @@ tune them for your deployment.
    (body limit raised to 16 MiB) were buffered before any gate could refuse them and the 512 MiB container was
    OOM-killed (`docs/RESOURCE_BOUNDS_MEASUREMENTS.md`). The cap counts bytes of bodies still being received; a
    parsed payload is bounded by the structure limits above.
+
+   **Stalled and slow bodies.** A body that sends nothing for `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (default 10 s,
+   counted from the end of the headers and again after every chunk) is answered `408` with
+   `{"detail": "the request body was not received in time", "code": "BODY_TIMEOUT", "operation": ...}` and the
+   bytes it held are released at once; before, it held them until `REGAUDIT_FHE_REQUEST_TIMEOUT_S` (30 s) and was
+   then answered `504`. This is an inactivity deadline, not a minimum transfer rate: a client that sends one byte
+   every few seconds still holds its share of the budget until the request timeout, and a proxy in front should
+   enforce a body rate. A client that disconnects mid-body is ended quietly (no unhandled exception in the log).
+   The budget is released on every exit path (success, refusal, deadline, disconnect, cancellation, timeout).
+
+   **Authentication order (`REGAUDIT_FHE_AUTH_BEFORE_BODY`).** By default `/v1/audit` still reads and strictly
+   parses the body *before* it checks the bearer token, so an unauthenticated 1 MiB body costs the event loop its
+   full parse time (measured on an Apple-silicon laptop, Python 3.13: about 25 ms for 1 MiB of floats, 65 ms of
+   ints, 100 ms of small objects; `/v1/verify` authenticates first and answers the same bodies in about 1 ms).
+   Setting it to `1` checks the token and scope first, so a refused caller costs no parse. The only requests whose
+   answer changes are those that are both malformed (or arrive while the body budget is exhausted) and
+   unauthenticated or unauthorised: `422`/`503` becomes `401`/`403`. Authorised callers see no difference.
+   It is off by default for that reason.
+
+   **Verify bodies.** `/v1/verify` applies structure limits (`REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH`,
+   `REGAUDIT_FHE_VERIFY_MAX_ELEMENTS`) to the parsed body before the strict envelope parse. They are separate from
+   the `/v1/audit` input limits (an envelope is an aggregate result: depth 4 and about 14 to 20 members per
+   container for every primitive, whatever the input size). A body over them gets the same
+   `422 {"detail": "malformed envelope"}` as any other malformed envelope; a 1 MiB body of 500 000 integers
+   used to be parsed in full (about 340 ms on the event loop, then `200` with `INVALID`) and is now refused in about
+   65 ms. The strict parse itself still runs on the event loop.
+
+   **Schema errors are bounded.** A `422` that reports a schema violation carries the validator's messages, which
+   name the offending values, one per element. The detail is cut at 2048 characters (`... [truncated, N characters
+   in all]`); a body of 100 000 wrong-typed elements used to produce a 9.3 MB answer (about 19 times the request).
+   Short messages are unchanged. The validator still collects every error on a worker thread (about 2 s for
+   100 000 elements) before the detail is cut, so the cost is bounded by the input limits, not by this change.
 2. **Bounded concurrency with backpressure.** At most `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS` audits compute at once
    (on dedicated threads) and at most `REGAUDIT_FHE_MAX_QUEUED_AUDITS` wait, each for at most
    `REGAUDIT_FHE_QUEUE_WAIT_S`. Everything else is refused immediately:
@@ -235,7 +271,11 @@ tune them for your deployment.
 3. **Timeouts cancel.** When `REGAUDIT_FHE_REQUEST_TIMEOUT_S` expires the request is answered `504` and
    cancelled; a request waiting for a slot leaves the queue. A computation that is already running on its thread
    cannot be interrupted, so its slot stays taken until it ends: after a timeout at most
-   `MAX_CONCURRENT_AUDITS` jobs, each bounded by the input limits, keep running. Before this change every
+   `MAX_CONCURRENT_AUDITS` jobs, each bounded by the input limits, keep running. The same holds for `/v1/verify`: a
+   verification that has already been submitted runs to the end, and in replay `record` mode it records the report
+   as seen even though its caller got a `504`. A client that retries that report is then answered `REPLAY_DETECTED`.
+   The server logs `verify_request_abandoned` when this can happen. Keep `REGAUDIT_FHE_REQUEST_TIMEOUT_S` well above
+   the slowest replay-store operation, and treat a `504` from `/v1/verify` in `record` mode as "outcome unknown". Before this change every
    queued request still ran to completion after its 504.
 4. **Probes.** `/healthz` and `/readyz` are coroutines served on the event loop, never on a worker thread.
    `regaudit-fhe serve` also lowers the interpreter thread-switch interval (`REGAUDIT_FHE_SWITCH_INTERVAL_S`,
