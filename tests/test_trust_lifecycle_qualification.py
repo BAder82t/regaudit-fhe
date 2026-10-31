@@ -898,3 +898,69 @@ def test_cli_status_output_marks_store_unauthenticated(tmp_path):
     assert (
         out["authenticated"] is False and "not an independent revocation authority" in out["note"]
     )
+
+
+# ============================================================================
+# 5. Wording: an unsigned local edit is a LOCAL VERIFIER POLICY CHANGE
+# ============================================================================
+
+
+def test_results_say_local_policy_change_not_issuer_authorised(tmp_path):
+    path = _two_key_store(tmp_path)
+    for res in (
+        lc.retire(str(path), "a-1", at=None, now=NOW),
+        lc.revoke(str(path), "b-1", compromised_from=None, now=NOW),
+    ):
+        assert res["scope"] == "LOCAL VERIFIER POLICY CHANGE"
+        assert res["issuer_authorized"] is False
+        assert "NOT evidence that the issuer authorised" in res["notice"]
+        assert "cannot be detected" in res["rollback_detection"]
+    st = lc.status_rows(str(path))
+    assert st["scope"] == "LOCAL VERIFIER POLICY CHANGE" and st["issuer_authorized"] is False
+    assert "no independently preserved high-water mark" in st["rollback_detection"]
+
+
+def test_cli_marks_edits_on_stderr_and_help_text(tmp_path):
+    _enrolled(tmp_path)
+    r = _cli(tmp_path, "trust", "revoke", "--store", "s.json", "--key-id", "k-1")
+    assert r.returncode == 0
+    assert "LOCAL VERIFIER POLICY CHANGE" in r.stderr and "issuer authorised" in r.stderr
+    assert json.loads(r.stdout)["issuer_authorized"] is False
+    refused = _cli(tmp_path, "trust", "revoke", "--store", "s.json", "--key-id", "k-1")
+    assert refused.returncode == 2 and "LOCAL VERIFIER POLICY CHANGE" not in refused.stderr
+    for sub in ("retire", "revoke"):
+        h = _cli(tmp_path, "trust", sub, "--help")
+        assert "LOCAL VERIFIER POLICY CHANGE" in " ".join(h.stdout.split())
+
+
+# ============================================================================
+# 6. Isolate the data-file fsync (mutant M23)
+# ============================================================================
+
+
+def test_new_store_and_backup_data_files_are_fsynced_before_the_replace(tmp_path, monkeypatch):
+    """Both staged data files must be fsynced BEFORE the first rename, then the directory after.
+
+    Without the data fsync a crash after the rename could leave a store whose bytes never reached
+    disk; the earlier failure-injection tests could not tell that apart from a failed directory fsync.
+    """
+    path = _two_key_store(tmp_path)
+    events: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def spy_fsync(fd):
+        mode = os.fstat(fd).st_mode
+        events.append("fsync-file" if stat.S_ISREG(mode) else "fsync-dir")
+        return real_fsync(fd)
+
+    def spy_replace(src, dst):
+        events.append("replace")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", spy_fsync)
+    monkeypatch.setattr(os, "replace", spy_replace)
+    lc.retire(str(path), "a-1", at=None, now=NOW)
+    first = events.index("replace")
+    assert events[:first].count("fsync-file") == 2  # new store bytes and backup bytes
+    assert events.count("replace") == 2
+    assert events[-1] == "fsync-dir" and "fsync-dir" not in events[:first]

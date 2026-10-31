@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://regaudit-fhe.vaultbytes.com/proposals/revocation-list.v1.schema.json",
+  "title": "DRAFT, NOT PUBLISHED, NOT REGISTERED: regaudit-fhe owner-signed revocation list (v1)",
+  "description": "Experimental draft. It is not in src/regaudit_fhe/schemas, is not registered with schemas.py and is not part of the published protocol. Signed by a dedicated revocation key (never a report-signing key). Signing input: b'regaudit-fhe/revocation-list/v1/sign\\x00' || canonical_bytes(every member except 'signature'). See docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "algorithm_version", "issuer", "authority", "epoch", "prev_list_digest", "issued_at", "valid_from", "valid_until", "entries", "signature"],
+  "allOf": [
+    {"if": {"properties": {"epoch": {"const": 1}}}, "then": {"properties": {"prev_list_digest": {"type": "null"}}}, "else": {"properties": {"prev_list_digest": {"$ref": "#/$defs/fingerprint"}}}}
+  ],
+  "properties": {
+    "schema": {"const": "regaudit-fhe.revocation-list"},
+    "schema_version": {"const": 1},
+    "algorithm_version": {"const": 1},
+    "issuer": {"type": "string", "minLength": 1, "maxLength": 256},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "key_fingerprint"],
+      "properties": {
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "key_fingerprint": {"$ref": "#/$defs/fingerprint"}
+      }
+    },
+    "epoch": {"type": "integer", "minimum": 1},
+    "prev_list_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fingerprint"}]},
+    "issued_at": {"$ref": "#/$defs/time"},
+    "valid_from": {"$ref": "#/$defs/time"},
+    "valid_until": {"$ref": "#/$defs/time"},
+    "entries": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {"$ref": "#/$defs/entry"}
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signature_b64"],
+      "properties": {
+        "algorithm": {"const": "ed25519"},
+        "signature_b64": {"type": "string", "minLength": 88, "maxLength": 88}
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "time": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?([Zz]|[+-]\\d{2}:\\d{2})$"},
+    "successor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "key_fingerprint"],
+      "properties": {
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "key_fingerprint": {"$ref": "#/$defs/fingerprint"}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "key_fingerprint", "status", "effective_from"],
+      "properties": {
+        "key_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "key_fingerprint": {"$ref": "#/$defs/fingerprint"},
+        "status": {"enum": ["retired", "compromised", "replaced"]},
+        "effective_from": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/time"}]},
+        "successor": {"$ref": "#/$defs/successor"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"enum": ["retired", "replaced"]}}}, "then": {"properties": {"effective_from": {"$ref": "#/$defs/time"}}}},
+        {"if": {"properties": {"status": {"const": "replaced"}}}, "then": {"required": ["successor"]}}
+      ]
+    }
+  }
+}

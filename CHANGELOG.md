@@ -14,7 +14,9 @@ are byte-identical to 0.2.0 across bare, legacy and entries stores).
   distribute anything. Edits are validated, atomic, keep a one-generation `STORE.prev`, and preserve the store's
   permission bits (store and backup); symlinked stores are edited through the link. Legacy and bare-mapping stores
   are refused, not converted. See `docs/TRUST_LIFECYCLE_PROPOSAL.md`; the signed-revocation design is a proposal
-  only (`docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`).
+  only (`docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`; tests-only prototype under `tests/experimental_revocation/`,
+  nothing shipped, no schema registered). Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
+  (not issuer-authorised revocation) and states that rollback of the local file is undetectable.
 
 ## 0.2.0 — 2026-10-31
 

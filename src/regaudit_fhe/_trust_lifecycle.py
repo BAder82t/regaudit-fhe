@@ -30,11 +30,23 @@ from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
 
-__all__ = ["LifecycleRefused", "retire", "revoke", "status_rows"]
+__all__ = ["LOCAL_NOTICE", "LifecycleRefused", "retire", "revoke", "status_rows"]
 
 # A boundary this far past the operator's clock is refused as a typo or a replayed clock.
 FUTURE_SKEW = timedelta(minutes=5)
 BACKUP_SUFFIX = ".prev"
+
+
+SCOPE = "LOCAL VERIFIER POLICY CHANGE"
+LOCAL_NOTICE = (
+    "LOCAL VERIFIER POLICY CHANGE: this edits only this verifier's own trust-store file. It is NOT "
+    "evidence that the issuer authorised a revocation, it is not distributed to anyone, and anyone "
+    "who can write the file can undo it."
+)
+ROLLBACK_NOTICE = (
+    "no independently preserved high-water mark: a rollback of this file (and its .prev backup) to an "
+    "earlier state cannot be detected by this tool or by verification"
+)
 
 
 class LifecycleRefused(ValueError):
@@ -139,6 +151,9 @@ def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
         "warnings": _warnings(mode),
         "as_of": _utc(store.as_of) if store.as_of else None,
         "authenticated": False,
+        "issuer_authorized": False,
+        "scope": SCOPE,
+        "rollback_detection": ROLLBACK_NOTICE,
         "note": "local file; unauthenticated and not an independent revocation authority",
         "keys": rows,
     }
@@ -225,6 +240,10 @@ def _mutate(
         "store_mode": f"{mode:04o}",
         "warnings": _warnings(mode),
         "store_sha256": hashlib.sha256(data).hexdigest(),
+        "scope": SCOPE,
+        "issuer_authorized": False,
+        "notice": LOCAL_NOTICE,
+        "rollback_detection": ROLLBACK_NOTICE,
     }
 
 

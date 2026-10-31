@@ -7,6 +7,12 @@ This document adds no verification rule that `docs/TRUST_SPEC.md` section 4 does
 `trust.py`, `verification.py`, `trusted.py`, `canonical.py`, `schemas.py`, `_keys.py`, `replay.py` or any report
 schema was changed.
 
+**Wording rule.** `trust retire` and `trust revoke` are a **LOCAL VERIFIER POLICY CHANGE**: they edit this
+verifier's own file and are not evidence that the issuer authorised a revocation. Their JSON output carries
+`scope`, `issuer_authorized: false`, `notice` and `rollback_detection` (no independently preserved high-water
+mark: rollback of the file and `.prev` is undetectable); the notice is repeated on stderr and in `--help`.
+The owner-signed alternative is `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
+
 ## 1. States and what they mean
 
 | State (entry `status`) | Meaning | What a verifier accepts |

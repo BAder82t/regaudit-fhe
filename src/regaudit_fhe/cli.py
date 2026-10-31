@@ -42,7 +42,7 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
-from ._trust_lifecycle import LifecycleRefused, status_rows
+from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, status_rows
 from ._trust_lifecycle import retire as retire_key
 from ._trust_lifecycle import revoke as revoke_key
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
@@ -468,10 +468,12 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _lifecycle(action: Callable[[], dict[str, Any]]) -> int:
+def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> int:
     """Run one lifecycle action. Exit 0 done | 2 refused | 3 store unusable."""
     try:
         print(json.dumps(action(), indent=2))
+        if edits:
+            sys.stderr.write(LOCAL_NOTICE + "\n")
     except LifecycleRefused as exc:
         sys.stderr.write(f"refused, nothing written: {exc}\n")
         return 2
@@ -490,7 +492,8 @@ def _cmd_trust_status(args: argparse.Namespace) -> int:
 
 def _cmd_trust_retire(args: argparse.Namespace) -> int:
     return _lifecycle(
-        lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc))
+        lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc)),
+        edits=True,
     )
 
 
@@ -501,7 +504,8 @@ def _cmd_trust_revoke(args: argparse.Namespace) -> int:
             args.key_id,
             compromised_from=args.compromised_from,
             now=datetime.now(timezone.utc),
-        )
+        ),
+        edits=True,
     )
 
 
@@ -763,7 +767,11 @@ def build_parser() -> argparse.ArgumentParser:
     t_status.set_defaults(func=_cmd_trust_status)
     t_retire = trust_sub.add_parser(
         "retire",
-        help="Mark an active key retired (planned rotation). One-way; edits the local file only.",
+        description="LOCAL VERIFIER POLICY CHANGE: edits only this verifier's trust-store file; not "
+        "evidence of issuer-authorised revocation; not distributed; reversible by anyone who can "
+        "write the file.",
+        help="LOCAL VERIFIER POLICY CHANGE: mark an active key retired in this trust-store file "
+        "(planned rotation). One-way; not evidence of issuer-authorised revocation.",
     )
     t_retire.add_argument("--store", required=True)
     t_retire.add_argument("--key-id", required=True)
@@ -773,8 +781,12 @@ def build_parser() -> argparse.ArgumentParser:
     t_retire.set_defaults(func=_cmd_trust_retire)
     t_revoke = trust_sub.add_parser(
         "revoke",
-        help="Mark a key compromised. One-way; edits the local file only. Without "
-        "--compromised-from the boundary is unknown and everything the key signed is refused.",
+        description="LOCAL VERIFIER POLICY CHANGE: edits only this verifier's trust-store file; not "
+        "evidence of issuer-authorised revocation; not distributed; reversible by anyone who can "
+        "write the file.",
+        help="LOCAL VERIFIER POLICY CHANGE: mark a key compromised in this trust-store file. "
+        "One-way; not evidence of issuer-authorised revocation. Without --compromised-from the "
+        "boundary is unknown and everything the key signed is refused.",
     )
     t_revoke.add_argument("--store", required=True)
     t_revoke.add_argument("--key-id", required=True)
