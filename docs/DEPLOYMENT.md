@@ -228,6 +228,16 @@ tune them for your deployment.
    enforce a body rate. A client that disconnects mid-body is ended quietly (no unhandled exception in the log).
    The budget is released on every exit path (success, refusal, deadline, disconnect, cancellation, timeout).
 
+   **Compatibility of the 0.2.1 availability settings.** Three requests that 0.2.0 answered differently are now
+   refused: a body that stops for more than `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (`504` after the request timeout
+   before, `408` now; set `0` for the old behaviour), a `/v1/verify` body deeper than 16 or wider than 65536
+   elements (`200` with an `INVALID` verdict before, `422` now; no genuine envelope comes near these values: depth
+   4, at most about 1000 members), and an oversized schema `422` detail (cut at 2048 characters). Nothing else
+   changes, and the 0.1.1 limits and defaults above are untouched. Measured over real sockets (loopback, one run,
+   1 MiB in-flight budget): a stalled 900 kB body released its budget after 0.95 s instead of 5.95 s (request
+   timeout 6 s in that test); a 0.5 MB body of 100 000 wrong-typed elements was answered with 2.1 kB instead of
+   9.3 MB. These are engineering measurements on one machine, not guarantees.
+
    **Authentication order (`REGAUDIT_FHE_AUTH_BEFORE_BODY`).** By default `/v1/audit` still reads and strictly
    parses the body *before* it checks the bearer token, so an unauthenticated 1 MiB body costs the event loop its
    full parse time (measured on an Apple-silicon laptop, Python 3.13: about 25 ms for 1 MiB of floats, 65 ms of

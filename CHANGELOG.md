@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.1 — unreleased
+
+Availability hardening of the HTTP server (`regaudit-fhe[server]`). AI-assisted engineering work; not an audit and
+no production assurance. Library, CLI, schemas, signing formats, canonicalisation, trust decisions and replay
+semantics are unchanged. Defaults of every 0.1.1 resource, concurrency and memory limit are unchanged.
+
+### Changed (server, with the exact compatibility difference)
+
+- A request body that sends nothing for `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (default 10 s; `0` restores the old
+  behaviour) is answered `408` (`code: BODY_TIMEOUT`) and releases its in-flight body budget; it used to hold it until
+  the 30 s request timeout and get a `504`. Difference: a client that pauses more than 10 s between two chunks of a
+  body (or between the headers and the body) is now refused with 408 instead of being allowed up to the request
+  timeout. A steady slow drip is still limited only by the request timeout.
+- `POST /v1/verify` refuses a body deeper than `REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH` (16) or with an array or object
+  wider than, or arrays totalling more than, `REGAUDIT_FHE_VERIFY_MAX_ELEMENTS` (65536) with
+  `422 {"detail": "malformed envelope"}` before the strict envelope parse. Difference: such a body used to be parsed
+  and answered `200` with an `INVALID` verdict. A genuine envelope (depth 4 or less, about 1000 members at most) is
+  unaffected.
+- A schema `422` from `/v1/audit/{primitive}` truncates its detail at 2048 characters (a 0.5 MB body of 100 000
+  wrong-typed elements used to be answered with 9.3 MB). Short details are unchanged.
+- A client that disconnects while its body is read no longer leaves an unhandled exception in the server log.
+- The server logs `verify_request_abandoned` when a `/v1/verify` request is cancelled (request timeout or server cancellation) while its
+  verification may still complete; the log carries only the key id, no report content. In replay `record` mode such a
+  verification still records the report as seen (unchanged); see `docs/DEPLOYMENT.md`.
+
+### Added
+
+- `REGAUDIT_FHE_AUTH_BEFORE_BODY` (default `0`, unchanged behaviour): `1` authenticates `/v1/audit` before the body
+  is read and parsed.
+- Real-socket regression tests (`tests/test_server_real_sockets.py`) and in-process tests
+  (`tests/test_server_availability.py`).
+
 ## 0.2.0 — 2026-10-31
 
 Trust and usability release. AI-assisted engineering work; not an audit and no production assurance. Signing
