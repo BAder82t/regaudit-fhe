@@ -43,3 +43,20 @@ changed to the recommended API if that is a genuine improvement.
 
 These are quality notes with no security impact. They are deferred so that this change
 stays confined to the security findings.
+
+## 0.2.0 merge (PR #45): alerts #52–#57
+
+Alerts raised on the PR merge ref or on `master` after the 0.2.0 trust-completion merge (`304144b`). The 19
+older open alerts above and in the historical table remain in the backlog.
+
+| # | Rule | Location | Disposition | Evidence |
+|---|---|---|---|---|
+| 52 | `py/overly-permissive-file` | `cli.py` `_write_new_file` | Dismissed, won't fix | Called only by `keygen`. The private key is created 0600 (tested); the 0644 file is the public-key PEM. `O_EXCL`, never overwrites. |
+| 53 | `py/overly-permissive-file` | `cli.py` `trust add` | Dismissed, won't fix | The trust store holds `issuer`, `public_key_pem` and `status` only; verifiers must read it. Written to a temp file, then atomically replaced. |
+| 54 | `py/comparison-of-identical-expressions` | `report_v2.py` `_assert_plain_json` | Fixed | `value != value` became `math.isnan(value) or math.isinf(value)`. Only exact `float` instances reach it. Tests added. |
+| 55 | `py/catch-base-exception` | `cli.py` cleanup handlers | Dismissed, won't fix | Unlinks only the file just created, suppresses `OSError`, then re-raises with a bare `raise`; the original exception is never masked and no partial trust store is published. |
+| 56 | `py/import-and-import-from` | `tests/test_legacy_bool_apis_deprecation.py` | Fixed | Test import style. |
+| 57 | `py/clear-text-logging-sensitive-data` | `cli.py` verify verdict | Dismissed, false positive | The sources are the boolean `VerificationResult.issuer_trusted` (`cli.py:644`, `verification.py:253`). The printed fields are verdict metadata and report-supplied identifiers; no key material reaches `verify()`. `tests/test_cli_verify_output_no_secrets.py` pins the field inventory and checks for key leaks, including a private key passed as the report or the trust store. |
+
+The identifiers `verify` prints (`issuer`, `key_id`, `deployment_id`, ...) are chosen by the report's producer and may be
+sensitive in some deployments; see the 0.2.0 known limitations in `CHANGELOG.md`.

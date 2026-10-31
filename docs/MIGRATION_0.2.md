@@ -1,7 +1,7 @@
-# Migrating to 0.2.0 (draft release notes)
+# Migrating to 0.2.0 (release notes)
 
-AI-assisted draft. Not a security audit and not a production assurance. This file describes a
-local candidate; wording and scope are for the maintainer to confirm before any release.
+AI-assisted engineering notes. Not a security audit and not a production assurance. 0.2.0 is not yet
+released; this file describes the release candidate on `master`.
 
 ## What is new
 
@@ -74,7 +74,7 @@ call `verify_trusted`, which re-serialises the object and applies the same check
 3. Issuers: `regaudit-fhe keygen`, send the public key and its fingerprint to verifiers over a
    channel you trust; verifiers run `regaudit-fhe trust add --fingerprint ...`.
 
-## Known limits of this candidate
+## Known limits of 0.2.0
 
 * `report.v1` signatures do not cover `receipt` or `timestamp`; strict parsing pins their shape
   but not their values (the receipt is recomputed and checked; a timestamp is evidence verified
@@ -87,4 +87,9 @@ call `verify_trusted`, which re-serialises the object and applies the same check
 * Key custody: whoever can read the CLI private key file can sign as the issuer. Keep it mode 0600 (the CLI
   refuses a group- or other-readable file), off shared and synced folders, in an encrypted volume, and rotate by
   issuing a new key and enrolling it. For production use a KMS/HSM-backed signer through the library.
-* No change was made to resource limits, Docker, or any signed field.
+* `regaudit-fhe verify` prints the report's own identifiers (`issuer`, `key_id`, `primitive`, `issued_at`,
+  `regulations`, `parameter_set_hash`, `deployment_id`, `audit_run_id`) even for a refused report. They are not
+  key material, but the report's producer chooses them: treat them as untrusted text in logs and tooling, and as
+  possibly sensitive in some deployments. The free-form `result` is never printed.
+* No change was made to resource limits, Docker, or any signed field; the 0.1.1 protections still apply,
+  including on the signed CLI path.
