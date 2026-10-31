@@ -777,7 +777,7 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
 | pytest suite (800+ tests)               | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; currently about 89%.                          |
-| Type checking                           | `mypy` gates CI: zero errors across the 29 source files.                            |
+| Type checking                           | `mypy` gates CI: zero errors across the source tree.                                 |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
