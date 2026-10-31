@@ -26,6 +26,7 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -616,7 +617,7 @@ def _assert_plain_json(value: Any, depth: int = 0) -> None:
     if value is None or kind in (bool, str, int):
         return
     if kind is float:
-        if value != value or value in (float("inf"), float("-inf")):
+        if math.isnan(value) or math.isinf(value):
             raise EnvelopeFormatError("BAD_VALUE", "report contains a non-finite number")
         return
     if kind is list:

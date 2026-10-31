@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import regaudit_fhe as rf
-from regaudit_fhe import reports
+import regaudit_fhe.reports as reports
 
 
 @pytest.fixture(scope="module")

@@ -540,3 +540,28 @@ def test_rfc3339_hands_fromisoformat_only_six_digit_fractions(monkeypatch):
     monkeypatch.setattr(t, "datetime", Spy)
     t.parse_rfc3339("2026-01-01T00:00:00.5Z")
     assert seen == ["2026-01-01T00:00:00.500000+00:00"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_plain_json_check_refuses_every_non_finite_float(value):
+    from regaudit_fhe.report_v2 import _assert_plain_json
+
+    for wrapped in (value, [value], {"x": value}):
+        with pytest.raises(EnvelopeFormatError, match="non-finite"):
+            _assert_plain_json(wrapped)
+
+
+@pytest.mark.parametrize("value", [0.0, -0.0, 1.5, -2.5e300, 5e-324])
+def test_plain_json_check_accepts_finite_floats(value):
+    from regaudit_fhe.report_v2 import _assert_plain_json
+
+    _assert_plain_json({"x": [value]})
+
+
+def test_plain_json_check_still_refuses_non_float_numeric_types():
+    from regaudit_fhe.report_v2 import _assert_plain_json
+
+    np = pytest.importorskip("numpy")
+    for value in (np.float64(1.0), np.float32(1.0), np.float64("nan")):
+        with pytest.raises(EnvelopeFormatError, match="non-JSON value"):
+            _assert_plain_json(value)
