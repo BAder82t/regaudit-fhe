@@ -23,7 +23,8 @@ import os
 import stat
 import sys
 import tempfile
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,9 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
+from ._trust_lifecycle import LifecycleRefused, status_rows
+from ._trust_lifecycle import retire as retire_key
+from ._trust_lifecycle import revoke as revoke_key
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
 from .replay import ReplayStateError, SqliteReplayCache
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope_strict
@@ -464,6 +468,43 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lifecycle(action: Callable[[], dict[str, Any]]) -> int:
+    """Run one lifecycle action. Exit 0 done | 2 refused | 3 store unusable."""
+    try:
+        print(json.dumps(action(), indent=2))
+    except LifecycleRefused as exc:
+        sys.stderr.write(f"refused, nothing written: {exc}\n")
+        return 2
+    except TrustStoreError as exc:
+        sys.stderr.write(f"--store: {exc}\n")
+        return 3
+    except OSError as exc:
+        sys.stderr.write(f"cannot write the trust store: {exc}\n")
+        return 3
+    return 0
+
+
+def _cmd_trust_status(args: argparse.Namespace) -> int:
+    return _lifecycle(lambda: status_rows(args.store, args.key_id))
+
+
+def _cmd_trust_retire(args: argparse.Namespace) -> int:
+    return _lifecycle(
+        lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc))
+    )
+
+
+def _cmd_trust_revoke(args: argparse.Namespace) -> int:
+    return _lifecycle(
+        lambda: revoke_key(
+            args.store,
+            args.key_id,
+            compromised_from=args.compromised_from,
+            now=datetime.now(timezone.utc),
+        )
+    )
+
+
 def _cmd_schema(args: argparse.Namespace) -> int:
     if args.list:
         for name in list_schemas():
@@ -713,6 +754,32 @@ def build_parser() -> argparse.ArgumentParser:
     t_list = trust_sub.add_parser("list", help="List the enrolled keys and their fingerprints.")
     t_list.add_argument("--store", required=True)
     t_list.set_defaults(func=_cmd_trust_list)
+    t_status = trust_sub.add_parser(
+        "status",
+        help="Read-only lifecycle view of a local trust store (unauthenticated file).",
+    )
+    t_status.add_argument("--store", required=True)
+    t_status.add_argument("--key-id", help="Show only this key_id.")
+    t_status.set_defaults(func=_cmd_trust_status)
+    t_retire = trust_sub.add_parser(
+        "retire",
+        help="Mark an active key retired (planned rotation). One-way; edits the local file only.",
+    )
+    t_retire.add_argument("--store", required=True)
+    t_retire.add_argument("--key-id", required=True)
+    t_retire.add_argument(
+        "--at", help="RFC 3339 retirement time (default: now; not in the future)."
+    )
+    t_retire.set_defaults(func=_cmd_trust_retire)
+    t_revoke = trust_sub.add_parser(
+        "revoke",
+        help="Mark a key compromised. One-way; edits the local file only. Without "
+        "--compromised-from the boundary is unknown and everything the key signed is refused.",
+    )
+    t_revoke.add_argument("--store", required=True)
+    t_revoke.add_argument("--key-id", required=True)
+    t_revoke.add_argument("--compromised-from", help="RFC 3339 earliest possible exposure time.")
+    t_revoke.set_defaults(func=_cmd_trust_revoke)
 
     verify_p = sub.add_parser(
         "verify",
