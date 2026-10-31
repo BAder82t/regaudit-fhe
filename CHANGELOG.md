@@ -22,6 +22,12 @@ fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.*
   is a self-consistency check on signer-asserted values, a bug detector rather than an adversarial control (a
   `parameter_set` of another shape is only reported as unverifiable); it does not prove that an FHE computation ran.
 
+- Regression tests (`tests/test_cli_verify_output_no_secrets.py`) pin the fields `regaudit-fhe verify` prints and
+  check, with synthetic keys and sentinel strings, that no private key material reaches stdout or stderr on the
+  verdict, malformed-input and misuse paths (for example a private key file passed as the report). They back the
+  triage of a CodeQL clear-text-logging alert (a boolean named `issuer_trusted`); they are not proof that every
+  future logging path is safe.
+
 ### Compatibility changes
 
 - `regaudit-fhe verify` and `POST /v1/verify` parse strictly. A `report.v1` whose JSON is not exactly what the
@@ -35,6 +41,12 @@ fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.*
   once per process (in addition to the existing one-time `UserWarning`); `verify_envelope(...).valid` states that `True`
   includes self-signed reports (a setup that turns `DeprecationWarning` into an error will now raise on the first such call); `parse_envelope` and `verify_report` documents that they are not a strict acceptance path.
 
+### Fixed
+
+- `docs/DEPLOYMENT.md`: the environment-variable table listed stale defaults for `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS`
+  (`32768`), `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS` (`131072`) and `REGAUDIT_FHE_MAX_JSON_DEPTH` (`8`). The code has
+  always used `131072`, `524288` and `4`, as the "Resource bounds" section says. Documentation only.
+
 ### Known limitations
 
 - `trust add` enrols a key; it is not a key-lifecycle or revocation system. There is no retire or revoke command, no
@@ -45,7 +57,13 @@ fixtures). **Read "Compatibility changes" before upgrading a deployed verifier.*
   backed signer.
 - `backend` remains signer-asserted: a signer can sign a consistent claim of `tenseal-ckks` over a plaintext run, and a
   default library call signs `plaintext` even on the encrypted path.
-- The 0.1.1 residual-risk list (body-inactivity deadline, parse before authentication, body budget bounds bytes not
+- `regaudit-fhe verify` prints the report's own identifiers (`issuer`, `key_id`, `primitive`, `issued_at`,
+  `regulations`, `parameter_set_hash`, `deployment_id`, `audit_run_id`) in its JSON verdict, even when the verdict
+  is a refusal. They are never key material, but they are chosen by whoever produced the report, so treat them as
+  untrusted text in downstream logs and tooling, and as potentially sensitive in some deployments. The free-form
+  `result` is not printed.
+- The 0.1.1 resource protections (input limits, admission gate, body budget, `413 INPUT_LIMIT_EXCEEDED`,
+  `503 SERVER_BUSY`) are unchanged and also apply to the signed CLI path. The 0.1.1 residual-risk list (body-inactivity deadline, parse before authentication, body budget bounds bytes not
   memory, verify jobs continue after timeout, echoed 422 values, plain-text uvicorn 503) is unchanged.
 
 ## 0.1.1 — 2026-10-28

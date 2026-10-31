@@ -51,9 +51,9 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
 | `REGAUDIT_FHE_REPLAY_MODE`            | `off`         | `off`, `check` (look up only) or `record` (record at verification time). Required, with a persistent cache, outside development. |
 | `REGAUDIT_FHE_TRUSTED_PROXIES`        | (empty)       | IPs/CIDRs allowed to vouch for a forwarded client. Used only by the development self-signed exposure check. |
-| `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS`     | `32768`       | Longest JSON array (and member count of any object) `/v1/audit` accepts. Over it: 413 `INPUT_LIMIT_EXCEEDED`. |
-| `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS`     | `131072`      | Sum of all array lengths in one `/v1/audit` payload.                    |
-| `REGAUDIT_FHE_MAX_JSON_DEPTH`         | `8`           | Deepest JSON nesting `/v1/audit` accepts (the schemas need 4).          |
+| `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS`     | `131072`      | Longest JSON array (and member count of any object) `/v1/audit` accepts. Over it: 413 `INPUT_LIMIT_EXCEEDED`. |
+| `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS`     | `524288`      | Sum of all array lengths in one `/v1/audit` payload.                    |
+| `REGAUDIT_FHE_MAX_JSON_DEPTH`         | `4`           | Deepest JSON nesting `/v1/audit` accepts (the deepest valid input is depth 3; minimum setting 3). |
 | `REGAUDIT_FHE_MAX_CONCURRENT_AUDITS`  | `2`           | Audits computed at the same time (dedicated worker threads).            |
 | `REGAUDIT_FHE_MAX_QUEUED_AUDITS`      | `4`           | Audits allowed to wait for a free slot (also the verify queue). Beyond it: 503 at once. |
 | `REGAUDIT_FHE_QUEUE_WAIT_S`           | `5`           | Longest wait for a slot before a 503 `queue_wait_timeout`.              |

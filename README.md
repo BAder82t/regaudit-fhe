@@ -468,7 +468,9 @@ library. Whoever can read that file can sign as the issuer: keep it mode 0600 (t
 file), off shared or synced folders, and treat `trust add` as enrolment only; it is not a key-lifecycle or revocation system
 (no retire, revoke or rotation commands in 0.2.0). `regaudit-fhe verify` reads the report strictly: duplicate keys, `NaN`, unknown or
 missing members in a `report.v1`, and anything else that would let the JSON you hold differ
-from the bytes that were signed, are refused with exit 2. Useful `verify` options:
+from the bytes that were signed, are refused with exit 2. The JSON verdict echoes the report's own identifiers
+(`issuer`, `key_id`, `deployment_id`, ...), even for a refused report: they are never key material, but whoever produced the
+report chose them, so treat them as untrusted text in logs and as possibly sensitive. Useful `verify` options:
 
 | Option | Purpose |
 | --- | --- |
