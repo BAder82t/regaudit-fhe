@@ -800,7 +800,7 @@ exactly what is checked automatically, what is only partly done, and what is not
 | High-assurance historical verification  | Not implemented.                                                                    |
 | Evaluator / key-holder separation       | The encrypted path still encrypts, evaluates and decrypts in one process.           |
 | External security audit                 | Not performed. Reviews of the trust core were internal.                             |
-| `report.v2` from the CLI / HTTP audit   | Not yet: `regaudit-fhe audit` and `/v1/audit/*` emit `report.v1` (ephemeral key).  |
+| `report.v2` from the HTTP audit         | Not yet: `/v1/audit/*` emits `report.v1` (ephemeral key). The CLI emits `report.v2` with `audit --signing-key`. |
 | Post-quantum authentication             | Not provided (Ed25519).                                                             |
 
 `regaudit-fhe` is a dependency you can bring into a compliance
