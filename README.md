@@ -29,7 +29,7 @@ installed by that extra, not vendored in this repository.
 
 **Jump to:** [Install](#install) · [Quick start](#quick-start) ·
 [How a report becomes trusted](#how-a-report-becomes-trusted-in-plain-english) ·
-[Command line](#same-flow-command-line) · [What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated) ·
+[Command line](#same-flow-command-line) · [Step-by-step walkthrough](docs/WALKTHROUGH.md) · [What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated) ·
 [Trust specification](docs/TRUST_SPEC.md) · [Changelog](CHANGELOG.md)
 
 [![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
@@ -276,6 +276,21 @@ a report you received. Even `TRUSTED` says only "signed by a key in my trust sto
 its scope, with every policy rule met"; it does not say the audit is correct or that anything
 is compliant. [`examples/strict_verification_quickstart.py`](examples/strict_verification_quickstart.py)
 runs each of these cases.
+
+### Four different questions (and what answers each)
+
+A `TRUSTED` verdict answers the first two only.
+
+1. **Is the report intact? (cryptographic validity)** The Ed25519 signature and content hash match.
+2. **Is the signer someone I trust? (signer trust)** The key is enrolled in **your own** trust store. Trust stores are
+   local files: there is no authoritative revocation service.
+3. **Does the signed provenance agree with itself? (provenance consistency)** The signed `backend`,
+   `parameter_set` and `parameter_set_hash` do not contradict each other. This is a bug detector, not a defence
+   against an adversarial signer.
+4. **Did the computation really run under FHE?** **Not provided.** `backend` is what the signer asserted, and a
+   default library call signs `plaintext` even on the encrypted path.
+
+A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 ### Regulator side — verify a report (recommended)
 
