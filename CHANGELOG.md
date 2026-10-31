@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-10-31
 
 Trust and usability release. AI-assisted engineering work; not an audit and no production assurance. Signing
 formats, signed fields, canonicalisation, schemas and crypto backends are unchanged: reports signed by 0.1.0 and
