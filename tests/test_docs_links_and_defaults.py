@@ -16,7 +16,12 @@ FENCE = re.compile(r"^(```|~~~)")
 
 
 def _markdown_files() -> list[Path]:
-    files = [ROOT / "README.md", ROOT / "SECURITY.md", ROOT / "CHANGELOG.md", ROOT / "CONTRIBUTING.md"]
+    files = [
+        ROOT / "README.md",
+        ROOT / "SECURITY.md",
+        ROOT / "CHANGELOG.md",
+        ROOT / "CONTRIBUTING.md",
+    ]
     files += sorted((ROOT / "docs").rglob("*.md"))
     return [f for f in files if f.is_file()]
 

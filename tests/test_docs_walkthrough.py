@@ -26,7 +26,9 @@ def _blocks() -> list[tuple[str, str]]:
 
 def _runnable() -> str:
     # The install block needs the network; everything else is run.
-    return "\n".join(code for lang, code in _blocks() if lang == "bash" and "pip install" not in code)
+    return "\n".join(
+        code for lang, code in _blocks() if lang == "bash" and "pip install" not in code
+    )
 
 
 def _documented_exits() -> list[int]:
