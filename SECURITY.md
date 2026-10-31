@@ -2,8 +2,15 @@
 
 ## Supported versions
 
-`regaudit-fhe` is currently at `0.2.0`. Only the latest release receives
-security updates.
+| Version | Status |
+| --- | --- |
+| `0.2.0` (published 2026-10-31) | Latest release; receives security updates. |
+| `0.1.1`, `0.1.0` | Still on PyPI, not yanked; not supported. Upgrade to the latest release. |
+
+Only the latest release receives security updates. See `CHANGELOG.md` and
+`docs/releases/` for what each release contains and its known limitations. These
+are AI-assisted engineering releases: not externally audited, and human code review
+was waived by the owner.
 
 ## Reporting a vulnerability
 
