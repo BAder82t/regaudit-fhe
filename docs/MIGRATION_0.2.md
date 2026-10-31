@@ -1,7 +1,8 @@
 # Migrating to 0.2.0 (release notes)
 
-AI-assisted engineering notes. Not a security audit and not a production assurance. 0.2.0 is not yet
-released; this file describes the release candidate on `master`.
+AI-assisted engineering notes. Not a security audit and not a production assurance. 0.2.0 was published to
+PyPI on 2026-10-31 (`pip install "regaudit-fhe==0.2.0"`; record: `docs/releases/RELEASE_0.2.0_RECORD.md`). 0.1.1 and
+0.1.0 remain available on PyPI.
 
 ## What is new
 
