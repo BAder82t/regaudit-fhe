@@ -1,0 +1,385 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=2.4cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{cmap}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{url}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue!50!black,
+  pdftitle={regaudit-fhe: Depth-Tracked Regulatory Audit Primitives for Privacy-Preserving AI Audits},
+  pdfauthor={VaultBytes Innovations Ltd},
+  pdfsubject={Audit primitives, signed reports and verification in regaudit-fhe 0.2.1},
+  pdfkeywords={fully homomorphic encryption, CKKS, AI audit, signed reports, verification, fairness, drift, conformal, concordance, disagreement, provenance},
+}
+
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.2\baselineskip}{0.4\baselineskip}
+\titlespacing*{\subsection}{0pt}{0.8\baselineskip}{0.2\baselineskip}
+
+\setlength{\parskip}{0.4\baselineskip}
+\setlength{\parindent}{0pt}
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+\emergencystretch=3em
+\sloppy
+\raggedbottom
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  framesep=4pt,
+  rulecolor=\color{black!25},
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\begin{document}
+
+\thispagestyle{empty}
+\begin{center}
+  \includegraphics[height=2.0cm]{vaultbytes_logo.png}\\[0.8em]
+  {\Huge\bfseries regaudit-fhe}\\[0.4em]
+  {\large Depth-Tracked Regulatory Audit Primitives\\[0.1em]
+   for Privacy-Preserving AI Audits}\\[0.8em]
+  {\normalsize VaultBytes Innovations Ltd \\
+   \href{mailto:b@vaultbytes.com}{\texttt{b@vaultbytes.com}}\quad\textbar\quad
+   \href{https://vaultbytes.com}{\texttt{vaultbytes.com}}}\\[0.4em]
+  {\small 2026-11-01\quad\textbar\quad version 0.2.1\quad\textbar\quad AGPL-3.0-or-later}\\[0.2em]
+  {\small AI-assisted engineering work. Not an audit. No production assurance is claimed.}
+\end{center}
+\bigskip
+
+\begin{abstract}\noindent
+regaudit-fhe is an open-source Python library that has six audit primitives: fairness, drift, calibration, provenance, concordance, and cross-model disagreement. Each primitive has a plaintext version and a version written for the CKKS encryption scheme at a multiplicative depth of six with no use of bootstrapping. The output is wrapped in a signed report that can be verified using keys the verifier has enrolled itself. This paper describes version 0.2.1.
+
+The default execution path is plaintext. A signed report would show which key signed it and that it was not changed after. This would not prove that an encrypted computation was done. It would not say that the audit is correct or that anything is compliant. The encrypted path shipped today allows us to show that the encrypted circuits are the same as the plaintext ones by evaluating and decrypting in one process. This is not yet a deployment where the data holder and the evaluator are separate parties.
+\end{abstract}
+
+\section{Problem}
+
+Several laws and guidance documents request organizations for evidence about automated decision systems. Table 1 shows the ones this library was written with in mind taking into account the status of each on 2026-11-01. They do not all ask for the same thing. NYC Local Law 144 asks for an annual independent bias audit. The EU AI Act sets data governance and accuracy duties for high-risk systems. The model risk guidance for US banks is risk-based guidance and it is not a rule for audits at run time.
+
+\begin{table}[h]
+\small
+\caption{Instruments this library was written with in mind, status on 2026-11-01. A summary only, not legal advice.}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{4.2cm} Y}
+\toprule
+\textbf{Instrument} & \textbf{Status and what it asks for} \\
+\midrule
+NYC Local Law 144 of 2021 [9] & In force, enforced since 5 July 2023. An annual independent bias audit of automated employment decision tools. The rules use selection rates and impact ratios, and \texttt{audit\_fairness} reports differences, so its scalars do not replace that calculation. \\
+EU AI Act, Regulation (EU) 2024/1689 [10], amended by (EU) 2026/1744 [4] & High-risk duties now apply from 2 December 2027 (Annex III) and 2 August 2028 (Annex I). Art.\ 10 data governance, which was amended, Art.\ 15 accuracy, robustness and cybersecurity, Art.\ 72 post-market monitoring. \\
+Colorado SB26-189 [2] & Repealed and reenacted SB24-205, signed 14 May 2026. Automated decision-making technology, with requirements starting 1 January 2027. The legislative summary describes documentation, notices, records and consumer rights, and does not describe impact assessments or bias audits. \\
+ECOA and Regulation B & Adverse action duties stay in place. CFPB Circular 2022-03 was withdrawn on 12 May 2025 [3]. The primitives do not produce adverse action reasons. \\
+FDA guidance on predetermined change control plans [11] & Final guidance, December 2024. Marketing submission recommendations for AI-enabled device software. \\
+SR 26-2 and OCC Bulletin 2026-13 [1] & Revised model risk guidance, 17 April 2026, superseding SR 11-7 and OCC Bulletin 2011-12. Generative and agentic AI are outside its scope. \\
+EMA reflection paper [12] & Reflection paper on AI in the medicinal product lifecycle, 2024. \\
+ISO/IEC 23053:2022 [13] & A framework standard, not a regulation. \\
+BCBS 239 [14] and BCBS d515 [15] & Risk data aggregation (2013) and sound management of operational risk (revised 2021). General banking principles, not specific to AI. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four entries in Table 1 have changed since the previous version of this paper. SR 11-7 was superseded in April 2026 [1]. The Colorado AI Act was repealed and reenacted in May 2026 as a law about automated decision-making technology [2]. CFPB Circular 2022-03 was withdrawn in May 2025 [3] but the adverse action duties in ECOA and Regulation B are still in place. The dates of the EU AI Act for high-risk systems changed in July 2026 [4].
+
+Table 1 is a summary and it is not meant to be legal advice. Anyone relying on these instruments would need to check the primary text.
+
+The data these instruments are used on is sensitive. This can include protected attributes and per-row labels and predictions. This can also include health data and training-row identifiers. Sending this data to a third-party auditor can be conflicting with privacy law and internal policy. Keeping this data in-house would make it difficult for independent checking. regaudit-fhe is made to fill this gap between these two positions. This allows us to calculate the scalars an auditor would want and sign the result in a way that allows a third party to check.
+
+The library does not discharge any obligations through any of these instruments. A compliance professional would use its output as one input for this decision.
+
+\section{What a Report Does and Does Not Show}
+
+Four questions need to be separated before looking at the design. A verdict from the library would only solve the first two questions. The first question would be if the report is intact. The Ed25519 signature and the content hash would help us know this. The second question would be if the signer is someone that the verifier trusts. A key that the verifier enrolled in its own trust store would be needed for this. A report would have the public key that would check its signature. Any person can create a key and sign a report and add the key. This report would be internally consistent and would not prove anything about who has signed it.
+
+The third question is if the signed provenance agrees with itself meaning that the signed backend, \texttt{parameter\_set} and \texttt{parameter\_set\_hash} are not contradictory. This is a bug detector and not a defence for a dishonest signer. The fourth question is if the computation really ran under FHE. The library will not give us this. The backend field is what the signer claimed and a default call to the library would sign plaintext even on the encrypted path.
+
+A \texttt{TRUSTED} verdict would mean that the report was signed with a key in the verifier's own trust store and is within the scope of that key. All the policy rules were met. This would not mean that the audit is correct and it would not mean that anything is compliant.
+
+\section{Architecture}
+
+\begin{enumerate}[leftmargin=*]
+  \item The plaintext model in \texttt{regaudit\_fhe.\_slot} is a numpy slot vector with a depth tracker. It raises \texttt{DepthBudgetExceeded} when a circuit goes beyond its budget.
+  \item The six audit primitives are \texttt{audit\_fairness}, \texttt{audit\_provenance}, \texttt{audit\_concordance}, \texttt{audit\_calibration}, \texttt{audit\_drift}, and \texttt{audit\_disagreement}. Each has a plaintext oracle and a depth-budgeted circuit with the same semantics.
+  \item The encrypted backends are optional. The \texttt{[fhe]} extra adds TenSEAL. The \texttt{regaudit\_fhe.fhe} module has an encrypted function for each primitive. The \texttt{[openfhe]} extra adds an experimental OpenFHE adapter that runs five of the six primitives. Encrypted concordance is pending on OpenFHE due to the need for rectangular matrix products.
+  \item There are two formats for signed reports: \texttt{report.v1} and \texttt{report.v2}. Each has canonical JSON, SHA-256 digest, an Ed25519 signature, a \texttt{parameter\_set\_hash} and optional \texttt{input\_commitments}. An optional block can be added to show differential-privacy noise in a result.
+  \item The trust and verification layer contains the trust store, key status, \texttt{verify\_trusted}, the verification profiles and the replay cache.
+  \item The surfaces are 14 JSON Schemas, a CLI that has the commands audit, keygen, trust, verify, serve, and schema, and a reference FastAPI server.
+\end{enumerate}
+
+\subsection{How the encrypted path runs today}
+
+\begin{figure}[h]
+\begin{lstlisting}
+Subject  --[CKKS public key]--> Subject encrypts inputs locally
+                                          v
+                              Operator runs the encrypted circuit
+                                          v   (depth <= 6, no bootstrap)
+                                Encrypted result + signed report
+                                          v
+                              Auditor decrypts the result
+                                          v
+                              Plaintext-side threshold compare
+                              + report verification
+\end{lstlisting}
+\caption{The intended deployment. The library does not implement this separation today.}
+\end{figure}
+
+The intended deployment will have a Subject that has the data and encrypts it. It will also have an Operator that will evaluate the circuit and an Auditor that will decrypt the result. The library does not implement this separation today. In the functions shipped such as \texttt{fairness\_encrypted}, the context will have the secret key. A call will encrypt the inputs, evaluate the circuit and decrypt the aggregate scalars. This means that the same process will see both the inputs and the result.
+
+A deployment that wants the separation would need to build it. The evidence for it would not come from this library.
+
+The CLI and the HTTP server have no encrypted path. They run the plaintext primitives on the JSON received and sign plaintext as the backend. The server is therefore not a privacy boundary. Encrypted execution is only available through the Python API with the \texttt{[fhe]} extra.
+
+\section{Threat Model}
+
+The threat model has four roles. These roles can be one legal entity but would be treated separately. The Subject is the owner of the plaintext per-row data. The Auditee has the model that is being audited. The Operator runs the circuit. The Auditor has the verifying keys and the CKKS secret key for decrypting. As described in the section above the shipped encrypted functions have the Operator and the Auditor in the same process.
+
+\subsection{Security of the encryption}
+
+The parameter sets are sized for 128-bit IND-CPA security under Ring-LWE. \texttt{CKKSParams} enforces the bounds from the HomomorphicEncryption.org standard [5]. The bounds are 438 bits for $N=2^{14}$ and 881 bits for $N=2^{15}$. This is a parameter-level claim. An adopter would need to check this with a lattice estimator [6] for their own library versions and deployment. They would need to make sure that this is trustworthy before relying on it.
+
+IND-CPA does not cover how this library uses CKKS. Li and Micciancio showed how a passive attacker can get the CKKS secret key from seeing decryption outputs [7]. Later, Guo et al. were able to get a key from one shared decryption output in OpenFHE when the noise flooding used average-case noise estimates [8]. regaudit-fhe decrypts aggregate scalars and places them in the signed result with no rounding and no noise flooding.
+
+If a party has the ciphertexts from an evaluation and can see the result of it then this attack setting would apply. The Operator would be this party in the intended deployment. IND-CPA-D is a property of a scheme under a defined decryption oracle. The claims for a deployed system would depend on who can see which ciphertexts and what outputs. The library makes no claim for IND-CPA-D and its parameter sets have not been analyzed for it.
+
+A deployment that separates the roles would need to treat this as an open problem. It should not show decrypted values to the Operator.
+
+The current threat model document states that collusion between Operator and Auditor would add no new leakage. This does not take into account key recovery.
+
+\subsection{Depth and report integrity}
+
+Depth is restricted in two places. \texttt{CKKSParams} would not allow a depth outside 1 to 6 or a modulus chain that is too short for the declared depth. The depth tracker would raise an error if a circuit goes over its budget. No primitive uses bootstrapping.
+
+The SHA-256 digest and the Ed25519 signature cover the canonical form of the signed body. Any change in a signed value would change the digest. Changes in whitespace, key order, and string escapes would not change the digest. These values are not part of the canonical form. The \texttt{input\_commitments} field would hold SHA-256 digests of the inputs when the caller provides them. A verifier that has the inputs can check them. The commitments would not show that these inputs went through an encrypted circuit.
+
+\subsection{Out of scope}
+
+Side channels in the host, Subjects that would create inputs to get a wrong decision, Auditors that might leak decrypted values, long-term cryptanalytic advances and SHA-256 collisions are out of scope. An Operator that has control over the signing key is also out of scope, since a signature will only show that the key was used. These would be part of the deployment layer.
+
+\section{Six Primitives}
+
+Each primitive has a plaintext oracle, a depth-budgeted circuit, an encrypted TenSEAL function and input and output JSON Schemas. Table 2 shows the depth each one declares. The module names are internal and the public API uses descriptive names. The notes below explain what each encrypted function encrypts and decrypts, as read from the code for this release.
+
+\begin{table}[h]
+\small
+\caption{Primitives and declared depth on the TenSEAL backend. Declared depth is the budget each function asserts.}
+\begin{tabularx}{\textwidth}{l l l Y}
+\toprule
+\textbf{Module} & \textbf{API} & \textbf{Depth} & \textbf{Use} \\
+\midrule
+\texttt{egf\_imss}    & \texttt{audit\_fairness}     & 4 & Demographic parity, equal opportunity and predictive parity differences between two groups. \\
+\texttt{etk\_fpa\_hbc}& \texttt{audit\_provenance}   & 3 & Top-K training-data provenance histogram through hashed buckets. \\
+\texttt{esc\_cia}     & \texttt{audit\_concordance}  & 5 & Harrell C-index. The plaintext model has depth 4. \\
+\texttt{ecp\_qssp}    & \texttt{audit\_calibration}  & 4 & Conformal prediction-set bitmask from public quantile thresholds. \\
+\texttt{ew1\_cdsf}    & \texttt{audit\_drift}        & 2 & Squared L2 distance between two CDFs. The plaintext model has depth 1. \\
+\texttt{ecmd\_jps}    & \texttt{audit\_disagreement} & 5 & Pairwise variance across $M \geq 3$ degree-3 polynomial surrogates. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Only \texttt{y\_pred} is encrypted for the function \texttt{fairness\_encrypted}. \texttt{y\_true} and the two group masks are plaintext in the same call. The threat model document shows all of them as encrypted. This however does not match the function. The group sizes and label-positive counts are public to the Auditor. Therefore, we can make the reciprocals plaintext scalars. No encrypted division is needed. The disparity scalars will be decrypted and the decision on the breach will be made in the plaintext side.
+
+For \texttt{audit\_provenance} the attribution values are encrypted. The row identifiers are plaintext and the hash function and seed are public. A verifier would be able to reproduce the bucket assignments. The bucket aggregates would be decrypted.
+
+For \texttt{audit\_concordance} the risk, time and event vectors are encrypted. Three aggregates are decrypted and the C-index is computed from them on the plaintext side. The previous version of this paper said two.
+
+For \texttt{audit\_calibration} the scores are encrypted and the per-class quantile thresholds are public to the Auditor. The function decrypts a membership signal for each class and turns it into a bitmask on the plaintext side. Therefore, the decrypted values would be the polynomial outputs and not just the final bits.
+
+For \texttt{audit\_drift} the circuit would calculate the squared L2 distance between two CDFs. This would be a Cramer-von-Mises style statistic. This was chosen over the strict use of the W1 distance to avoid the use of an encrypted absolute value. This would be zero only if the two distributions are equal. There would also be a \texttt{w1\_distance} field. This will be computed in the plaintext for reference only. The depth of the plaintext model would be 1 but for use with TenSEAL we would need depth of 2. This is due to the lack of a public rotation for the \texttt{CKKSVector} and the use of a plaintext matrix product for the prefix sum.
+
+For \texttt{audit\_disagreement} the input vector will be encrypted. Each of the $M \geq 3$ model versions will be a public degree-3 polynomial surrogate. The average variance will be decrypted as well as one summary mean for each model.
+
+The approximation polynomials have low degrees but have a large error near the decision boundary. The sign polynomial is $p(x) = 1.5x - 0.5x^3$. Its error is 31.25\% when $|x| = 0.5$ and it gets worse when closer to zero. It is not a minimax fit, which the previous version of this paper said it was. The reciprocal polynomial is a Taylor expansion of $1/x$ at $x = 1$. It has a worst-case relative error of 6.25\% when $0.5 < x < 1.5$. A result close to a threshold would need more care than what Table 4 suggests.
+
+\section{CKKS Parameters and Measurements}
+
+\texttt{CKKSParams} is the validated parameter set. Table 3 shows the defaults. The chain has 8 primes and has a total of 360 bits. The previous version of this paper gave $\log Q$ as about 240. This was incorrect. The \texttt{build\_d6\_context} function has its own defaults where $N=2^{14}$ and the chain is of 9 primes totaling 400 bits. A caller that does not pass parameters will get a different set than Table 3. The benchmark passes the 360-bit chain in both ring sizes.
+
+\begin{table}[h]
+\small
+\caption{\texttt{CKKSParams} defaults.}
+\begin{tabularx}{\textwidth}{l l Y}
+\toprule
+\textbf{Field} & \textbf{Default} & \textbf{Meaning} \\
+\midrule
+\texttt{ring\_dim}              & $2^{15}$         & Power of two. At least $2^{14}$ is required for this depth. \\
+\texttt{multiplicative\_depth}  & $6$              & Must lie in $[1,6]$. \\
+\texttt{scaling\_mod\_size}     & $40$             & Bit size of each interior prime. \\
+\texttt{first\_mod\_size}       & $60$             & Bit size of the first and last primes. \\
+\texttt{security\_level}        & \texttt{HEStd\_128\_classic} & At least 128-bit IND-CPA. \\
+\texttt{coeff\_mod\_bit\_sizes} & $\langle 60, 40, 40, 40, 40, 40, 40, 60\rangle$ & 8 primes, 360 bits in total. The bound is 881 bits at $2^{15}$. \\
+\texttt{rotation\_steps}        & $\pm 2^k$        & Powers of two up to the slot count. \\
+\texttt{precision\_loss\_bound} & $10^{-2}$        & Worst-case rescale loss bound. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The library declares that TenSEAL is the reference backend and needs version 0.3.16 or later. It does not configure the key-switching decomposition and therefore the previous statement that \texttt{dnum = 3} is removed. The use of the OpenFHE adapter is experimental and was not part of these measurements.
+
+The benchmark in \path{benchmarks/bench_fhe.py} was run again on the 0.2.1 wheel from PyPI with TenSEAL 0.3.18. Table 4 shows the median runtime of 3 repetitions and the largest absolute error compared to the plaintext oracle. These numbers come from one run where a laptop was also running other work. The inputs are small with batches of 64 for fairness and provenance and 16 for the others. So they only show the order of size. The process memory was about 3.7 GB when $N=2^{15}$. This script reads memory for the entire process. We cannot get a figure for each primitive.
+
+\begin{table}[h]
+\small
+\caption{Measured on the 0.2.1 wheel. Apple M3 Max, 36 GB, macOS 26.6.2, Python 3.12.11, NumPy 2.5.4, TenSEAL 0.3.18. Median of 3 repetitions. The error is the largest absolute difference from the plaintext oracle at $N=2^{15}$. Calibration compares the final bitmask, so its error is not an error on the polynomial output.}
+\begin{tabularx}{\textwidth}{l r r r r r Y}
+\toprule
+\textbf{Primitive} & \textbf{Batch} & \textbf{Depth} & \textbf{$2^{14}$ (s)} & \textbf{$2^{15}$ (s)} & \textbf{Max error} & \textbf{Flip rate} \\
+\midrule
+fairness     & 64 & 1 / 4 & 0.76  & 1.31  & $7.0 \times 10^{-7}$ & 0 of 10 \\
+provenance   & 64 & 1 / 3 & 1.94  & 3.41  & $1.6 \times 10^{-5}$ & not measured \\
+concordance  & 16 & 5 / 5 & 10.83 & 15.27 & $1.4 \times 10^{-6}$ & not measured \\
+calibration  & 16 & 3 / 4 & 0.06  & 0.08  & $0$                  & not measured \\
+drift        & 16 & 2 / 2 & 0.48  & 0.82  & $3.6 \times 10^{-6}$ & 0 of 10 \\
+disagreement & 16 & 3 / 5 & 0.39  & 0.66  & $1.5 \times 10^{-8}$ & 0 of 10 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{lstlisting}
+python benchmarks/bench_fhe.py --rings 14 15 --reps 3 --flip-trials 10
+\end{lstlisting}
+
+The threshold flip rate is the fraction of trials where CKKS noise changes a breach decision relative to the plaintext oracle. This was 0 out of 10 trials for fairness, drift, and disagreement in both ring sizes. This is weak evidence and would be consistent with a true rate of up to about 26\% at 95\% confidence. The script does not measure the rate for provenance, concordance, and calibration and it writes 0 for them. So the 0.00\% across all primitives in the previous version of this paper said more than was measured.
+
+\section{Reports and Verification}
+
+\texttt{report.v1} is the original format and \texttt{report.v2} was added for strict verification. \texttt{report.v2} adds signed \texttt{audit\_run\_id}, \texttt{deployment\_id}, \texttt{key\_id}, \texttt{public\_key\_fingerprint} and \texttt{trust\_policy\_version} fields. It also allows for an optional audience. Figure 2 shows a \texttt{report.v2}. The CLI will write a \texttt{report.v2} if given a long-lived key with \texttt{audit -{}-signing-key}. The HTTP endpoints will continue to write \texttt{report.v1} using an ephemeral key. This report will never be more than \texttt{SELF\_SIGNED\_ONLY}.
+
+\begin{figure}[h]
+\begin{lstlisting}
+{
+  "schema":                 "regaudit-fhe.report.v2",
+  "schema_version":         "regaudit-fhe.report.v2",
+  "trust_policy_version":   1,
+  "algorithm_version":      "0.2.1",
+  "primitive":              "fairness",
+  "backend":                "plaintext",
+  "parameter_set":          { "backend": "plaintext", "library_version": "0.2.1", ... },
+  "parameter_set_hash":     "9f6e012d6c51ca88...",
+  "regulations":            ["NYC_LL144", "EU_AI_ACT_ART10", ...],
+  "result":                 { "demographic_parity_diff": 0.5, ... },
+  "input_commitments":      [{ "name": "group_a", "sha256": "9438b00c..." }, ...],
+  "depth_budget":           { "declared": 6, "consumed": 6 },
+  "audit_run_id":           "c0ad3a73-f267-4acf-8381-7361ef78329b",
+  "deployment_id":          "d1",
+  "audience":               ["v1"],
+  "issued_at":              "2026-11-01T20:07:47.057506+00:00",
+  "issuer":                 "acme",
+  "key_id":                 "k1",
+  "public_key_fingerprint": "84cc09f8d95b60b7...",
+  "receipt":                { "sha256": "...", "signature_alg": "Ed25519", ... }
+}
+\end{lstlisting}
+\caption{An abridged \texttt{report.v2} written by \texttt{regaudit-fhe audit -{}-signing-key} in version 0.2.1.}
+\end{figure}
+
+\texttt{verify\_trusted} is the main entry point. It would parse the report strictly and would need the trust store. It would return \texttt{TRUSTED}, \texttt{SELF\_SIGNED\_ONLY} or \texttt{INVALID}. Only the \texttt{TRUSTED} would be an acceptance. The result would refuse any truth value. This would make sure that a caller cannot accidentally consider any verdict true. The \texttt{verify\_receipt} and \texttt{verify\_envelope} functions remain for compatibility but can return true for any intact report signed by any person. The previous version of this paper pointed to \texttt{verify\_envelope} but that should not be followed.
+
+Strict parsing would not allow for duplicate keys in JSON, non-finite numbers, unknown or missing members in a \texttt{report.v1} or contradictory provenance. \texttt{report.v2} has a separate strict canonical form. The verifier would use its key from its trust store and not the one in the report. A trust store entry would link a \texttt{key\_id} and public key to an issuer name. It would also have a status and validity dates. A parameter-set pin can be added.
+
+Trust stores are local files. There is no authoritative revocation service. The CLI has no retire, revoke or rotation commands in this release. A trust store in the older \texttt{key\_id} to PEM form has no issuer binding. A registered key can sign as any issuer and it would still report \texttt{trusted\_issuer} as true. Thus, the entries form should be used.
+
+Table 5 shows the verification profiles. The high-assurance profile requires a trust store and a maximum age. It also does replay checking. It would refuse a report without an audience naming the verifier. It would accept a local unauthenticated trust store and a local replay file. This means that the name would represent stricter settings. It would not yet mean the authenticated and fresh store needed for this profile as described in the trust specification.
+
+\begin{table}[h]
+\small
+\caption{Verification profiles as implemented in 0.2.1.}
+\begin{tabularx}{\textwidth}{l Y Y l}
+\toprule
+\textbf{Profile} & \textbf{Trust store} & \textbf{Replay} & \textbf{report.v1} \\
+\midrule
+\texttt{development}    & Optional. Self-signed checking allowed on loopback. & Off by default. & Allowed \\
+\texttt{confidential}   & Required. & Required, persistent. & Refused \\
+\texttt{high-assurance} & Required. A local file is accepted today. & Required, persistent. A local file is accepted today. & Refused \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Replay detection is local to the replay store a verifier is configured with. The cache will remember the \texttt{key\_id} and \texttt{audit\_run\_id} pair at verification time and refuse it if it still has it. This is not a global replay guarantee. Verifiers or server instances that do not share a store can each accept the same report once. A report that is forgotten if the store is deleted, reset, rolled back, or restored from a backup can be accepted again. The library would not detect this.
+
+An in-memory cache will be lost if the system is restarted.
+
+Retention is fixed by the policy in force when the id was recorded. A way to allow a report to be accepted a second time would be by increasing the \texttt{max\_age} for a store in use. An operator should not raise \texttt{max\_age} on a store in use. Starting a new replay file would not help since it would remember nothing.
+
+The \texttt{issued\_at} field is a claim written by the signer. A timestamp member on a \texttt{report.v1} covers the body and not the signature. Therefore, it cannot be used as evidence of when the report was signed. A timestamp on a \texttt{report.v2} would count as evidence if the caller's pinned verifier checks it. The library does not bundle a timestamp authority.
+
+Three signed fields need care. The \texttt{depth\_budget} consumed value will default to 6 unless passed a measured value. So a default report would not show what the depth used is. The \texttt{parameter\_set\_hash} would include the version of the library as well as the CKKS parameters. Therefore, a parameter-set pin would allow reports from one library version only. The regulations field would default to a list of labels for each primitive. Some labels would refer to instruments in Table 1 that have since changed. These labels are not a claim of compliance.
+
+\section{Server and Release Pipeline}
+
+The HTTP server is a reference deployment. It has limits on the size of the body, in-flight body bytes, concurrency and request time. A body that stalls for 10 seconds will get a 408 response. \path{/v1/verify} will refuse bodies deeper than 16 or wider than 65,536 elements before parsing. These are availability controls. A reverse proxy to limit body size, connections, timeouts, and rates would be needed. TLS needs to end at this layer.
+
+Releases are built through a workflow that only runs on a version tag. It builds the wheel and sdist. It runs tests on the wheel installed in Python 3.10 to 3.13 with tests from the sdist. It runs pip-audit and generates an SBOM. It signs the files with Sigstore. The upload is held for approval in a protected environment. PyPI attestations are created during the upload. With one maintainer, the approval would be a second click from the same person and not a separation of duties. The evidence for this release is in \path{docs/releases/RELEASE_0.2.1_RECORD.md}.
+
+\section{Limitations and Status}
+
+This release relies on AI-assisted testing and review. It has had no independent external security audit and no claim is made for production assurance. No regulator has endorsed the report format. This package is pre-alpha and public APIs may change in minor versions.
+
+Signed revocation data, key rotation, and rollback protection are not implemented in this release. The design and test work on these features are ongoing and have no committed release date. A verifier can only know that a key is revoked through the use of its local trust store. Python 3.15, native Windows, the \texttt{[fhe]} Docker image, and the OpenFHE backend are not qualified. Post-quantum assurance is not claimed beyond the standard Ring-LWE assumptions. $N=2^{16}$ is not in the published measurements.
+
+\section*{Companion documents}
+
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+  \item Trust and verification specification: \path{docs/TRUST_SPEC.md}
+  \item Threat and leakage model: \path{docs/THREAT_MODEL.md}
+  \item Scope statement: \path{COMPLIANCE.md}
+  \item Deployment guide: \path{docs/DEPLOYMENT.md}
+  \item End-to-end walkthrough: \path{docs/WALKTHROUGH.md}
+  \item Supply-chain controls: \path{docs/SUPPLY_CHAIN.md}
+  \item Release record: \path{docs/releases/RELEASE_0.2.1_RECORD.md}
+  \item Per-primitive specifications: \path{docs/specs/}
+  \item OpenFHE design note: \path{docs/roadmap/openfhe_backend.md}
+\end{itemize}
+
+\section*{References}
+\small
+\begin{enumerate}[label={[\arabic*]},leftmargin=*,itemsep=1pt]
+  \item Board of Governors of the Federal Reserve System, SR 26-2, \textit{Revised Guidance on Model Risk Management}, 17 April 2026; OCC Bulletin 2026-13, \textit{Model Risk Management: Revised Guidance}, 17 April 2026.
+  \item Colorado General Assembly, SB26-189, \textit{Automated Decision-Making Technology}, signed 14 May 2026.
+  \item Consumer Financial Protection Bureau, \textit{Interpretive Rules, Policy Statements, and Advisory Opinions; Withdrawal}, 90 FR 20084, 12 May 2025.
+  \item Regulation (EU) 2026/1744 (Digital Omnibus on AI), in force 27 July 2026.
+  \item M.~Albrecht et al., \textit{Homomorphic Encryption Standard}, HomomorphicEncryption.org, version 1.1, 2018. See also J.-P.~Bossuat et al., \textit{Security Guidelines for Implementing Homomorphic Encryption}, IACR ePrint 2024/463.
+  \item M.~Albrecht, R.~Player and S.~Scott, \textit{On the concrete hardness of Learning with Errors}, Journal of Mathematical Cryptology, 2015, and the Lattice Estimator.
+  \item B.~Li and D.~Micciancio, \textit{On the Security of Homomorphic Encryption on Approximate Numbers}, EUROCRYPT 2021, IACR ePrint 2020/1533.
+  \item Q.~Guo, D.~Nabokov, E.~Suvanto and T.~Johansson, \textit{Key Recovery Attacks on Approximate Homomorphic Encryption with Non-Worst-Case Noise Flooding Countermeasures}, USENIX Security 2024.
+  \item New York City Department of Consumer and Worker Protection, Local Law 144 of 2021, \textit{Automated employment decision tools}.
+  \item Regulation (EU) 2024/1689 of the European Parliament and of the Council (Artificial Intelligence Act).
+  \item U.S.\ FDA, \textit{Marketing Submission Recommendations for a Predetermined Change Control Plan for Artificial Intelligence-Enabled Device Software Functions}, final guidance, December 2024.
+  \item European Medicines Agency, \textit{Reflection paper on the use of artificial intelligence in the medicinal product lifecycle}, 2024.
+  \item ISO/IEC 23053:2022, \textit{Framework for AI systems using machine learning}.
+  \item Basel Committee on Banking Supervision, \textit{Principles for effective risk data aggregation and risk reporting}, BCBS 239, 2013.
+  \item Basel Committee on Banking Supervision, \textit{Revisions to the principles for the sound management of operational risk}, BCBS d515, March 2021.
+\end{enumerate}
+\normalsize
+
+\medskip
+\noindent\rule{\linewidth}{0.4pt}\smallskip
+
+\noindent\textit{regaudit-fhe is licensed under AGPL-3.0-or-later.}\\
+\textit{Source:}~\href{https://github.com/BAder82t/regaudit-fhe}{\nolinkurl{github.com/BAder82t/regaudit-fhe}}.\\
+\textit{PyPI:}~\href{https://pypi.org/project/regaudit-fhe/}{\nolinkurl{pypi.org/project/regaudit-fhe}}.\\
+\textit{Maintained by VaultBytes Innovations Ltd; contact}~\href{mailto:b@vaultbytes.com}{\nolinkurl{b@vaultbytes.com}}.
+
+\end{document}
