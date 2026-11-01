@@ -556,7 +556,7 @@ An audit result is wrapped into a regulator-facing, signed JSON envelope.
 {
   "schema": "regaudit-fhe.report.v2",
   "schema_version": "regaudit-fhe.report.v2",
-  "algorithm_version": "0.2.0",
+  "algorithm_version": "0.2.1",
   "primitive": "fairness",
   "backend": "plaintext",
   "parameter_set": { "...": "..." },

@@ -245,6 +245,10 @@ tune them for your deployment.
    every 9 s, stays connected until the request timeout and holds its share of the body budget for that long. A
    reverse proxy in front of the server still has to enforce a minimum upload rate and its own body limits.
 
+   **The idle timeout measures wall-clock time on the event loop.** If the event loop is blocked for about as long as
+   the timeout, a client that was still sending can get `408`. At the 10 s default that takes a stall of about 10 s;
+   a much lower setting makes it more likely.
+
    **Authentication order (`REGAUDIT_FHE_AUTH_BEFORE_BODY`).** By default `/v1/audit` still reads and strictly
    parses the body *before* it checks the bearer token, so an unauthenticated 1 MiB body costs the event loop its
    full parse time (measured on an Apple-silicon laptop, Python 3.13: about 25 ms for 1 MiB of floats, 65 ms of
