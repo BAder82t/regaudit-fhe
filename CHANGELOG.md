@@ -56,7 +56,7 @@ resource, concurrency and memory limit are unchanged.
   private key is an unencrypted PEM (mode 0600), `backend` is signer-asserted, and nothing here proves that an FHE
   computation ran.
 - Not qualified: Python 3.15, native Windows, the `[fhe]` Docker image and the OpenFHE backend.
-- No external security audit and no regulator approval. Human code review was waived by the owner.
+- No external security audit and no regulator approval.
 
 ## 0.2.0 — 2026-10-31
 
