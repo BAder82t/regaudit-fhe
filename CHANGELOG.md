@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 — unreleased
+## [0.2.1] - 2026-11-01
 
 Availability hardening of the HTTP server (`regaudit-fhe[server]`). AI-assisted engineering work; not an audit and
 no production assurance. Library, CLI, schemas, signing formats, canonicalisation, trust decisions and replay
