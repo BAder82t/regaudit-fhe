@@ -40,7 +40,7 @@ GOOD = {
 }
 PATH = "/v1/audit/fairness"
 MAX_BODY = 1 << 20
-IDLE_S = 1.0
+IDLE_S = 3.0  # also the window in which a probe must see the held budget: wide enough for a loaded runner
 REQUEST_TIMEOUT_S = 6.0
 STALL_BYTES = 900_000  # leaves ~148 KiB of the 1 MiB in-flight budget for everybody else
 LEGAL_BYTES = 300_000
@@ -635,7 +635,9 @@ def test_chunked_upload_works_and_a_stalled_one_is_cut_off_and_recovers(make_ser
         assert recovered is not None and recovered < 1.0
     finally:
         stalled.close()
-    # a chunked upload that disconnects: budget freed, no traceback
+    # a chunked upload that disconnects: budget freed, no traceback. The idle deadline is off here so
+    # that only the disconnect can free the budget (and the held-budget probe has no time window).
+    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="0")
     s = socket.create_connection(("127.0.0.1", srv.port), timeout=10)
     s.sendall(_chunked_head() + _chunk(_padded(STALL_BYTES)))
     _wait_until_budget_is_held(srv.port)
