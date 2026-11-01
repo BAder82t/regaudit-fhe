@@ -29,7 +29,7 @@ installed by that extra, not vendored in this repository.
 
 **Jump to:** [Install](#install) · [Quick start](#quick-start) ·
 [How a report becomes trusted](#how-a-report-becomes-trusted-in-plain-english) ·
-[Command line](#same-flow-command-line) · [What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated) ·
+[Command line](#same-flow-command-line) · [Step-by-step walkthrough](docs/WALKTHROUGH.md) · [What is and isn't validated](#production--regulator-readiness--what-is-and-isnt-validated) ·
 [Trust specification](docs/TRUST_SPEC.md) · [Changelog](CHANGELOG.md)
 
 [![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
@@ -276,6 +276,21 @@ a report you received. Even `TRUSTED` says only "signed by a key in my trust sto
 its scope, with every policy rule met"; it does not say the audit is correct or that anything
 is compliant. [`examples/strict_verification_quickstart.py`](examples/strict_verification_quickstart.py)
 runs each of these cases.
+
+### Four different questions (and what answers each)
+
+A `TRUSTED` verdict answers the first two only.
+
+1. **Is the report intact? (cryptographic validity)** The Ed25519 signature and content hash match.
+2. **Is the signer someone I trust? (signer trust)** The key is enrolled in **your own** trust store. Trust stores are
+   local files: there is no authoritative revocation service.
+3. **Does the signed provenance agree with itself? (provenance consistency)** The signed `backend`,
+   `parameter_set` and `parameter_set_hash` do not contradict each other. This is a bug detector, not a defence
+   against an adversarial signer.
+4. **Did the computation really run under FHE?** **Not provided.** `backend` is what the signer asserted, and a
+   default library call signs `plaintext` even on the encrypted path.
+
+A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 ### Regulator side — verify a report (recommended)
 
@@ -762,7 +777,7 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
 | pytest suite (800+ tests)               | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; currently about 89%.                          |
-| Type checking                           | `mypy` gates CI: zero errors across the 29 source files.                            |
+| Type checking                           | `mypy` gates CI: zero errors across the source tree.                                 |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
@@ -800,7 +815,7 @@ exactly what is checked automatically, what is only partly done, and what is not
 | High-assurance historical verification  | Not implemented.                                                                    |
 | Evaluator / key-holder separation       | The encrypted path still encrypts, evaluates and decrypts in one process.           |
 | External security audit                 | Not performed. Reviews of the trust core were internal.                             |
-| `report.v2` from the CLI / HTTP audit   | Not yet: `regaudit-fhe audit` and `/v1/audit/*` emit `report.v1` (ephemeral key).  |
+| `report.v2` from the HTTP audit         | Not yet: `/v1/audit/*` emits `report.v1` (ephemeral key). The CLI emits `report.v2` with `audit --signing-key`. |
 | Post-quantum authentication             | Not provided (Ed25519).                                                             |
 
 `regaudit-fhe` is a dependency you can bring into a compliance
