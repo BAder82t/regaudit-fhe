@@ -137,10 +137,11 @@ commit-and-verify chaining. The `last_depth` state is held in a
 The counter does not count `mul_scalar` or negation, and TenSEAL spends a level on
 both. The runtime check only compares the declared ceiling with this counter. We
 counted the levels left on the output ciphertext with TenSEAL 0.3.18 at N = 2^14,
-and the levels used were fairness 2, provenance 1, concordance 6, calibration 5,
-drift 2 and disagreement 5 (with non-zero polynomial coefficients). For concordance
-and calibration this is above the declared depth. All of them fit in the 6 levels of
-the 360-bit chain.
+on the default 400-bit chain and on the 360-bit chain, and both gave the same result.
+The levels used were fairness 2, provenance 1, concordance 6, calibration 5, drift 2
+and disagreement 5 (with non-zero polynomial coefficients). For concordance and
+calibration this is above the declared depth of 5 and 4. All of them fit in the 6
+levels of the 360-bit chain. We did not run this count at N = 2^15.
 
 Observed vs. declared depth, as counted on TenSEAL (identical at
 N = 2^14 and 2^15):

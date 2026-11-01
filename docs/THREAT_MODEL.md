@@ -148,8 +148,10 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
 - No bootstrapping is invoked. Depth budgets are enforced by
   `regaudit_fhe._slot.SlotVec` and, on the encrypted path, by the
   `EncryptedSlotVec.depth` counter, which does not count every level TenSEAL
-  uses (see the README depth notes). They are asserted by the
-  equivalence-test matrix.
+  uses. The declared ceiling is only compared with that counter. With
+  TenSEAL 0.3.18 at `N = 2^14`, concordance used 6 levels against a declared 5
+  and calibration used 5 against a declared 4 (see the README depth notes).
+  They are asserted by the equivalence-test matrix.
 
 ### Audit envelope
 
@@ -385,11 +387,16 @@ scalars (and the per-slot vectors in §3.4 and §3.6) and return results, which
 is calibrated to a sensitivity the caller supplies, for differential privacy,
 and not for this purpose.
 
-<!-- EXPERIMENT-STATUS: update the next sentence when the IND-CPA-D experiment reports. -->
-As of 2026-11-01 the decrypted output of this library has not been analysed for IND-CPA-D.
-
 This document does not claim that an attack on `regaudit-fhe` was demonstrated,
 and it does not claim that such attacks are impossible.
+
+#### Scope of the key-recovery experiment
+
+A limited key-recovery experiment was conducted against the library's evaluated CKKS parameter configurations and output shapes. The tested attack succeeded in a separate setup that exposed information not provided by the library's tested outputs. The same attack did not recover the secret key from the library's tested output shapes in the runs performed.
+
+These observations are limited to the attack implementation, configurations, output shapes, and trials examined. They do not establish resistance to other attacks or provide a general IND-CPA-D security guarantee. The library's confidentiality claims remain conditional on its stated threat model, supported parameter configurations, and operational assumptions.
+
+The runs used fresh ciphertexts and one seed per setting, and not the output of a real audit circuit.
 
 ---
 
@@ -500,4 +507,4 @@ it would remember nothing.
 | 2026-10-24 | Phase 1 trust hardening (unreleased): `/v1/verify` fails closed without a trust store; `trust_status` / `timestamp_status` outcomes; revocation and pins enforced through `verify_receipt`; unverified timestamps no longer reported valid. |
 | 2026-10-24 | Trust specification (docs/TRUST_SPEC.md) drafted: key lifecycle, time evidence, replay, verification-status semantics and entry-point requirements for a future report.v2. Specification only. |
 | 2026-10-24 | Phase 3A candidate: `report.v2` with a signed security identity, strict canonicalisation, a shared verification engine (key lifecycle, chronology, local replay), CLI exit codes 0/1/2/3 and per-request development-option checks. Not production readiness; O8 and O9 remain open. |
-| 2026-11-01 | Corrected against the 0.2.1 code: separated shipped code from the intended deployment; rewrote the §3 tables from `fhe/primitives.py`; removed the `dnum` and `parameter_set` claims from §2; stated signed provenance as authenticated claims; corrected the Operator + Auditor row; added the IND-CPA-D limit (§5.1) and the replay limits (§6). |
+| 2026-11-01 | Corrected against the 0.2.1 code: separated shipped code from the intended deployment; rewrote the §3 tables from `fhe/primitives.py`; removed the `dnum` and `parameter_set` claims from §2; stated signed provenance as authenticated claims; corrected the Operator + Auditor row; added the IND-CPA-D limit and the scope of the key-recovery experiment (§5.1) and the replay limits (§6). |
