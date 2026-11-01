@@ -393,7 +393,8 @@ def test_transition_accepted_before_recovery_is_superseded_by_the_recovery_state
 def test_only_transitions_at_or_after_the_boundary_are_voided(w):
     state = w.enrolled()
     early = w.transition(w.rev, w.auth2, issued_at="2026-10-01T00:00:00Z")  # before the boundary
-    state = take(state, vt(w, early, state))
+    # taken before the boundary too: a thief can backdate issued_at, not this verifier's clock
+    state = take(state, vt(w, early, state, now=NOW - timedelta(days=30)))
     rec = w.recovery_stmt(w.auth3, declares=[(w.fp(w.rev), "2026-10-15T00:00:00Z")], new_gen=3)
     assert vr(w, rec, state).voided == ()
     rec2 = w.recovery_stmt(w.auth3, declares=[(w.fp(w.rev), "2026-09-15T00:00:00Z")], new_gen=3)

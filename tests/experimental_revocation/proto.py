@@ -182,6 +182,7 @@ def validate_shape(doc: Any) -> None:
     if not isinstance(entries, list) or len(entries) > MAX_ENTRIES:
         raise ShapeError(f"entries must be a list of at most {MAX_ENTRIES}")
     last = None
+    seen_fps: set[str] = set()
     for i, e in enumerate(entries):
         _exact(e, {"key_id", "key_fingerprint", "status", "effective_from"}, f"entries[{i}]",
                frozenset({"successor"}))  # fmt: skip
@@ -190,6 +191,9 @@ def validate_shape(doc: Any) -> None:
             raise ShapeError("entries must be strictly sorted by key_id (unique)")
         last = kid
         fp = _fp(e["key_fingerprint"], f"entries[{i}].key_fingerprint")
+        if fp in seen_fps:
+            raise ShapeError("one key fingerprint may appear once in a list")
+        seen_fps.add(fp)
         if e["status"] not in STATUSES:
             raise ShapeError(f"entries[{i}].status must be one of {STATUSES}")
         if e["effective_from"] is None:
@@ -222,6 +226,7 @@ class Mark:
     issued_at: str
     valid_until: str
     entries: dict[str, dict[str, Any]] = field(default_factory=dict)  # key_id -> entry
+    accepted_at: str | None = None  # this verifier's clock; a signer can backdate issued_at, not this
 
 
 @dataclass(frozen=True)
@@ -320,6 +325,21 @@ class ListResult:
         return self.blocking[0] if self.blocking else None
 
 
+def condemned(mark: Mark, compromised: dict[str, str | None]) -> bool:
+    """The mark was signed by a key declared compromised, at or after the boundary or with an unknown one.
+
+    Compares this verifier's acceptance time as well as the list's claim, since a thief writes ``issued_at``.
+    """
+    if mark.authority_fingerprint not in compromised:
+        return False
+    boundary = compromised[mark.authority_fingerprint]
+    if boundary is None:
+        return True
+    limit = parse_rfc3339(boundary)
+    times = [mark.issued_at] + ([mark.accepted_at] if mark.accepted_at else [])
+    return any(parse_rfc3339(t) >= limit for t in times)
+
+
 def _refuse(code: str, *notes: str, detection: str = "none") -> ListResult:
     return ListResult(False, (code,), tuple(notes), rollback_detection=detection)
 
@@ -366,6 +386,39 @@ def _successor_cycle(entries: list[dict[str, Any]]) -> str | None:
                 return start
             seen.add(cur)
             cur = nxt[cur]
+    return None
+
+
+def _store_conflict(
+    entries: list[dict[str, Any]], issuer: str, store: TrustStore
+) -> tuple[str, str] | None:
+    """A key is (key_id, fingerprint). The same fingerprint under another issuer is out of scope. The same
+    key_id under another issuer with another fingerprint is an unrelated key: key_ids are not namespaced."""
+    by_fp = {spki_fingerprint(p): k for k, p in store.keys.items()}
+
+    def mine(entry: Any) -> bool:
+        return entry.issuer is None or entry.issuer == issuer
+
+    for e in entries:
+        alias = store.entry(by_fp[e["key_fingerprint"]]) if e["key_fingerprint"] in by_fp else None
+        if alias is not None and not mine(alias):
+            return "REVOCATION_ISSUER_SCOPE", e["key_id"]  # cannot revoke another issuer's key
+        local = store.entry(e["key_id"])
+        if (
+            local is not None
+            and mine(local)
+            and spki_fingerprint(local.public_key_pem) != e["key_fingerprint"]
+        ):
+            return "REVOCATION_KEY_MISMATCH", e["key_id"]
+        succ = e.get("successor")
+        if succ is not None:
+            bound = store.entry(succ["key_id"])
+            if (
+                bound is not None
+                and mine(bound)
+                and spki_fingerprint(bound.public_key_pem) != succ["key_fingerprint"]
+            ):
+                return "REVOCATION_KEY_MISMATCH", "successor " + succ["key_id"]
     return None
 
 
@@ -432,23 +485,6 @@ def verify_list(
             return _refuse("REVOCATION_MALFORMED", f"{e['key_id']}: effective_from after issued_at")
     if _successor_cycle(entries):
         return _refuse("REVOCATION_MALFORMED", "successor cycle")
-    if store is not None:
-        for e in entries:
-            local = store.entry(e["key_id"])
-            if local is not None and local.issuer is not None and local.issuer != doc["issuer"]:
-                return _refuse(
-                    "REVOCATION_ISSUER_SCOPE", e["key_id"]
-                )  # cannot revoke another issuer's key
-            if local is not None and spki_fingerprint(local.public_key_pem) != e["key_fingerprint"]:
-                return _refuse("REVOCATION_KEY_MISMATCH", e["key_id"])
-            succ = e.get("successor")
-            if succ is not None:
-                bound = store.entry(succ["key_id"])
-                if (
-                    bound is not None
-                    and spki_fingerprint(bound.public_key_pem) != succ["key_fingerprint"]
-                ):
-                    return _refuse("REVOCATION_KEY_MISMATCH", "successor " + succ["key_id"])
     digest = list_digest(doc)
     mark = state.get(anchor.issuer)
     notes: list[str] = []
@@ -457,13 +493,25 @@ def verify_list(
         detection = "none"
     else:
         detection = "high-water-mark-present"
+        distrusted = enrollment is not None and condemned(mark, enrollment.compromised)
         if doc["epoch"] < mark.epoch:
             return _refuse("REVOCATION_ROLLBACK", detection=detection)
-        if doc["epoch"] == mark.epoch:
+        if distrusted:
+            # What a thief told this verifier must not make an honest list look contradictory. The epoch
+            # floor stays, and joined key actions keep every tightening, so nothing loosens.
+            if digest != mark.digest:
+                notes.append("REVOCATION_MARK_CONDEMNED")
+            else:
+                notes.append("REVOCATION_REPEAT")
+        elif doc["epoch"] == mark.epoch:
             if digest != mark.digest:
                 return _refuse("REVOCATION_FORK", detection=detection)
             notes.append("REVOCATION_REPEAT")
         else:
+            if issued < parse_rfc3339(mark.issued_at):
+                return _refuse(
+                    "REVOCATION_NOT_MONOTONE", "issued_at moved backwards", detection=detection
+                )
             if doc["epoch"] == mark.epoch + 1 and doc["prev_list_digest"] != mark.digest:
                 return _refuse("REVOCATION_FORK", detection=detection)
             if doc["epoch"] > mark.epoch + 1:
@@ -473,10 +521,17 @@ def verify_list(
             problem = _monotone(mark.entries, {e["key_id"]: e for e in entries})
             if problem:
                 return _refuse("REVOCATION_NOT_MONOTONE", problem, detection=detection)
+    # After the epoch rules: a replayed old list is a rollback, whatever has since changed in the local store.
+    if store is not None:
+        problem_code = _store_conflict(entries, doc["issuer"], store)
+        if problem_code is not None:
+            return _refuse(problem_code[0], problem_code[1], detection=detection)
     return ListResult(True, (), tuple(notes), doc, digest, detection)
 
 
-def commit(state: RevocationState, anchor: Anchor, result: ListResult) -> RevocationState:
+def commit(
+    state: RevocationState, anchor: Anchor, result: ListResult, *, accepted_at: str | None = None
+) -> RevocationState:
     """Advance the high-water mark after an accepted list (compare-and-set in a real verifier)."""
     if not result.accepted or result.statement is None or result.digest is None:
         return state
@@ -493,6 +548,7 @@ def commit(state: RevocationState, anchor: Anchor, result: ListResult) -> Revoca
             issued_at=doc["issued_at"],
             valid_until=doc["valid_until"],
             entries={e["key_id"]: e for e in doc["entries"]},
+            accepted_at=accepted_at,
         )
     )
 
@@ -525,19 +581,25 @@ def _entry_dict(store: TrustStore, kid: str) -> dict[str, Any]:
 
 
 def apply_to_store(store: TrustStore, result: ListResult) -> TrustStore:
-    """The STRICTER of the local entry and the verified list entry; never loosens.
+    """The STRICTER of the local entry and the verified list entry; never loosens."""
+    if not result.accepted or result.statement is None:
+        raise ValueError("only an accepted list can be applied")
+    return apply_entries(store, result.statement["entries"])
+
+
+def apply_entries(store: TrustStore, listed: list[dict[str, Any]]) -> TrustStore:
+    """Join listed key actions into a store, matching on the key fingerprint, not on key_id.
 
     ``replaced`` maps to ``retired`` (the store format has no successor member); the successor is
     evidence, never trust.
     """
-    if not result.accepted or result.statement is None:
-        raise ValueError("only an accepted list can be applied")
     if not store.entries:
         raise ValueError("only an 'entries' store can carry lifecycle state")
     entries = {kid: _entry_dict(store, kid) for kid in store.entries}
-    for item in result.statement["entries"]:
-        kid = item["key_id"]
-        if kid not in entries:
+    by_fp = {spki_fingerprint(e.public_key_pem): kid for kid, e in store.entries.items()}
+    for item in listed:
+        kid = by_fp.get(item["key_fingerprint"])
+        if kid is None:
             continue
         cur = entries[kid]
         eff = parse_rfc3339(item["effective_from"]) if item["effective_from"] else None
@@ -559,6 +621,9 @@ def apply_to_store(store: TrustStore, result: ListResult) -> TrustStore:
         else:
             assert eff is not None
             if cur["status"] == "compromised":
+                known = cur.get("compromised_from")
+                if known is not None and eff < parse_rfc3339(known):
+                    cur["compromised_from"] = _z(eff)
                 continue
             if cur["status"] == "retired":
                 eff = min(eff, parse_rfc3339(cur["retired_at"]))
@@ -764,6 +829,8 @@ class AuthResult:
     enrollment: Enrollment | None = None  # the enrollment AFTER applying (not yet committed)
     voided: tuple[str, ...] = ()
     limit: str = ROLLBACK_LIMIT
+    # On a refused recovery with a valid anchor signature: the compromise knowledge it carries anyway.
+    declared: dict[str, str | None] | None = None
 
     @property
     def code(self) -> str | None:
@@ -963,6 +1030,16 @@ def _timed(doc: dict[str, Any], now: datetime) -> str | None:
     return None
 
 
+def _earlier(a: str | None, b: str | None) -> str | None:
+    if a is None or b is None:
+        return None
+    return min(a, b, key=parse_rfc3339)
+
+
+def _role_conflict_report(fp: str, store: TrustStore | None) -> bool:
+    return store is not None and any(spki_fingerprint(p) == fp for p in store.keys.values())
+
+
 def _role_conflict(fp: str, enr: Enrollment, store: TrustStore | None) -> bool:
     if enr.recovery_pem is not None and spki_fingerprint(enr.recovery_pem) == fp:
         return True
@@ -1029,7 +1106,14 @@ def verify_transition(
         superseded=(*enr.superseded, frm["key_fingerprint"]),
         accepted_transitions=(
             *enr.accepted_transitions,
-            {"digest": digest, "signed_by": frm["key_fingerprint"], "issued_at": doc["issued_at"]},
+            {
+                "digest": digest,
+                "signed_by": frm["key_fingerprint"],
+                "issued_at": doc["issued_at"],
+                "accepted_at": _z(now),
+                "to": to_fp,
+                "from_generation": frm["generation"],
+            },
         ),
     )
     return AuthResult(True, (), (), doc, digest, new)
@@ -1037,10 +1121,14 @@ def verify_transition(
 
 def apply_authority(state: RevocationState, result: AuthResult) -> RevocationState:
     """Commit an accepted transition or recovery (compare-and-set in a real verifier)."""
-    if not result.accepted or result.enrollment is None:
-        return state
+    if not result.accepted or result.enrollment is None or "REVOCATION_REPEAT" in result.notes:
+        return state  # a repeated statement is public and replayable: it must change nothing
     new = state.with_enrollment(result.enrollment)
-    if result.statement is not None and result.statement.get("rebase"):
+    if (
+        result.statement is not None
+        and result.statement.get("rebase")
+        and "REVOCATION_REBASE_NOOP" not in result.notes
+    ):
         base = state.archive.get(result.statement["rebase"]["list_digest"])
         if base is not None:
             marks = dict(new.marks)
@@ -1086,6 +1174,8 @@ def verify_recovery(
         )
     if doc["recovery_anchor"]["key_fingerprint"] != spki_fingerprint(enr.recovery_pem):
         return _auth_refuse("REVOCATION_RECOVERY_ANCHOR_MISMATCH")
+    if _role_conflict_report(spki_fingerprint(enr.recovery_pem), store):
+        return _auth_refuse("REVOCATION_KEY_IS_REPORT_KEY", "the recovery anchor is enrolled as a report key")
     new = doc["new_authority"]
     if not _pem_matches(new):
         return _auth_refuse(
@@ -1097,59 +1187,81 @@ def verify_recovery(
         and _sig_ok(new["public_key_pem"], REC_TO_DOMAIN, body, doc["signatures"]["new_authority"])
     ):
         return _auth_refuse("REVOCATION_SIGNATURE_INVALID")
-    timing = _timed(doc, now)
-    if timing:
-        return _auth_refuse(timing)
     digest = recovery_digest(doc)
-    if doc["recovery_epoch"] < enr.recovery_epoch:
-        return _auth_refuse("REVOCATION_RECOVERY_REPLAY")
-    if doc["recovery_epoch"] == enr.recovery_epoch:
-        if digest == enr.recovery_digest:
-            return AuthResult(True, (), ("REVOCATION_REPEAT",), doc, digest, enr)
-        return _auth_refuse("REVOCATION_FORK", "same recovery_epoch, different statement")
+    if (
+        doc["recovery_epoch"] == enr.recovery_epoch
+        and digest == enr.recovery_digest
+        and _timed(doc, now) is None
+    ):
+        return AuthResult(True, (), ("REVOCATION_REPEAT",), doc, digest, enr)
+
     declared = {d["key_fingerprint"]: d["compromised_from"] for d in doc["declares_compromised"]}
     issued = parse_rfc3339(doc["issued_at"])
+    new_fp = new["key_fingerprint"]
+    anchor_fp = spki_fingerprint(enr.recovery_pem)
+    coherent = (
+        all(b is None or parse_rfc3339(b) <= issued + SKEW for b in declared.values())
+        and anchor_fp not in declared
+        and new_fp not in declared
+    )
+    merged: dict[str, str | None] = dict(enr.compromised)
+    for fp, boundary in declared.items():
+        merged[fp] = _earlier(merged[fp], boundary) if fp in merged else boundary
+
+    # Transitions taken from a key at or after its boundary are void, with every hop after the first. Keys they
+    # installed are condemned: nobody but the thief knows those keys, so no statement can name them. Compared on
+    # this verifier's own acceptance time as well, because the thief writes issued_at.
+    voided_digests: list[str] = []
+    base_generation = enr.generation
+    for t in enr.accepted_transitions:
+        if not voided_digests:
+            if t["signed_by"] not in merged:
+                continue
+            limit = merged[t["signed_by"]]
+            times = [t["issued_at"], t["accepted_at"]]
+            if limit is not None and all(parse_rfc3339(x) < parse_rfc3339(limit) for x in times):
+                continue
+            base_generation = t["from_generation"]
+        voided_digests.append(t["digest"])
+        merged[t["to"]] = None
+    def refuse(code: str, *notes: str) -> AuthResult:
+        """Everything past the anchor signature is the anchor speaking. Whatever stops the authority change
+        (a lost baseline, expiry, a generation) must not leave the verifier trusting a key it was told is stolen."""
+        tell = merged if coherent and merged != enr.compromised else None
+        return AuthResult(False, (code,), tuple(notes), declared=tell)
+
+    timing = _timed(doc, now)
+    if timing:
+        return refuse(timing)
+    if doc["recovery_epoch"] < enr.recovery_epoch:
+        return refuse("REVOCATION_RECOVERY_REPLAY")
+    if doc["recovery_epoch"] == enr.recovery_epoch:
+        return refuse("REVOCATION_FORK", "same recovery_epoch, different statement")
     for boundary in declared.values():
         if boundary is not None and parse_rfc3339(boundary) > issued + SKEW:
-            return _auth_refuse("REVOCATION_MALFORMED", "compromised_from after issued_at")
-    new_fp = new["key_fingerprint"]
+            return refuse("REVOCATION_MALFORMED", "compromised_from after issued_at")
+
     if (
-        new_fp in declared
-        or new_fp in enr.compromised
+        new_fp in merged
         or new_fp in enr.superseded
         or new_fp == enr.authority_fingerprint
     ):
-        return _auth_refuse("REVOCATION_TRANSITION_CYCLE", "the new authority must be a fresh key")
+        return refuse("REVOCATION_TRANSITION_CYCLE", "the new authority must be a fresh key")
     if _role_conflict(new_fp, enr, store):
-        return _auth_refuse("REVOCATION_KEY_IS_REPORT_KEY")
-    if spki_fingerprint(enr.recovery_pem) in declared:
-        return _auth_refuse(
-            "REVOCATION_MALFORMED", "the recovery anchor cannot declare itself compromised"
-        )
-    if new["generation"] <= enr.generation:
-        return _auth_refuse("REVOCATION_TRANSITION_GAP", "generation must increase")
+        return refuse("REVOCATION_KEY_IS_REPORT_KEY")
+    if anchor_fp in declared:
+        return refuse("REVOCATION_MALFORMED", "the recovery anchor cannot declare itself compromised")
+    if new["generation"] <= base_generation:
+        return refuse("REVOCATION_TRANSITION_GAP", "generation must increase")
+    notes: tuple[str, ...] = ()
     if doc["rebase"] is not None:
-        base = state.archive.get(doc["rebase"]["list_digest"])
-        if base is None or base.epoch != doc["rebase"]["epoch"] or base.issuer != doc["issuer"]:
-            return _auth_refuse("REVOCATION_RECOVERY_BASELINE_UNKNOWN")
-    merged: dict[str, str | None] = dict(enr.compromised)
-    for fp, boundary in declared.items():
-        old = merged.get(fp, "absent")
-        if old == "absent":
-            merged[fp] = boundary
-        elif old is None or boundary is None:
-            merged[fp] = None
+        mark = state.get(doc["issuer"])
+        if mark is not None and mark.epoch < doc["rebase"]["epoch"]:
+            notes = ("REVOCATION_REBASE_NOOP",)  # this verifier never passed the baseline
         else:
-            merged[fp] = min(old, boundary, key=parse_rfc3339)  # type: ignore[arg-type]
-    voided = tuple(
-        t["digest"]
-        for t in enr.accepted_transitions
-        if t["signed_by"] in declared
-        and (
-            declared[t["signed_by"]] is None
-            or parse_rfc3339(t["issued_at"]) >= parse_rfc3339(declared[t["signed_by"]])  # type: ignore[arg-type]
-        )
-    )
+            base = state.archive.get(doc["rebase"]["list_digest"])
+            if base is None or base.epoch != doc["rebase"]["epoch"] or base.issuer != doc["issuer"]:
+                return refuse("REVOCATION_RECOVERY_BASELINE_UNKNOWN")
     cur = enr.authority_fingerprint
     superseded = enr.superseded if cur in merged else (*enr.superseded, cur)
     updated = replace(
@@ -1160,9 +1272,9 @@ def verify_recovery(
         superseded=superseded,
         recovery_epoch=doc["recovery_epoch"],
         recovery_digest=digest,
-        voided=(*enr.voided, *voided),
+        voided=(*enr.voided, *voided_digests),
     )
-    return AuthResult(True, (), (), doc, digest, updated, voided)
+    return AuthResult(True, (), notes, doc, digest, updated, tuple(voided_digests))
 
 
 def verify_list_enrolled(

@@ -148,4 +148,4 @@ differ from a hand-written equivalent only by the existing `as_of` member. The h
 ## 8. Owner decisions (not implemented)
 
 See `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md` (signed revocation lists, epochs, high-water marks, successor
-evidence, authenticated trust history) and its section 9 for the exact schema/owner blockers.
+evidence, authenticated trust history) and its section 16 for the open owner decisions.
