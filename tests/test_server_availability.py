@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -455,11 +456,7 @@ def test_embedding_config_values_are_validated() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_timed_out_verify_still_records_replay_and_the_retry_is_flagged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Documents, does not endorse: the 504 client that retries sees REPLAY_DETECTED. Any change to this is a
-    compatibility decision (see docs/DEPLOYMENT.md, "Resource bounds")."""
+def _trusted_v2() -> tuple[TrustStore, bytes]:
     signer, _, v2 = _envelopes()
     store = TrustStore.from_dict(
         {
@@ -472,23 +469,46 @@ def test_timed_out_verify_still_records_replay_and_the_retry_is_flagged(
             }
         }
     )
-    real = server.verify
+    return store, _dump({"envelope": v2})
 
-    def slow(env: Any, policy: Any) -> Any:
-        time.sleep(0.5)
-        return real(env, policy)
 
-    monkeypatch.setattr(server, "verify", slow)
-    body = _dump({"envelope": v2})
+def _capture(name: str) -> tuple[logging.Logger, list[str]]:
     seen: list[str] = []
 
     class Capture(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
             seen.append(record.getMessage())
 
-    log = logging.getLogger("test-availability-replay")
+    log = logging.getLogger(name)
+    log.handlers.clear()
     log.addHandler(Capture())
     log.setLevel(logging.INFO)
+    return log, seen
+
+
+def test_a_verify_submitted_before_the_504_still_records_and_the_retry_is_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Documents, does not endorse: a verification SUBMITTED before the request times out runs to the end and, in
+    replay ``record`` mode, records the report, so the 504 client's retry is REPLAY_DETECTED. Any change to this
+    is a compatibility decision (docs/DEPLOYMENT.md, "Resource bounds"). No wall-clock race: the abandoned job
+    blocks until the test has its 504, and the branch precondition (it was submitted) is asserted explicitly."""
+    store, body = _trusted_v2()
+    real = server.verify
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def slow(env: Any, policy: Any) -> Any:
+        if not started.is_set():  # the first (abandoned) verification only
+            started.set()
+            release.wait(30)
+            try:
+                return real(env, policy)
+            finally:
+                finished.set()
+        return real(env, policy)
+
+    monkeypatch.setattr(server, "verify", slow)
+    log, seen = _capture("test-availability-replay-submitted")
 
     async def go() -> None:
         cache = InMemoryReplayCache()
@@ -498,12 +518,71 @@ def test_timed_out_verify_still_records_replay_and_the_retry_is_flagged(
             ),
             logger=log,
         )
-        status, _, _ = await _call(mk(0.15), "/v1/verify", _whole(body))
+        # 3 s is far above the few milliseconds the request needs to reach submission
+        status, _, _ = await _call(mk(3.0), "/v1/verify", _whole(body))
         assert status == 504
-        await asyncio.sleep(0.8)
+        assert started.is_set(), "precondition: the verification was submitted before the 504"
+        assert not cache._entries  # nothing recorded yet: the job is still blocked
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 30)
+        assert len(cache._entries) == 1  # the abandoned verification recorded the report
         status, resp, _ = await _call(mk(5.0), "/v1/verify", _whole(body))
         verdict = json.loads(resp)
-        assert status == 200 and "REPLAY_DETECTED" in verdict["blocking_reasons"]
+        assert status == 200 and "REPLAY_DETECTED" in verdict["blocking_reasons"], verdict
 
     asyncio.run(go())
     assert "verify_request_abandoned" in seen
+
+
+def test_a_verify_that_times_out_before_submission_records_nothing_and_the_retry_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other branch of "outcome unknown": when the timeout fires before the verification is submitted (here
+    the request is still in its authentication dependency, which runs on a worker thread), verify() never runs,
+    nothing is recorded and the retry is verified normally. This is what the earlier, timing-based test hit on a
+    slow CI runner. Deterministic: the dependency outlasts the timeout, and the 504 is sent only after it returned."""
+    store, body = _trusted_v2()
+    real_scopes = server._check_scopes
+    entered: list[str] = []
+    real_verify = server.verify
+
+    def counting_verify(env: Any, policy: Any) -> Any:
+        entered.append("verify")
+        return real_verify(env, policy)
+
+    calls = [0]
+    dep_done = threading.Event()
+
+    def slow_scopes(caller: Any, scopes: Any) -> Any:
+        calls[0] += 1
+        if calls[0] == 1:
+            time.sleep(0.6)  # longer than the 0.2 s request timeout below
+            dep_done.set()
+        return real_scopes(caller, scopes)
+
+    monkeypatch.setattr(server, "verify", counting_verify)
+    monkeypatch.setattr(server, "_check_scopes", slow_scopes)
+    log, seen = _capture("test-availability-replay-not-submitted")
+
+    async def go() -> None:
+        cache = InMemoryReplayCache()
+        mk = lambda t: build_app(  # noqa: E731
+            config=_cfg(
+                trust_store=store, replay_cache=cache, replay_mode="record", request_timeout_s=t
+            ),
+            logger=log,
+        )
+        status, _, _ = await _call(mk(0.2), "/v1/verify", _whole(body))
+        assert status == 504
+        # the 504 is sent only after the cancelled request has finished: the dependency returned, and the
+        # endpoint (which submits the verification) never ran
+        assert dep_done.is_set()
+        assert calls[0] == 1 and entered == []  # never submitted
+        assert not cache._entries
+        status, resp, _ = await _call(mk(5.0), "/v1/verify", _whole(body))
+        verdict = json.loads(resp)
+        assert status == 200 and verdict["blocking_reasons"] == [], verdict
+        assert entered == ["verify"] and len(cache._entries) == 1
+
+    asyncio.run(go())
+    assert "verify_request_abandoned" not in seen

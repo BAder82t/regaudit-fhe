@@ -291,7 +291,9 @@ tune them for your deployment.
    `MAX_CONCURRENT_AUDITS` jobs, each bounded by the input limits, keep running. The same holds for `/v1/verify`: a
    verification that has already been submitted runs to the end, and in replay `record` mode it records the report
    as seen even though its caller got a `504`. A client that retries that report is then answered `REPLAY_DETECTED`.
-   The server logs `verify_request_abandoned` when this can happen. Keep `REGAUDIT_FHE_REQUEST_TIMEOUT_S` well above
+   If instead the timeout fires before the verification is submitted (while the request is still being
+   authenticated or its body read), nothing runs and nothing is recorded, and a retry is verified normally. The
+   client cannot tell the two cases apart. The server logs `verify_request_abandoned` when the first can happen. Keep `REGAUDIT_FHE_REQUEST_TIMEOUT_S` well above
    the slowest replay-store operation, and treat a `504` from `/v1/verify` in `record` mode as "outcome unknown". Before this change every
    queued request still ran to completion after its 504.
 4. **Probes.** `/healthz` and `/readyz` are coroutines served on the event loop, never on a worker thread.
