@@ -331,3 +331,20 @@ def sign_poly_d3(x: OpenFHESlotVec) -> OpenFHESlotVec:
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
     return x.mul_scalar(1.5) + x_cube.mul_scalar(-0.5)
+
+
+def register() -> None:
+    """Register the OpenFHE backend with the backend registry."""
+    from .backends import FHEBackend, register_backend
+
+    register_backend(
+        FHEBackend(
+            name="openfhe-ckks",
+            description="OpenFHE CKKS (install the `openfhe` Python package). EXPERIMENTAL.",
+            available=_HAVE_OPENFHE,
+            _build_context=build_d6_context,
+            _slotvec_cls=lambda: OpenFHESlotVec,
+            _sign_poly=lambda: sign_poly_d3,
+            experimental=True,
+        )
+    )
