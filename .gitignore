@@ -18,3 +18,4 @@ htmlcov/
 regulator_submission.json
 site/
 .hypothesis/
+.claude/
