@@ -162,15 +162,23 @@ The parameter sets are sized for 128-bit IND-CPA security under Ring-LWE. \textt
 
 IND-CPA does not cover how this library uses CKKS. Li and Micciancio showed how a passive attacker can get the CKKS secret key from seeing decryption outputs [7]. Later, Guo et al. were able to get a key from one shared decryption output in OpenFHE when the noise flooding used average-case noise estimates [8]. regaudit-fhe decrypts aggregate scalars and places them in the signed result with no rounding and no noise flooding.
 
-If a party has the ciphertexts from an evaluation and can see the result of it then this attack setting would apply. The Operator would be this party in the intended deployment. IND-CPA-D is a property of a scheme under a defined decryption oracle. The claims for a deployed system would depend on who can see which ciphertexts and what outputs. The library makes no claim for IND-CPA-D and its parameter sets have not been analyzed for it.
+If a party has the ciphertexts from an evaluation and can see the result of it then this attack setting may apply. The Operator would be this party in the intended deployment. IND-CPA-D is a property of a scheme under a defined decryption oracle. The claims for a deployed system would depend on who can see which ciphertexts and what outputs. The library makes no claim for IND-CPA-D and its parameter sets have not been analyzed for it.
 
 A deployment that separates the roles would need to treat this as an open problem. It should not show decrypted values to the Operator.
 
-The current threat model document states that collusion between Operator and Auditor would add no new leakage. This does not take into account key recovery.
+An earlier version of the threat model said that collusion between Operator and Auditor adds no new leakage. In the intended deployment they would together hold the ciphertexts and the secret key.
+
+\subsubsection*{Scope of the key-recovery experiment}
+
+A limited key-recovery experiment was conducted against the library's evaluated CKKS parameter configurations and output shapes. The tested attack succeeded in a separate setup that exposed information not provided by the library's tested outputs. The same attack did not recover the secret key from the library's tested output shapes in the runs performed.
+
+These observations are limited to the attack implementation, configurations, output shapes, and trials examined. They do not establish resistance to other attacks or provide a general IND-CPA-D security guarantee. The library's confidentiality claims remain conditional on its stated threat model, supported parameter configurations, and operational assumptions. The runs used fresh ciphertexts and one seed per setting, and not the output of a real audit circuit.
 
 \subsection{Depth and report integrity}
 
 Depth is restricted in two places. \texttt{CKKSParams} would not allow a depth outside 1 to 6 or a modulus chain that is too short for the declared depth. The depth tracker would raise an error if a circuit goes over its budget. No primitive uses bootstrapping.
+
+The depth tracker counts operations and is not a reading of the modulus levels. We have taken measurements of the levels used when $N=2^{14}$ in the default chain. Concordance used 6 levels against a declared 5 and calibration used 5 against a declared 4. The check did not refuse these since the counter has read 5 and 3.
 
 The SHA-256 digest and the Ed25519 signature cover the canonical form of the signed body. Any change in a signed value would change the digest. Changes in whitespace, key order, and string escapes would not change the digest. These values are not part of the canonical form. The \texttt{input\_commitments} field would hold SHA-256 digests of the inputs when the caller provides them. A verifier that has the inputs can check them. The commitments would not show that these inputs went through an encrypted circuit.
 
@@ -199,13 +207,13 @@ Each primitive has a plaintext oracle, a depth-budgeted circuit, an encrypted Te
 \end{tabularx}
 \end{table}
 
-Only \texttt{y\_pred} is encrypted for the function \texttt{fairness\_encrypted}. \texttt{y\_true} and the two group masks are plaintext in the same call. The threat model document shows all of them as encrypted. This however does not match the function. The group sizes and label-positive counts are public to the Auditor. Therefore, we can make the reciprocals plaintext scalars. No encrypted division is needed. The disparity scalars will be decrypted and the decision on the breach will be made in the plaintext side.
+Only \texttt{y\_pred} is encrypted for the function \texttt{fairness\_encrypted}. \texttt{y\_true} and the two group masks are plaintext in the same call. An earlier version of the threat model showed all of them as encrypted, which did not match the function. The group sizes and label-positive counts are public to the Auditor. Therefore, we can make the reciprocals plaintext scalars. No encrypted division is needed. The disparity scalars will be decrypted and the decision on the breach will be made in the plaintext side.
 
 For \texttt{audit\_provenance} the attribution values are encrypted. The row identifiers are plaintext and the hash function and seed are public. A verifier would be able to reproduce the bucket assignments. The bucket aggregates would be decrypted.
 
 For \texttt{audit\_concordance} the risk, time and event vectors are encrypted. Three aggregates are decrypted and the C-index is computed from them on the plaintext side. The previous version of this paper said two.
 
-For \texttt{audit\_calibration} the scores are encrypted and the per-class quantile thresholds are public to the Auditor. The function decrypts a membership signal for each class and turns it into a bitmask on the plaintext side. Therefore, the decrypted values would be the polynomial outputs and not just the final bits.
+For \texttt{audit\_calibration} the scores are encrypted and the per-class quantile thresholds are public to the Auditor. The function decrypts a membership signal for each class and turns it into a bitmask on the plaintext side. Therefore, the decrypted values would be the polynomial outputs and not just the final bits. This decrypted signal shows the scores. In a test of 4 scores they could be worked out from it with an error of about 4e-6.
 
 For \texttt{audit\_drift} the circuit would calculate the squared L2 distance between two CDFs. This would be a Cramer-von-Mises style statistic. This was chosen over the strict use of the W1 distance to avoid the use of an encrypted absolute value. This would be zero only if the two distributions are equal. There would also be a \texttt{w1\_distance} field. This will be computed in the plaintext for reference only. The depth of the plaintext model would be 1 but for use with TenSEAL we would need depth of 2. This is due to the lack of a public rotation for the \texttt{CKKSVector} and the use of a plaintext matrix product for the prefix sum.
 
