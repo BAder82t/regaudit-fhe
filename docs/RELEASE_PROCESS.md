@@ -38,7 +38,7 @@ touch packaging or release files, and on demand (a `workflow_dispatch` needs the
 PR that does not touch those paths would wait for it forever). It publishes nothing, signs nothing, has no environment and no `id-token`.
 
 ## 2. What a release needs before the tag is pushed
-1. The review the owner has decided on for this release, recorded with the full 40-character commit. For 0.1.0, 0.1.1 and 0.2.0 the owner waived human code review and substituted AI-agent reviews plus executable verification (see the release records in `docs/releases/`); that is a lower assurance than a professional audit and must be stated as such in the release notes.
+1. A review statement for this release, recorded with the full 40-character commit in its release record under `docs/releases/`. It must identify who performed the security review, what evidence exists, and which assurance activities were not performed. Any assurance below a professional audit must be stated as such in the release notes.
 2. `CHANGELOG.md` section for the version, known limitations listed; version bumped consistently
    (`python scripts/check_release_metadata.py --dist dist --tag vX.Y.Z` after a local build).
 3. A green `release-rehearsal` run on the exact commit (GitHub Actions, not only local).

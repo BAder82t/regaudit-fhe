@@ -4,13 +4,13 @@
 
 | Version | Status |
 | --- | --- |
-| `0.2.0` (published 2026-10-31) | Latest release; receives security updates. |
-| `0.1.1`, `0.1.0` | Still on PyPI, not yanked; not supported. Upgrade to the latest release. |
+| `0.2.1` (published 2026-11-01) | Latest release; receives security updates. |
+| `0.2.0`, `0.1.1`, `0.1.0` | Still on PyPI, not yanked; not supported. Upgrade to the latest release. |
 
 Only the latest release receives security updates. See `CHANGELOG.md` and
 `docs/releases/` for what each release contains and its known limitations. These
-are AI-assisted engineering releases: not externally audited, and human code review
-was waived by the owner.
+releases rely on AI-assisted testing and review. They have had no independent external
+security audit, and no production assurance is claimed.
 
 ## Reporting a vulnerability
 

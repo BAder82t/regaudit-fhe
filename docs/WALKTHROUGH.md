@@ -229,8 +229,8 @@ forward verdict output to places the report's contents should not go. The free-f
   KMS/HSM-backed signer through the library.
 * A trust store is a local file. There is no authoritative revocation or rotation service.
 * Resource limits help but do not replace a reverse proxy in front of `regaudit-fhe serve`.
-* This is AI-assisted engineering: no external security audit, no regulator approval, and human code review of the
-  releases was waived by the owner. See `docs/releases/RELEASE_0.2.0_RECORD.md`.
+* The releases rely on AI-assisted testing and review. There is no independent external security audit and no
+  regulator approval, and no production assurance is claimed. See `docs/releases/RELEASE_0.2.1_RECORD.md`.
 
 Next: `examples/strict_verification_quickstart.py` (library API), `docs/TRUST_SPEC.md` (verdict semantics),
 `docs/THREAT_MODEL.md`, `docs/DEPLOYMENT.md`.
