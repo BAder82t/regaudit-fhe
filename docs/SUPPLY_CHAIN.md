@@ -20,7 +20,7 @@ attestation surface.
 | Release-asset checksums    | `sha256sum dist/*` uploaded as a release asset            | `.github/workflows/pypi-release.yml`                   |
 
 The release pipeline, its controls and the GitHub/PyPI settings it depends on are described in
-[RELEASE_PROCESS.md](RELEASE_PROCESS.md); the pipeline has not yet run on GitHub Actions.
+[RELEASE_PROCESS.md](RELEASE_PROCESS.md); the pipeline has run on GitHub Actions for `v0.1.1` and `v0.2.0`.
 
 Every artefact uploaded to PyPI carries a Sigstore-backed publish
 attestation that links the release to the GitHub Actions workflow run
@@ -31,9 +31,9 @@ attached to the matching GitHub Release page.
 
 ## Verifying a wheel from PyPI
 
-> **Status: this recipe has not been exercised.** No release has been produced by the current
-> `pypi-release.yml` since its actions were bumped to new major versions, so neither the attestation
-> location nor the identity strings below have been checked against a real release. In particular
+> **Status: exercised for `v0.1.1` and `v0.2.0`.** For both releases the two PyPI-served files were verified with
+> `sigstore verify identity` against the identity strings below (`docs/releases/`). The release records do not claim a
+> check of PyPI's own attestation endpoint. In particular
 > `pip download` fetches only the wheel: the `.sigstore.json` bundles are uploaded to the GitHub Release
 > (and as a workflow artefact), not to PyPI, so download the bundle from the Release assets (or the
 > attestation from the PyPI provenance URL). The certificate identity names the tag the workflow ran
@@ -98,7 +98,7 @@ and has not been regenerated since: it lacks packages that the `dev` extra now l
 `bandit`, `pdoc` and `setuptools`) and Dependabot updates individual pins in it. Treat it as a
 contributor convenience only. Do not cite it as evidence that a release was built from pinned
 dependencies. The point-in-time evidence for a release is the qualification record that lists the
-resolved versions and the `pip-audit` result (see `docs/rc/`). Regenerating it, or deleting it and
+resolved versions and the `pip-audit` result (`docs/releases/`). Regenerating it, or deleting it and
 removing this section, is a maintainer decision that was not made as part of the 0.1.0 candidate.
 
 Production users should pin the wheel in their own application's lockfile.

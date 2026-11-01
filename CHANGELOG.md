@@ -18,6 +18,64 @@ are byte-identical to 0.2.0 across bare, legacy and entries stores).
   nothing shipped, no schema registered). Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
   (not issuer-authorised revocation) and states that rollback of the local file is undetectable.
 
+## [0.2.1] - 2026-11-01
+
+Availability hardening of the HTTP server (`regaudit-fhe[server]`). AI-assisted engineering work; not an audit and
+no production assurance. Library, CLI, schemas, signing formats, canonicalisation, trust decisions and replay
+semantics are unchanged; the only source file changed since 0.2.0 apart from the version identifiers is `server.py`.
+New reports carry `0.2.1` as their signer-asserted `algorithm_version` and `library_version`. Defaults of every 0.1.1
+resource, concurrency and memory limit are unchanged.
+
+### Changed (server, with the exact compatibility difference)
+
+- A request body that sends nothing for `REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S` (default 10 s; `0` restores the old
+  behaviour) is answered `408` (`code: BODY_TIMEOUT`) and releases its in-flight body budget; it used to hold it until
+  the 30 s request timeout and get a `504`. Difference: a client that pauses more than 10 s between two chunks of a
+  body (or between the headers and the body) now gets 408 instead of being allowed up to the request timeout. This
+  is an idle timeout, not a minimum-rate policy: a steady drip stays connected until the request timeout, so
+  reverse-proxy limits remain necessary.
+- `POST /v1/verify` refuses a body deeper than `REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH` (16) or with an array or object
+  wider than, or arrays totalling more than, `REGAUDIT_FHE_VERIFY_MAX_ELEMENTS` (65536) with
+  `422 {"detail": "malformed envelope"}` before the strict envelope parse. Difference: such a body used to be parsed
+  and answered `200` with an `INVALID` verdict. A genuine envelope (depth 4, at most about 3100 array elements, from the widest legal
+  provenance result) is unaffected; the limits are exact at 16 and 65 536 (see `docs/DEPLOYMENT.md`).
+- A schema `422` from `/v1/audit/{primitive}` truncates its detail at 2048 characters (a 0.5 MB body of 100 000
+  wrong-typed elements used to be answered with 9.3 MB). Short details are unchanged.
+- A client that disconnects while its body is read no longer leaves an unhandled exception in the server log.
+- The server logs `verify_request_abandoned` when a `/v1/verify` request is cancelled (request timeout or server cancellation) while its
+  verification may still complete; the log carries only the key id, no report content. In replay `record` mode such a
+  verification still records the report as seen (unchanged); see `docs/DEPLOYMENT.md`.
+
+### Added
+
+- `REGAUDIT_FHE_AUTH_BEFORE_BODY` (default `0`, unchanged behaviour): `1` authenticates `/v1/audit` before the body
+  is read and parsed.
+- Real-socket regression tests (`tests/test_server_real_sockets.py`) and in-process tests
+  (`tests/test_server_availability.py`).
+- `docs/WALKTHROUGH.md`, an end-to-end walkthrough with documentation smoke tests.
+
+### Fixed
+
+- `examples/server_client.py` presents a loopback peer so that its development self-signed verify step runs.
+
+### Known limitations
+
+- The idle timeout is not a minimum-rate policy, and a reverse proxy limiting body size, connections, timeouts and
+  rates is still required.
+- The idle timeout measures wall-clock time on the event loop. An event-loop stall about as long as the timeout can
+  answer `408` to a client that was still sending. At the 10 s default that takes a stall of about 10 s; a much lower
+  setting makes it more likely.
+- By default `/v1/audit` reads and parses the body before it authenticates the caller, and the strict parse runs on
+  the event loop. `REGAUDIT_FHE_AUTH_BEFORE_BODY=1` changes the order for `/v1/audit`.
+- A `504` from `/v1/verify` does not tell the client the outcome. In replay `record` mode the report may or may not
+  have been recorded, depending on whether the timeout came before the verification was submitted (see
+  `docs/DEPLOYMENT.md`).
+- The trust limitations of 0.2.0 are unchanged: trust stores are local files with no authoritative revocation, the CLI
+  private key is an unencrypted PEM (mode 0600), `backend` is signer-asserted, and nothing here proves that an FHE
+  computation ran.
+- Not qualified: Python 3.15, native Windows, the `[fhe]` Docker image and the OpenFHE backend.
+- No external security audit and no regulator approval.
+
 ## 0.2.0 — 2026-10-31
 
 Trust and usability release. AI-assisted engineering work; not an audit and no production assurance. Signing

@@ -190,7 +190,7 @@ def test_gate_bounds_running_and_waiting_and_refuses_the_rest() -> None:
             await gate.acquire()
         assert full.value.reason == "queue_full"
         gate.release()  # hands the slot to the waiter
-        await waiter
+        _ = await waiter
         assert (gate.running, gate.waiting) == (1, 0)
         gate.release()
         assert gate.running == 0
@@ -211,7 +211,7 @@ def test_gate_wait_times_out_and_cancelled_waiter_leaves_no_trace() -> None:
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await waiter
+            _ = await waiter
         assert gate.waiting == 0
         gate.release()
         assert gate.running == 0
@@ -228,7 +228,7 @@ def test_gate_slot_granted_to_a_cancelled_waiter_is_returned() -> None:
         gate.release()  # grant ...
         waiter.cancel()  # ... and cancel before the waiter resumes
         with pytest.raises(asyncio.CancelledError):
-            await waiter
+            _ = await waiter
         assert gate.running == 0 and gate.waiting == 0
 
     asyncio.run(go())
@@ -312,7 +312,7 @@ def test_queue_wait_expiry_is_a_503_not_a_hang(blocker: _Blocker) -> None:
             late = await c.post("/v1/audit/fairness", json=GOOD)
             waited = time.monotonic() - t0
             blocker.release.set()
-            await first
+            _ = await first
             return late, waited
 
     late, waited = asyncio.run(go())

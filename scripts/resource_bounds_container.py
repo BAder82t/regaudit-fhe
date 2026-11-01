@@ -45,6 +45,7 @@ def mem_mib(name: str) -> float | None:
             if used.endswith(suffix):
                 return float(used[: -len(suffix)]) * mult
     except ValueError:
+        # docker printed something that is not a number: report the usage as unknown.
         pass
     return None
 

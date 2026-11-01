@@ -25,7 +25,6 @@ try:
 except Exception as exc:
     sys.exit(f"[server] extra not installed: {exc}")
 
-import regaudit_fhe as rf
 from regaudit_fhe.server import ServerConfig, build_app
 
 
@@ -48,7 +47,9 @@ def main() -> int:
         # REGAUDIT_FHE_TRUST_STORE and verifies envelopes from a known issuer.
         allow_self_signed=True,
     )
-    client = TestClient(build_app(config=cfg))
+    # The development self-signed verify path is refused unless the peer and the server socket are
+    # loopback, so the in-process client presents itself as 127.0.0.1.
+    client = TestClient(build_app(config=cfg), base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     print("[1/5] /healthz + /version (no auth required)...")
     print(f"      health: {client.get('/healthz').json()}")

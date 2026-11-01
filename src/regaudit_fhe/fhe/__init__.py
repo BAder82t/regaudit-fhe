@@ -16,6 +16,8 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import contextlib
+
 try:
     import tenseal as _tenseal  # noqa: F401
 
@@ -51,6 +53,20 @@ from .params import (  # noqa: E402
     ParameterValidationError,
 )
 from .slot_vec import EncryptedSlotVec  # noqa: E402
+
+
+def _register_openfhe() -> None:
+    # OpenFHE registers itself from its own module, which imports .backends, so .backends must not
+    # import it back. This package's __init__ runs before anyone can reach .backends, so the
+    # registry is complete by the time it can be used. If the adapter is unimportable for any
+    # reason it simply stays unregistered.
+    with contextlib.suppress(Exception):
+        from . import openfhe
+
+        openfhe.register()
+
+
+_register_openfhe()
 
 __all__ = [
     "SEAL_MAX_LOG_Q_128",

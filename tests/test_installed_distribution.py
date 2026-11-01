@@ -381,7 +381,7 @@ def _smoke(
     tmp_path,
     *,
     folder="site-packages",
-    version="0.2.0",
+    version="0.2.1",
     forbid=(),
     schemas_in_cwd=False,
     strip=False,

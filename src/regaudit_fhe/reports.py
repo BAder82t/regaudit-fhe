@@ -73,7 +73,7 @@ from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
-LIB_VERSION: str = "0.2.0"
+LIB_VERSION: str = "0.2.1"
 SIGNATURE_ALG: str = "Ed25519"
 
 
@@ -329,10 +329,10 @@ class KeyProvider(Protocol):
     key_id: str
 
     def public_key_pem(self) -> str:  # pragma: no cover - structural
-        ...
+        """Return the public key as PEM."""
 
     def sign(self, body: bytes) -> bytes:  # pragma: no cover - structural
-        ...
+        """Return a detached signature over ``body``."""
 
 
 @dataclass
