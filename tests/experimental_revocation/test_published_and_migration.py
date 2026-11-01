@@ -1,7 +1,7 @@
 """Reports signed by the published versions under every profile, and trust-store migration.
 
-Rows V* and T* of the test matrix. ``published_vectors/by_*.json`` were signed by the published 0.1.0, 0.1.1 and
-0.2.0 wheels and by the source of tag v0.2.1 (see generate.py). The expected verdicts below are written from
+Rows V* and T* of the test matrix. ``published_vectors/by_*.json`` were signed by the published 0.1.0, 0.1.1, 0.2.0
+and 0.2.1 wheels, downloaded from PyPI with their SHA-256 checked (see generate.py). The expected verdicts below are written from
 docs/TRUST_SPEC.md and the proposal, not derived from the engine's output.
 """
 

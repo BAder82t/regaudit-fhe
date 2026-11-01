@@ -42,7 +42,8 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
-from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, status_rows
+from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, status_rows
+from ._trust_lifecycle import migrate as migrate_store_file
 from ._trust_lifecycle import retire as retire_key
 from ._trust_lifecycle import revoke as revoke_key
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
@@ -390,6 +391,18 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
     if not args.key_id or len(args.key_id) > 256 or not args.issuer or len(args.issuer) > 256:
         sys.stderr.write("--key-id and --issuer must be 1..256 characters\n")
         return 2
+    if args.revocation_pins:
+        from ._revocation_cli import refuses_trust_add
+        from ._revocation_state import PinStoreError
+
+        try:
+            why = refuses_trust_add(args.revocation_pins, actual)
+        except PinStoreError as exc:
+            sys.stderr.write(f"--revocation-pins: {exc}\n")
+            return 3
+        if why:
+            sys.stderr.write(f"refused, nothing enrolled: {why}; a report key must be another key\n")
+            return 2
     try:
         payload = _load_store_payload(args.store)
     except (TrustStoreError, CanonicalError, OSError, RecursionError) as exc:
@@ -507,6 +520,37 @@ def _cmd_trust_revoke(args: argparse.Namespace) -> int:
         ),
         edits=True,
     )
+
+
+def _cmd_trust_migrate(args: argparse.Namespace) -> int:
+    """Write an entries store from a legacy one. Exit 0 written or dry run | 2 refused | 3 source unusable."""
+    issuers: dict[str, str] = {}
+    for item in args.issuer or []:
+        key_id, _, issuer = item.partition("=")
+        if not key_id or not issuer or key_id in issuers:
+            sys.stderr.write(f"--issuer must be KEY_ID=ISSUER, once per key: {item!r}\n")
+            return 2
+        issuers[key_id] = issuer
+    try:
+        print(
+            json.dumps(
+                migrate_store_file(
+                    args.source,
+                    args.target,
+                    issuers,
+                    now=datetime.now(timezone.utc),
+                    dry_run=args.dry_run,
+                ),
+                indent=2,
+            )
+        )
+    except MigrationRefused as exc:
+        sys.stderr.write(f"refused, nothing written: {exc}\n")
+        return 2
+    except (TrustStoreError, OSError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    return 0
 
 
 def _cmd_schema(args: argparse.Namespace) -> int:
@@ -674,8 +718,25 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # configuration error (2), not a failure of verification infrastructure.
         sys.stderr.write(f"invalid configuration: {exc}\n")
         return 2
+    decision = None
     try:
-        result = verify(env, policy)
+        if args.revocation_mode == "off":
+            result = verify(env, policy)
+        else:
+            # The default path above calls the engine directly and touches no revocation state.
+            from ._revocation_cli import build_context
+            from ._revocation_gate import verify_with_revocation
+            from ._revocation_state import PinStoreError
+
+            try:
+                decision = verify_with_revocation(env, policy, build_context(args))
+            except PinStoreError as exc:
+                sys.stderr.write(f"--revocation-pins: {exc}\n")
+                return 3
+            result = decision.result
+    except PolicyError as exc:
+        sys.stderr.write(f"invalid configuration: {exc}\n")
+        return 2
     except VerificationUnavailable as exc:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
@@ -685,8 +746,19 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # infrastructure failure, not a verdict on the report (exit 3, not 1).
         sys.stderr.write("verification not possible: the replay store was unavailable\n")
         return 3
+    if args.revocation_mode != "off":
+        from ._revocation_gate import INFRASTRUCTURE_CODES
+
+        down = INFRASTRUCTURE_CODES.intersection(result.blocking_reasons)
+        if down:
+            sys.stderr.write(f"verification not possible: {sorted(down)[0]}\n")
+            return 3
     payload = result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
+    if args.policy_evidence or args.revocation_mode != "off":
+        from ._revocation_gate import policy_evidence
+
+        payload["policy_evidence"] = policy_evidence(decision)
     if not result.accepted:
         payload["reason"] = (
             result.blocking_reasons[0] if result.blocking_reasons else result.reasons[0]
@@ -698,6 +770,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from ._revocation_cli import add_parsers as add_revocation_parsers
+    from ._revocation_cli import add_verify_options as add_revocation_verify_options
+
     p = argparse.ArgumentParser(
         prog="regaudit-fhe",
         description="Encrypted regulatory audit primitives at CKKS depth six.",
@@ -754,6 +829,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expected SHA-256 fingerprint of the key, received out of band. Enrolment is "
         "refused if the file does not match.",
     )
+    t_add.add_argument(
+        "--revocation-pins",
+        help="EXPERIMENTAL. Pinned-authority file: refuse a key enrolled there as an authority or anchor.",
+    )
     t_add.set_defaults(func=_cmd_trust_add)
     t_list = trust_sub.add_parser("list", help="List the enrolled keys and their fingerprints.")
     t_list.add_argument("--store", required=True)
@@ -792,6 +871,18 @@ def build_parser() -> argparse.ArgumentParser:
     t_revoke.add_argument("--key-id", required=True)
     t_revoke.add_argument("--compromised-from", help="RFC 3339 earliest possible exposure time.")
     t_revoke.set_defaults(func=_cmd_trust_revoke)
+    t_migrate = trust_sub.add_parser(
+        "migrate",
+        help="Write a new entries store from a bare or legacy one. The source is left unchanged; a legacy "
+        "revoked key becomes compromised with an unknown boundary.",
+    )
+    t_migrate.add_argument("--source", required=True)
+    t_migrate.add_argument("--target", required=True, help="Must not exist.")
+    t_migrate.add_argument(
+        "--issuer", action="append", help="KEY_ID=ISSUER for every key; never inferred."
+    )
+    t_migrate.add_argument("--dry-run", action="store_true")
+    t_migrate.set_defaults(func=_cmd_trust_migrate)
 
     verify_p = sub.add_parser(
         "verify",
@@ -837,7 +928,9 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--refuse-legacy-v1", action="store_true", help="Refuse report.v1 envelopes."
     )
+    add_revocation_verify_options(verify_p)
     verify_p.set_defaults(func=_cmd_verify)
+    add_revocation_parsers(sub)
 
     serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")

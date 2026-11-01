@@ -3,8 +3,18 @@
 ## 0.3.0 — unreleased
 
 AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
-canonicalisation, schemas and verification rules are unchanged (verdicts for 0.1.0/0.1.1/0.2.0-signed fixtures
-are byte-identical to 0.2.0 across bare, legacy and entries stores).
+canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with one authorized exception
+(Changed, below). Release scope is undecided, and this section describes a local experimental branch.
+
+### Changed
+
+- Replay: raising `max_age` against an existing replay store no longer takes effect. A report that had gone stale, or
+  whose identifier had expired under the earlier setting, used to become acceptable again, so the same report could be
+  accepted twice. The store now keeps a floor, the smallest effective `max_age` served under `record`. It only goes down
+  and the sqlite floor survives restarts. Exact difference: only when the setting exceeds the floor, the floor is enforced
+  and the result carries the informational `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are
+  unchanged. Files from published versions adopt a floor at their first `record` under this code, so a raise before that
+  moment cannot be seen. See `docs/TRUST_SPEC.md` 6.1.
 
 ### Added
 
@@ -13,10 +23,16 @@ are byte-identical to 0.2.0 across bare, legacy and entries stores).
   deleted). These edit a **local, unauthenticated file**; they are not authoritative revocation and do not
   distribute anything. Edits are validated, atomic, keep a one-generation `STORE.prev`, and preserve the store's
   permission bits (store and backup); symlinked stores are edited through the link. Legacy and bare-mapping stores
-  are refused, not converted. See `docs/TRUST_LIFECYCLE_PROPOSAL.md`; the signed-revocation design is a proposal
-  only (`docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`; tests-only prototype under `tests/experimental_revocation/`,
-  nothing shipped, no schema registered). Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
+  are refused, not converted. See `docs/TRUST_LIFECYCLE_PROPOSAL.md`; the signed-revocation design is in
+  `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`. Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
   (not issuer-authorised revocation) and states that rollback of the local file is undetectable.
+- EXPERIMENTAL, off by default, nothing exported, no schema registered: signed revocation data under private modules, with
+  `revocation` CLI commands, `trust migrate`, `verify --revocation-mode` and `verify --policy-evidence`. The default output of
+  `verify` and `POST /v1/verify` is unchanged, so `high-assurance` still does not evaluate revocation: a `policy_id` without
+  `+revocation-` means that. The revocation-aware `high-assurance` profile is unavailable and refuses, because no independently
+  protected state store is qualified. `required` is available under the lower profiles on a local file store, which is not
+  independent. The pin and recovery anchor are the root and the signer a delegate, with no independent approver and no quorum.
+  See `docs/proposals/revocation-list.v1/IMPLEMENTATION_NOTES.md`.
 
 ## [0.2.1] - 2026-11-01
 

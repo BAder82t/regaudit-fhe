@@ -393,26 +393,24 @@ def test_G19_off_is_exactly_the_engine(w, tmp_path):
         ({"mode": tg.MODE_ADVISORY}, "no advisory"),
         ({"baseline": None}, "baseline"),
         ({"store": "bare"}, "REVOCATION_STORE_UNSUPPORTED"),
-        ({"independent": True}, "independent"),
-        ({"not_durable": True}, "durable"),
+        ({"asserted": True}, "signer-asserted"),
     ],
 )
 def test_G20_unsafe_configurations_are_refused_at_startup(w, tmp_path, change, text):
-    s: tg.CasStore = tg.FileCasStore(tmp_path)
-    if change.get("not_durable"):
-        s.durable = False  # type: ignore[misc]
+    s = tg.MemoryCasStore()
     p = tg.Pin(w.issuer, w.rev.public_key_pem(), "enr-1", baseline_epoch=change.get("baseline", 0))
     store = None
     if change.get("store") == "bare":
         store = rf.TrustStore.from_dict({w.old.key_id: w.old.public_key_pem()})
-    context = tg.RevocationContext(
-        change.get("mode", tg.MODE_REQUIRED),
-        s,
-        {w.issuer: p},
-        require_independent_store=change.get("independent", False),
-    )
+    context = tg.RevocationContext(change.get("mode", tg.MODE_REQUIRED), s, {w.issuer: p})
+    kw = {}
+    profile = "high-assurance"
+    if change.get("asserted"):
+        kw["historical_acceptance"] = "signer-asserted"
+        profile = "development"
+    pol = policy(w, tmp_path, profile=profile, store=store, **kw)
     with pytest.raises(PolicyError, match=text):
-        tg.verify_with_revocation(report(w), policy(w, tmp_path, store=store), context)
+        tg.verify_with_revocation(report(w), pol, context)
 
 
 # ============================================================================ state store: crash
@@ -545,9 +543,9 @@ def test_S06_restore_ceremony_with_a_fresh_baseline_refuses_older_lists(w, tmp_p
 def test_S07_the_ceremony_keeps_key_actions_unless_the_operator_clears_them(w, tmp_path):
     s, p = setup(w)
     add(w, s, p, l1(w, [w.entry(w.old, "compromised", None)]))
-    kept = tg.rebaseline(s, pin(w, enrollment_id="enr-2"), now=NOW)
+    kept = tg.rebaseline(s, pin(w, enrollment_id="enr-2"), now=NOW, accept_loss=True)
     assert w.fp(w.old) in kept.effective
-    cleared = tg.rebaseline(s, pin(w, enrollment_id="enr-3"), now=NOW, clear_effective=True)
+    cleared = tg.rebaseline(s, pin(w, enrollment_id="enr-3"), now=NOW, clear_effective=True, accept_loss=True)
     assert cleared.effective == {}
     assert cleared.seq > kept.seq
 
@@ -664,6 +662,7 @@ def test_S13_two_verifiers_sharing_one_store_see_one_mark(w, tmp_path):
 def test_S14_report_verification_never_writes_the_state(w, tmp_path):
     s, p = setup(w)
     add(w, s, p, l1(w))
+    assert tg.gate(ctx(w, s, p), w.issuer, NOW).ok  # binds the policy floor, its one write
     before = s.data[w.issuer]
     assert decide(w, tmp_path, s, p).result.accepted
     assert s.data[w.issuer] == before

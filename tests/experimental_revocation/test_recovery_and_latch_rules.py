@@ -10,6 +10,7 @@ from datetime import timedelta
 
 import pytest
 
+from regaudit_fhe import _revocation_state as state_module
 from regaudit_fhe.trust import TrustStore
 from regaudit_fhe.verification import PolicyError
 
@@ -294,6 +295,7 @@ def test_G30_presented_evidence_is_compared_and_never_written(w, tmp_path):
     s, p = setup(w)
     first = l1(w)
     add(w, s, p, first)
+    assert tg.gate(ctx(w, s, p), w.issuer, NOW).ok  # binds the policy floor, its one write
     before = s.data[w.issuer]
     fork = dump(w.signed(1, [w.entry(w.old, "retired", R)]))
     for raw, code in ((fork, "REVOCATION_FORK"), (b"{", "REVOCATION_MALFORMED")):
@@ -314,12 +316,17 @@ def test_S17_a_public_replay_after_a_restore_does_not_hide_the_lost_position(w):
     first = l1(w)
     add(w, s, p, first)
     second = w.signed(2, [], prev=proto.list_digest(first))
+    third = w.signed(3, [], prev=proto.list_digest(second))
+    fourth = w.signed(4, [], prev=proto.list_digest(third))
     backup = s.data[w.issuer]
     add(w, s, p, w.signed(5, [w.entry(w.old, "compromised", None)], prev="c" * 64))
     context = ctx(w, s, p)
     assert tg.gate(context, w.issuer, NOW).ok
+    seen = tg.load(s, p)[0].seq
     s.data[w.issuer] = backup
-    add(w, s, p, second)  # seq is back at its old value
+    for old in (second, third, fourth):
+        assert add(w, s, p, old).accepted
+    assert tg.load(s, p)[0].seq >= seen  # seq has been walked back up past what the process saw
     assert tg.gate(context, w.issuer, NOW).code == "REVOCATION_STATE_ROLLBACK"
 
 
@@ -401,14 +408,14 @@ def test_S23_the_archive_is_pruned_oldest_first_to_stay_inside_the_limit(w, monk
     doc = w.signed(1, entries)
     add(w, s, p, doc)
     size = len(s.data[w.issuer])
-    monkeypatch.setattr(tg, "MAX_RECORD_BYTES", size + 900)
+    monkeypatch.setattr(state_module, "MAX_RECORD_BYTES", size + 900)
     digests = [proto.list_digest(doc)]
     for epoch in range(2, 8):
         doc = w.signed(epoch, entries, prev=digests[-1])
         digests.append(proto.list_digest(doc))
         assert add(w, s, p, doc).accepted
     rec = record(s, p)
-    assert len(s.data[w.issuer]) <= tg.MAX_RECORD_BYTES
+    assert len(s.data[w.issuer]) <= state_module.MAX_RECORD_BYTES
     assert digests[0] not in rec.state.archive and digests[-1] in rec.state.archive
     assert rec.state.get(w.issuer).digest == digests[-1]
 
@@ -417,7 +424,7 @@ def test_S24_a_record_that_cannot_fit_refuses_the_document_and_stays_usable(w, m
     s, p = setup(w)
     add(w, s, p, l1(w))
     before = s.data[w.issuer]
-    monkeypatch.setattr(tg, "MAX_RECORD_BYTES", len(before) + 10)
+    monkeypatch.setattr(state_module, "MAX_RECORD_BYTES", len(before) + 10)
     big = w.signed(
         2,
         [w.entry(w.old, "retired", R), w.entry(w.new, "retired", R), w.entry(w.third, "retired", R)],
@@ -441,7 +448,8 @@ def test_E18_a_ceremony_cannot_move_the_authority_backwards_or_drop_its_history(
         w.auth2.public_key_pem(),
         "enr-2",
         recovery_pem=w.recovery.public_key_pem(),
-        baseline_epoch=0,
+        baseline_epoch=1,
+        baseline_digest=proto.list_digest(l1(w)),
         authority_generation=2,
         recovery_epoch=1,
     )
@@ -559,6 +567,9 @@ def test_D05_a_feed_can_be_polled_repeatedly_and_in_any_order(w):
     for _ in range(3):  # the distribution point serves everything, every time
         out = tg.ingest_feed(s, p, recoveries=[], transitions=stated, raw_list=dump(by3), trust_store=w.store(), now=NOW)
         assert out.accepted, out
+    # with no list to decide the result, a transition already passed is not a refusal
+    again = tg.ingest_feed(s, p, recoveries=[], transitions=stated, raw_list=None, trust_store=w.store(), now=NOW)
+    assert again.accepted, again
     enrollment = record(s, p).state.enrollments[w.issuer]
     assert enrollment.generation == 3 and record(s, p).contradiction is None
 

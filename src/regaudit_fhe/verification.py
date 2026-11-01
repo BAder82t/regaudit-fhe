@@ -36,7 +36,7 @@ from ._provenance import CONTRADICTION, UNVERIFIABLE
 from ._provenance import check_provenance as _check_provenance
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, decode_canonical_b64
-from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache
+from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache, ReplayStateError
 from .report_v2 import AuditEnvelopeV2
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
 from .trust import KeyEntry, TrustStore
@@ -291,6 +291,33 @@ def _effective_max_age(policy: VerificationPolicy) -> timedelta | None:
     if policy.max_age is not None:
         return policy.max_age
     return DEFAULT_RETENTION if policy.replay_mode != "off" else None
+
+
+def _bound_max_age(policy: VerificationPolicy) -> tuple[timedelta | None, bool, bool]:
+    """(max_age to enforce, whether the replay store's floor lowered it, whether the floor was unusable).
+
+    A larger ``max_age`` than a replay store has served is not honoured against that store: its older entries may be
+    gone, so the same report could be accepted twice, and evidence refused as stale could become acceptable merely
+    because a setting changed. With the setting unchanged this returns the setting. An unusable floor does not raise
+    here: it is reported at the replay step, the same place and with the same code as any other store failure.
+    """
+    requested = _effective_max_age(policy)
+    binder = getattr(policy.replay_cache, "bind_max_age", None)
+    if requested is None or policy.replay_mode == "off" or binder is None:
+        return requested, False, False
+    try:
+        bound = binder(requested, persist=True)
+    except Exception:  # any store failure, of any type
+        if policy.replay_mode == "record":
+            return requested, False, True
+        try:  # check mode records nothing, so a read-only store keeps working: honour what is there
+            bound = binder(requested, persist=False)
+        except Exception:
+            return requested, False, True
+    if not isinstance(bound, timedelta) or bound <= timedelta(0):
+        return requested, False, True
+    effective = min(bound, requested)
+    return effective, effective < requested, False
 
 
 def _aware_now(policy: VerificationPolicy) -> datetime:
@@ -561,7 +588,9 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("AUDIENCE_MISMATCH")
     elif policy.profile == "high-assurance":
         block("AUDIENCE_MISMATCH")
-    max_age = _effective_max_age(policy)
+    max_age, floor_applied, floor_failed = _bound_max_age(policy)
+    if floor_applied:
+        note("REPLAY_POLICY_FLOOR_APPLIED")
     if max_age is not None and issued is not None:
         if issued > now + policy.clock_skew:
             block("REPORT_FROM_FUTURE")
@@ -574,7 +603,14 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     replay_durable: bool | None = None
     if policy.replay_mode != "off" and not blocking:
         consumption, replay_scope, replay_durable = _apply_replay(
-            env, policy, now, fmt=fmt, key_id=key_id, note=note, block=block
+            env,
+            policy,
+            now,
+            max_age=max_age,
+            floor_failed=floor_failed,
+            key_id=key_id,
+            note=note,
+            block=block,
         )
 
     accepted = not blocking and integrity_valid and issuer_trusted
@@ -671,7 +707,8 @@ def _apply_replay(
     policy: VerificationPolicy,
     now: datetime,
     *,
-    fmt: str,
+    max_age: timedelta | None,
+    floor_failed: bool,
     key_id: str,
     note: Callable[[str], None],
     block: Callable[[str], None],
@@ -685,8 +722,10 @@ def _apply_replay(
     durable = bool(getattr(cache, "durable", False))
     # A report is fresh until issued_at + max_age, and issued_at may be up to
     # clock_skew in the future, so remember the id for max_age + 2*skew.
-    retain = (_effective_max_age(policy) or DEFAULT_RETENTION) + 2 * policy.clock_skew
+    retain = (max_age or DEFAULT_RETENTION) + 2 * policy.clock_skew
     try:
+        if floor_failed:
+            raise ReplayStateError("the replay store's policy floor could not be read or written")
         if policy.replay_mode == "check":
             if cache.seen(key_id, env.audit_run_id, now=now):
                 block("REPLAY_DETECTED")

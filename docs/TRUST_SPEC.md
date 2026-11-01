@@ -437,7 +437,16 @@ Requirements for `confidential` and `high-assurance`:
 * **Persistence.** The cache is durable. An in-memory cache is allowed only
   under `development`.
 * **Retention.** Entries live at least `max_age + clock_skew`; they MUST NOT be
-  evicted early. If capacity is exhausted the verifier fails closed
+  evicted early. Retention is fixed when an identifier is recorded, so a shipped
+  cache keeps a floor: the smallest effective `max_age` it has served under
+  `record`. It only goes down, the sqlite floor survives restarts, and a larger
+  setting is not honoured against that store (`REPLAY_POLICY_FLOOR_APPLIED`).
+  Otherwise raising `max_age` would let the same report be accepted twice, and
+  evidence refused as stale become acceptable merely because a setting changed.
+  A file from a published version has no floor and adopts the policy in force at
+  its first `record` under this code; a raise before that moment cannot be seen.
+  Going back to a larger `max_age` needs a new replay file, which forgets the
+  old identifiers, so it is an explicit operator decision. If capacity is exhausted the verifier fails closed
   (`REPLAY_STATE_UNAVAILABLE`); it MUST NOT evict to make room.
 * **Failure.** If the cache is unreachable or errors, verification fails closed
   with `REPLAY_STATE_UNAVAILABLE`. `development` MAY fail open and MUST say so
@@ -578,10 +587,10 @@ report is distinguishable from a forgery.
 `TRUST_STORE_ROLLBACK`, `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`,
 `TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
 `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`, `PROVENANCE_CONTRADICTION`,
-`PROVENANCE_UNVERIFIABLE`.
+`PROVENANCE_UNVERIFIABLE`, `REPLAY_POLICY_FLOOR_APPLIED`.
 
-Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT` and
-`SELF_SIGNED_NO_TRUST_MATERIAL` are informational unless a policy also refuses on
+Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT`,
+`SELF_SIGNED_NO_TRUST_MATERIAL` and `REPLAY_POLICY_FLOOR_APPLIED` are informational unless a policy also refuses on
 them; the result's `blocking_reasons` lists the codes that caused a refusal. The
 `TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
 the held O8 / reserve-commit work and are not emitted in Phase 3A.

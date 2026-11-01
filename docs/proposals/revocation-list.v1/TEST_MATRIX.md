@@ -1,7 +1,9 @@
 # 0.3.0 trust protocol: test matrix
 
 Companion to [the frozen proposal](../../TRUST_REVOCATION_PROTOCOL_PROPOSAL.md). AI-assisted engineering work; not an audit and no
-production assurance. An implementation is finished when every row passes against product code, including the `none` rows.
+production assurance. An implementation is finished when every row passes against product code, including the `none` rows. Rows `S16`, `G23`, `T12`,
+`V06` and `V07` stay `none` in the suite: `S16` needs real power loss and a real independent store, `G23` needs server wiring
+that this milestone does not build, and the last three are run by a release harness outside the suite.
 
 **Reading the last column.** `existing` means a test that was already in the draft v1 prototype at `f3e2a55`. `new` means a test
 added in this milestone, run against the reference model and the corrected prototype (`trust_gate.py`, `proto.py`). `none`
@@ -10,7 +12,8 @@ with itself and with the unchanged engine. It does not show that a product imple
 `test_matrix_consistency.py` checks that each named test exists in the labelled file set.
 
 **Verdict notation.** For a document: `accepted`, or `refused CODE`, at ingest, with state unchanged unless stated. For a report:
-`TRUSTED`, or `INVALID CODE`. Codes without a prefix are existing engine codes. "Permissive" describes what an implementation
+`TRUSTED`, or `INVALID CODE`. Codes without a prefix are existing engine codes. Since the implementation milestone, every test here runs against product code under `src/`, except where a row or
+the file says it uses the test double. "Permissive" describes what an implementation
 missing the rule would visibly do; rows marked (observed) were seen by running either the draft v1 prototype at `f3e2a55` or an
 earlier state of the reference model.
 
@@ -35,14 +38,14 @@ gate; overlay (join applied for one verification); wrapper (opt-in path around t
 | E11 | State and pin both deleted | refused REVOCATION_NOT_ENROLLED | enrollment | Treat the blank verifier as first use and re-learn | existing: test_deleting_the_state_forgets_enrollment_and_compromise_documented_limit; new: test_E11_no_pin_and_no_record_is_not_first_use |
 | E12 | Record from another enrollment | REVOCATION_STATE_UNAVAILABLE | state store | Read another ceremony's mark as if it were this one's | new: test_S08_a_record_from_another_enrollment_is_refused |
 | E13 | Statement that adds a new recovery anchor | refused REVOCATION_MALFORMED | transition verifier, recovery verifier | Let a statement replace the root of recovery | new: test_no_statement_can_name_a_new_recovery_anchor |
-| E14 | Enrolled authority or anchor offered to `trust add` | refused, exit 2 | CLI | Enrol a revocation key as a report key; lists stop being accepted later | none |
+| E14 | Enrolled authority or anchor offered to `trust add` | refused, exit 2 | CLI | Enrol a revocation key as a report key; lists stop being accepted later | new: test_cli_trust_add_refuses_an_enrolled_authority_or_anchor |
 | E16 | `advisory` with no baseline, first list | accepted, note REVOCATION_NO_HIGH_WATER_MARK | list verifier | Claim rollback detection it does not have | existing: test_valid_list_is_accepted_pure_and_reports_the_honest_limit; new: test_E16_advisory_with_no_baseline_says_it_has_no_mark |
 | E17 | Old recovery statement replayed after a ceremony that lost the record | refused REVOCATION_TRANSITION_GAP or REVOCATION_FORK, or REVOCATION_REPEAT if the pin holds its digest; authority unchanged | enrollment, recovery verifier | Reset the generation at the ceremony, so an old statement reinstates an old authority | new: test_E17_a_ceremony_states_the_position_so_old_statements_cannot_move_the_authority_back |
 | E18 | Ceremony pin behind the record's generation or recovery epoch | ceremony refused; authority history carried over otherwise | enrollment | Move the authority backwards and forget who was compromised | new: test_E18_a_ceremony_cannot_move_the_authority_backwards_or_drop_its_history |
 | E19 | Ceremony names a key declared compromised | ceremony refused | enrollment | Re-enrol the stolen key | new: test_E19_a_ceremony_refuses_a_key_declared_compromised |
 | E20 | Ceremony names a report key | ceremony refused | enrollment | Skip the purpose checks on the path used in an incident | new: test_E20_a_ceremony_runs_the_purpose_checks |
 | E21 | First list at baseline + 1 | must chain to the baseline digest, else refused REVOCATION_FORK | list verifier, enrollment | Skip the chain on the first list | new: test_E21_a_first_list_right_after_the_baseline_must_chain_to_it |
-| E15 | Pinned-authority store unreadable at startup under `required` | exit 3, HTTP refuses to start | CLI, server | Start with no authority and accept reports | none |
+| E15 | Pinned-authority store unreadable at startup under `required` | exit 3, HTTP refuses to start | CLI, server | Start with no authority and accept reports | new: test_cli_infrastructure_failures_exit_3 |
 
 ## L. List format and semantics
 
@@ -229,9 +232,9 @@ gate; overlay (join applied for one verification); wrapper (opt-in path around t
 | G19 | `off` | output equal to the engine, `policy_id` unchanged, even with listed state present | wrapper | Change a verdict without an opt-in | new: test_G19_off_is_exactly_the_engine |
 | G20 | `high-assurance` + `advisory`; bare store; non-durable store; no baseline | startup refused | config check | Run a fail-open configuration | new: test_G20_unsafe_configurations_are_refused_at_startup |
 | G21 | Signature valid, issuer once trusted, key now listed | INVALID with `integrity_valid: true` | wrapper, engine | Treat a valid signature as current trust | new: test_G21_an_old_signature_by_a_listed_compromised_key_is_refused_when_newly_presented |
-| G22 | Exit codes and HTTP status for each gate row | per section 10.2 | CLI, server | Exit 1 for an infrastructure failure, or 0 for anything | none |
+| G22 | Exit codes and HTTP status for each gate row | per section 10.2 | CLI, server | Exit 1 for an infrastructure failure, or 0 for anything | new: test_cli_end_to_end_required_with_exit_codes; test_cli_infrastructure_failures_exit_3 |
 | G23 | `serve` picks up a list with no restart | gate re-reads state per request | server | Hold state from startup, as it does the trust store | none |
-| G24 | Gate codes on the existing result contract, `to_dict`, `valid` alias | additive; no field removed; `off` byte-identical | wrapper | Break callers | none |
+| G24 | Gate codes on the existing result contract, `to_dict`, `valid` alias | additive; no field removed; `off` byte-identical | wrapper | Break callers | new: test_default_cli_output_has_exactly_the_published_fields; test_http_verify_output_has_exactly_the_published_fields |
 | G26 | Stolen key signs a list claiming a time before the boundary | INVALID REVOCATION_AUTHORITY_COMPROMISED | gate | Compare the thief's own `issued_at` (observed) | new: test_G26_a_backdated_list_from_a_stolen_key_does_not_survive_as_evidence |
 | G27 | `signer-asserted` with any mode | startup refused | config check | Let a report's own clock rescue a listed key under `required` (observed) | new: test_G27_signer_asserted_time_cannot_be_combined_with_a_revocation_mode |
 | G28 | Local store changes, then anyone replays an old list | refused REVOCATION_ROLLBACK; no latch | list verifier | Run store checks first and latch, so anyone can deny service (observed) | new: test_G28_replaying_an_old_list_after_a_local_store_change_stays_a_rollback |
@@ -250,7 +253,7 @@ gate; overlay (join applied for one verification); wrapper (opt-in path around t
 | D04 | Bare download of an authority key | enrolls nothing | enrollment | Install a key from a channel | existing: test_nothing_is_enrolled_from_a_list_or_statement |
 | D05 | Feed serves everything on every poll, out of order | applied in the order of section 8.4; passed transitions discarded; repeated polls succeed | state store | Stop at its first replay and never advance (observed) | new: test_D05_a_feed_can_be_polled_repeatedly_and_in_any_order |
 | D07 | List from a generation not reached yet | refused REVOCATION_AUTHORITY_MISMATCH; no latch | list verifier | Latch on ordinary delivery order | new: test_D07_a_list_from_a_generation_not_reached_yet_does_not_latch |
-| D06 | Issuer tooling persists its epoch before publishing, then crashes | no accidental fork | issuer tooling | Re-issue the same epoch with new content | none |
+| D06 | Issuer tooling persists its epoch before publishing, then crashes | no accidental fork | issuer tooling | Re-issue the same epoch with new content | new: test_a_crash_after_persist_leads_to_a_gap_and_never_a_fork |
 
 ## H. Historical verification
 
@@ -278,14 +281,14 @@ gate; overlay (join applied for one verification); wrapper (opt-in path around t
 | T07 | Lifecycle commands after migration | work | migration tool | Produce a store the tools refuse | new: test_T07_migrated_store_works_with_the_lifecycle_commands |
 | T08 | Lifecycle commands on legacy forms | still refused, file byte-identical | CLI | Convert in place | new: test_T08_lifecycle_commands_still_refuse_the_legacy_forms; existing: test_legacy_store_cannot_carry_lifecycle_state |
 | T09 | Local-only state after migration, opted in | stays in force beside the list | overlay | Let an empty list clear it | new: test_T09_after_migration_opting_in_works_and_a_local_only_state_stays |
-| T10 | Target exists, source unchanged, permission bits kept, dry run over a corpus | as section 13.4 | migration tool | Overwrite | none |
+| T10 | Target exists, source unchanged, permission bits kept, dry run over a corpus | as section 13.4 | migration tool | Overwrite | new: test_migrate_writes_a_new_file_and_leaves_the_source |
 | T11 | Legacy store with a mode other than `off` | startup refused REVOCATION_STORE_UNSUPPORTED | config check | Run with no lifecycle state | new: test_V04_opting_in_with_a_legacy_store_is_a_configuration_error_not_a_verdict |
 | T12 | Downgrade to 0.2.x after opting in | file unchanged; listed state no longer applies | CLI | Corrupt the file | none |
 
 ## V. Published reports
 
 Signers 0.1.0, 0.1.1, 0.2.0 and 0.2.1. The vectors in `tests/experimental_revocation/published_vectors/` were signed by the published
-wheels for the first three, and by the source of tag `v0.2.1` for the last.
+wheels, downloaded from PyPI with their SHA-256 checked.
 
 | ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
 |---|---|---|---|---|---|
@@ -301,6 +304,58 @@ wheels for the first three, and by the source of tag `v0.2.1` for the last.
 
 | ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
 |---|---|---|---|---|---|
-| N01 | Shipped source and schemas during this milestone | no mention, no registration, no API | test harness | Ship by accident | existing: test_no_shipped_source_mentions_the_prototype_format; test_no_schema_is_registered_or_shipped_for_it; test_the_package_exposes_no_revocation_list_api; test_prototype_lives_under_tests_and_the_draft_schema_under_docs_proposals |
+| N01 | Shipped code while this is experimental | no registration, nothing exported, default off, default path loads no revocation code | test harness | Ship by accident | new: test_nothing_is_registered_or_shipped_in_the_schema_list; test_nothing_new_is_exported_from_the_top_level; test_importing_the_package_loads_no_revocation_code; test_the_engine_knows_nothing_of_revocation; test_the_cli_default_is_off |
 | N02 | Matrix, registry and code name the same things. This does not check that a named test exercises its row | agreement | test harness | Drift | new: test_every_named_test_exists_where_its_label_says; test_codes_in_the_code_and_the_matrix_are_all_in_the_registry; test_every_registered_code_has_a_matrix_row; test_the_gate_table_matches_the_infrastructure_codes |
 | N03 | Documents avoid assurance claims | no forbidden wording | test harness | Overclaim | new: test_no_document_uses_forbidden_assurance_language |
+
+## P. Owner rulings on the implementation
+
+| ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
+|---|---|---|---|---|---|
+| P01 | `high-assurance` with `required` or `advisory`, any store, public path | PolicyError REVOCATION_HIGH_ASSURANCE_UNAVAILABLE; CLI exit 2 | wrapper | Fall back to a local file, or trust a store that says it is independent | new: test_high_assurance_with_any_mode_is_unavailable_whatever_store_is_passed; test_cli_high_assurance_is_refused_as_a_configuration_error |
+| P02 | Object claiming independence | no such attribute; refused on the public path | wrapper | Enable the mode on self-attestation | new: test_no_store_can_declare_itself_independent; test_a_store_other_than_the_shipped_one_is_refused_on_the_public_path |
+| P03 | `high-assurance` with `off` | decisions and `policy_id` unchanged; NOT_EVALUATED in the optional section; no new default field | wrapper | Add a field that breaks strict consumers, or read as satisfying the revocation-aware profile | new: test_high_assurance_off_keeps_decisions_and_policy_id_and_is_not_evaluated; test_cli_high_assurance_off_says_nothing_new_by_default |
+| P04 | Evidence age zero, negative, non-finite, above 24 h, wrong type | PolicyError; CLI exit 2 | config check | Accept an unbounded window | new: test_evidence_age_outside_the_cap_is_refused; test_cli_evidence_age_outside_the_cap_is_a_configuration_error |
+| P05 | Evidence age raised after stale data was refused | still REVOCATION_DATA_STALE, note REVOCATION_POLICY_FLOOR_APPLIED | gate, state store | Accept stale evidence because a setting changed | new: test_raising_the_evidence_age_does_not_make_stale_data_acceptable |
+| P06 | Record that served `required`, used under `advisory` | INVALID REVOCATION_POLICY_DOWNGRADE | gate | Downgrade silently | new: test_a_record_that_served_required_refuses_advisory |
+| P07 | Ceremony and the floor | kept unless reset explicitly | enrollment | Forget the floor as a side effect | new: test_the_floor_survives_a_new_context_and_a_ceremony_unless_reset_explicitly |
+| P08 | `off` after `required` | reads nothing, so cannot refuse. Stated limit, forced by the ruling on `off` | wrapper | Claim to detect it | new: test_limit_off_reads_nothing_so_it_cannot_be_refused |
+
+## F. F-07: replay retention and `max_age`
+
+| ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
+|---|---|---|---|---|---|
+| F01 | Record under 1 h, verify at +2 h under 1 d, new cache instance | INVALID REPORT_TOO_OLD, note REPLAY_POLICY_FLOOR_APPLIED | engine, replay store | TRUSTED twice (observed on published 0.2.1 per the finding) | new: test_the_finding_raising_max_age_no_longer_accepts_a_report_twice |
+| F02 | `max_age` unchanged | INVALID REPLAY_DETECTED, no new code | engine | Change the normal path | new: test_control_unchanged_max_age_is_the_normal_replay_path; test_control_unchanged_max_age_output_has_no_new_code |
+| F03 | Refused as stale, setting raised | still REPORT_TOO_OLD | engine, replay store | Accept because a setting changed | new: test_a_report_refused_as_stale_stays_refused_when_the_setting_is_raised |
+| F04 | Lowered, then raised back | floor stays at the lower value | replay store | Restore the wider window | new: test_lowering_is_honoured_and_raising_back_is_not |
+| F05 | Floor after a real new process | survives | replay store | Hold it in memory | new: test_the_floor_survives_a_real_new_process |
+| F06 | File written by a published version | entries honoured; floor adopted at first use; `check` records no identifier | replay store | Refuse old files, or write in `check` | new: test_a_file_from_a_published_version_keeps_its_entries_and_adopts_a_floor_at_first_record; test_check_mode_on_a_published_file_adds_only_the_floor |
+| F07 | A raise made before first use of a published file | undetected. Stated limit | replay store | Claim to detect it | new: test_limit_a_raise_made_before_first_use_of_a_published_file_cannot_be_seen |
+| F08 | Corrupt floor | REPLAY_STATE_UNAVAILABLE at the replay step; an earlier refusal keeps its path | engine | Fail open, or change exit codes on refused reports | new: test_a_corrupt_floor_fails_closed_with_the_existing_code; test_an_earlier_refusal_keeps_its_exit_path_when_the_floor_is_broken |
+| F09 | sqlite `:memory:`, in-memory cache, third-party cache | as before; in-memory holds a floor for its lifetime; third-party has none | engine | Break existing callers | new: test_the_memory_path_behaves_as_it_did; test_in_memory_cache_holds_the_floor_for_its_lifetime; test_a_third_party_cache_without_the_method_still_works_and_has_no_floor |
+
+## R. Real file store
+
+| ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
+|---|---|---|---|---|---|
+| R10 | Real process, SIGKILL at each commit point | whole old or whole new record; re-delivery converges; temp swept | state store | Leave a partial record | new: test_real_process_killed_at_each_commit_point; test_a_temp_file_from_a_killed_writer_is_never_read |
+| R11 | Real concurrent processes | highest epoch wins; no lost write | state store | Lower the mark | new: test_real_concurrent_processes_end_at_the_highest_epoch |
+| R12 | Damaged record on disk, six ways | REVOCATION_STATE_UNAVAILABLE. Truncation simulates a torn write | state store | Read it as empty | new: test_a_damaged_record_fails_closed_never_as_empty; test_an_unusable_directory_fails_closed |
+| R13 | Restored backup | caught by a process that remembers; not by a new one, until the deadline. Stated limit | gate | Claim otherwise | new: test_a_restored_backup_is_caught_by_a_process_that_remembers; test_limit_a_restored_backup_is_not_caught_by_a_new_process_and_the_bound_is_the_deadline |
+
+## X. Hostile sequences against the implementation
+
+| ID | Scenario | Expected | Enforced by | Permissive implementation would | Coverage |
+|---|---|---|---|---|---|
+| X01 | Old public recovery statement replayed, expired or superseded | record unchanged; current authority not condemned | recovery verifier, state store | Condemn the current authority with a public document (observed) | new: test_replaying_an_expired_public_recovery_does_not_condemn_the_current_authority; test_replaying_an_older_recovery_does_not_condemn_a_key_rotated_to_since |
+| X02 | Later recovery, key rotated to since the last one, not declared; late older statement | superseded, not compromised; its mark usable until the deadline; a late statement lands its declaration and voids nothing | recovery verifier, gate | Refuse a mark nobody condemned (observed) | new: test_a_legitimate_recovery_does_not_condemn_a_key_nobody_declared; test_a_mark_from_a_rotated_key_survives_a_later_recovery_that_did_not_declare_it; test_an_older_statement_lands_its_declaration_and_voids_nothing |
+| X03 | Feed poll with old statements and junk | reaches the list | state store | Stop, and go stale for ever (observed) | new: test_an_honest_feed_poll_carrying_old_recoveries_still_reaches_the_list; test_a_junk_transition_in_a_feed_does_not_stop_the_poll |
+| X04 | Fingerprint with a trailing newline | refused REVOCATION_MALFORMED | list verifier, issuer tooling | Accept a revocation it never enforces (observed) | new: test_a_fingerprint_with_a_trailing_newline_is_malformed |
+| X05 | Null successor, year 9999, non-text documents | refused REVOCATION_MALFORMED | list verifier, recovery verifier | Raise out of the verifier (observed) | new: test_an_explicit_null_successor_is_malformed; test_a_time_at_the_end_of_the_range_is_malformed_not_an_overflow; test_non_text_documents_are_refused_not_raised |
+| X06 | Entry without an issuer; mutated context; str subclass profile; private path without its flag | PolicyError | config check, wrapper | Skip the gate, widen the cap, or reach the unavailable profile (observed) | new: test_an_entry_without_an_issuer_is_refused_not_waved_through; test_mutating_the_context_cannot_widen_the_evidence_age_or_invent_a_mode; test_a_str_subclass_cannot_slip_past_the_high_assurance_refusal; test_the_private_algorithm_path_also_refuses_high_assurance_without_its_explicit_test_flag |
+| X07 | Ceremony below the mark, or naming a superseded key | refused unless the loss is stated | enrollment | Drop the epoch floor silently (observed) | new: test_a_ceremony_below_the_mark_needs_the_loss_stated; test_a_ceremony_refuses_a_superseded_key |
+| X08 | Damaged record with a recomputed digest, group-writable record, FIFO, bad pin | REVOCATION_STATE_UNAVAILABLE or PinStoreError; no traceback, no hang | state store | Crash, which exits 1 as if refused, or hang (observed) | new: test_a_well_digested_record_with_wrong_types_is_unavailable_not_a_traceback; test_a_group_writable_record_is_refused; test_a_fifo_is_refused_without_hanging; test_a_bad_pin_is_never_written_and_never_loads |
+| X09 | Successor cycle, mistyped fingerprint, unknown key, other issuer, oversized list, wrong generation after recovery | ActionRefused before signing | issuer tooling | Sign something that wedges the publisher for good (observed) | new: test_a_successor_cycle_is_refused_before_signing; test_a_mistyped_fingerprint_is_refused_with_an_inventory; test_a_key_outside_the_inventory_needs_saying_so; test_another_issuers_key_is_refused; test_an_oversized_list_is_refused_before_signing; test_the_generation_after_a_recovery_is_taken_from_the_statement |
+| X10 | CLI: missing publisher state, no inventory, digest at epoch 0, bad output path, hostile documents | refused, no traceback, right exit code | CLI | Start again at epoch 1 and fork (observed) | new: test_cli_a_missing_publisher_state_needs_initial; test_cli_actions_need_an_inventory_unless_waived; test_cli_baseline_digest_at_epoch_zero_is_refused; test_cli_enroll_with_a_bad_recovery_digest_leaves_the_pin_file_usable; test_cli_bad_output_path_and_nested_previous_are_refused_not_tracebacks; test_cli_hostile_documents_are_refusals_not_infrastructure_failures; test_cli_high_assurance_refusal_comes_before_touching_the_pins |
+| X11 | Gate refusal under `record`; stale refusal under `check`; read-only store; empty floor table | floor bound; stays refused when raised; read-only keeps working; empty table corrupt | engine, wrapper | Honour a raise after a refusal (observed) | new: test_a_gate_refusal_under_record_still_sets_the_floor; test_a_stale_refusal_in_check_mode_stays_refused_when_raised; test_a_read_only_store_in_check_mode_keeps_working; test_an_empty_floor_table_is_corrupt_not_absent |

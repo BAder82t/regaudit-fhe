@@ -22,7 +22,6 @@ EXISTING = (
     "test_worked_examples.py",
     "test_corpus.py",
     "test_frozen.py",
-    "test_not_shipped.py",
 )
 NEW = (
     "test_v2_verifier_rules.py",
@@ -30,7 +29,15 @@ NEW = (
     "test_recovery_and_latch_rules.py",
     "test_published_and_migration.py",
     "test_matrix_consistency.py",
+    "test_not_shipped.py",
+    "../test_replay_policy_floor.py",
+    "../test_revocation_file_store.py",
+    "../test_revocation_public_gate.py",
+    "../test_revocation_tooling_and_cli.py",
+    "../test_revocation_hostile_sequences.py",
 )
+SOURCES = ("_revocation.py", "_revocation_state.py", "_revocation_gate.py")
+SRC = ROOT / "src" / "regaudit_fhe"
 CODE = re.compile(r"\bREVOCATION_[A-Z_]+")
 
 
@@ -90,17 +97,19 @@ def test_every_new_numbered_test_appears_in_the_matrix():
 
 def _registry() -> set[str]:
     section = SPEC.read_text(encoding="utf-8").split("## 15. Reason codes")[1].split("\n## ")[0]
-    return set(CODE.findall(section))
+    notes = (MATRIX.parent / "IMPLEMENTATION_NOTES.md").read_text(encoding="utf-8")
+    return set(CODE.findall(section)) | set(CODE.findall(notes))
 
 
 def test_codes_in_the_code_and_the_matrix_are_all_in_the_registry():
     registry = _registry()
-    for path in (HERE / "proto.py", HERE / "trust_gate.py", MATRIX):
-        used = set(CODE.findall(path.read_text(encoding="utf-8")))
-        assert used <= registry, (path.name, sorted(used - registry))
-    code_side = set(CODE.findall((HERE / "proto.py").read_text(encoding="utf-8")))
-    code_side |= set(CODE.findall((HERE / "trust_gate.py").read_text(encoding="utf-8")))
-    assert registry <= code_side, sorted(registry - code_side)
+    code_side: set[str] = set()
+    for name in SOURCES:
+        code_side |= set(CODE.findall((SRC / name).read_text(encoding="utf-8")))
+    assert code_side <= registry, sorted(code_side - registry)
+    assert set(CODE.findall(MATRIX.read_text(encoding="utf-8"))) <= registry
+    test_side = set(CODE.findall((HERE / "proto.py").read_text(encoding="utf-8")))
+    assert registry <= code_side | test_side, sorted(registry - code_side - test_side)
 
 
 def test_every_registered_code_has_a_matrix_row():
@@ -123,12 +132,21 @@ def test_no_document_uses_forbidden_assurance_language():
         r"authoritative revocation is provided|proves? (that )?FHE|waived)\b",
         re.IGNORECASE,
     )
-    for path in (SPEC, MATRIX, MATRIX.parent / "IMPLEMENTATION_PLAN.md"):
+    for path in (
+        SPEC,
+        MATRIX,
+        MATRIX.parent / "IMPLEMENTATION_PLAN.md",
+        MATRIX.parent / "IMPLEMENTATION_NOTES.md",
+        MATRIX.parent / "CHALLENGER_API.md",
+    ):
         hits = forbidden.findall(path.read_text(encoding="utf-8"))
         assert not hits, (path.name, hits)
 
 
-@pytest.mark.parametrize("name", ["TEST_MATRIX.md", "IMPLEMENTATION_PLAN.md"])
+@pytest.mark.parametrize(
+    "name",
+    ["TEST_MATRIX.md", "IMPLEMENTATION_PLAN.md", "IMPLEMENTATION_NOTES.md", "CHALLENGER_API.md"],
+)
 def test_companion_documents_exist_and_are_not_empty(name):
     data = (MATRIX.parent / name).read_bytes()
     assert hashlib.sha256(data).hexdigest() != hashlib.sha256(b"").hexdigest()

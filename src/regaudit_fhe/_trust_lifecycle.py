@@ -20,7 +20,7 @@ import hashlib
 import os
 import stat
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,16 @@ from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
 
-__all__ = ["LOCAL_NOTICE", "LifecycleRefused", "retire", "revoke", "status_rows"]
+__all__ = [
+    "LOCAL_NOTICE",
+    "LifecycleRefused",
+    "MigrationRefused",
+    "migrate",
+    "migrate_store",
+    "retire",
+    "revoke",
+    "status_rows",
+]
 
 # A boundary this far past the operator's clock is refused as a typo or a replayed clock.
 FUTURE_SKEW = timedelta(minutes=5)
@@ -314,3 +323,106 @@ def revoke(
             entry["compromised_from"] = _utc(boundary)
 
     return _mutate(path, key_id, now, change)
+
+
+# ----------------------------------------------------------------------------- migration from the legacy forms
+
+
+class MigrationRefused(ValueError):
+    """Nothing was produced."""
+
+
+def migrate_store(
+    payload: Mapping[str, Any], issuers: Mapping[str, str], *, as_of: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Legacy or bare store to the ``entries`` form. The issuer of each key is an operator statement, never inferred.
+
+    A flat ``revoked`` key becomes compromised with an unknown boundary, never retired: the legacy form does not say
+    why it was revoked, and only the strictest reading is safe.
+    """
+    if "entries" in payload:
+        raise MigrationRefused("already an entries store")
+    try:
+        source = TrustStore.from_dict(payload)
+    except TrustStoreError as exc:
+        raise MigrationRefused(f"the source does not validate: {exc}") from exc
+    missing = sorted(set(source.keys) - set(issuers))
+    if missing:
+        raise MigrationRefused(f"no issuer stated for {missing}; issuers are never inferred")
+    extra = sorted(set(issuers) - set(source.keys))
+    if extra:
+        raise MigrationRefused(f"issuer stated for unknown key_id(s) {extra}")
+    entries: dict[str, dict[str, Any]] = {}
+    report: list[dict[str, Any]] = []
+    for kid in sorted(source.keys):
+        was = "revoked" if kid in source.revoked else "active"
+        item: dict[str, Any] = {
+            "issuer": issuers[kid],
+            "public_key_pem": source.keys[kid],
+            "status": "compromised" if was == "revoked" else "active",
+        }
+        pin = source.parameter_set_pins.get(kid)
+        if pin is not None:
+            item["parameter_set_pin"] = pin
+        entries[kid] = item
+        report.append(
+            {
+                "key_id": kid,
+                "fingerprint": spki_fingerprint(source.keys[kid]),
+                "from": was,
+                "to": item["status"],
+                "issuer": issuers[kid],
+                "reason_code_change": (
+                    "KEY_REVOKED -> KEY_COMPROMISED_NO_CHRONOLOGY" if was == "revoked" else None
+                ),
+                "new_refusal_possible": "ISSUER_MISMATCH",
+            }
+        )
+    out = {"entries": entries, "as_of": as_of}
+    try:
+        migrated = TrustStore.from_dict(out)
+    except TrustStoreError as exc:
+        raise MigrationRefused(f"the result does not validate: {exc}") from exc
+    if {k: spki_fingerprint(v) for k, v in migrated.keys.items()} != {
+        k: spki_fingerprint(v) for k, v in source.keys.items()
+    }:
+        raise MigrationRefused("a key changed during migration")
+    return out, report
+
+
+def migrate(
+    source: str, target: str, issuers: Mapping[str, str], *, now: datetime, dry_run: bool = False
+) -> dict[str, Any]:
+    """Write a new ``entries`` store. The source is left untouched; an existing target is refused."""
+    real, mode = _resolve(source)
+    try:
+        payload = loads_strict(Path(real).read_bytes(), max_bytes=MAX_TRUST_STORE_BYTES)
+    except (OSError, CanonicalError, RecursionError) as exc:
+        raise TrustStoreError(f"trust-store {source!r} is unusable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise MigrationRefused("the source must be a JSON object")
+    out, rows = migrate_store(payload, issuers, as_of=_utc(now))
+    if os.path.lexists(target):
+        raise MigrationRefused(f"{target!r} exists; migration never overwrites")
+    if not dry_run:
+        data = _dump(out).encode("utf-8")
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(target, mode)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(target)
+            raise
+    return {
+        "scope": SCOPE,
+        "source": source,
+        "target": target,
+        "dry_run": dry_run,
+        "keys": rows,
+        "notice": "The source is unchanged. Under the new store a report whose signed issuer differs from the "
+        "stated issuer is refused (ISSUER_MISMATCH): check the stated issuers against your reports first.",
+    }

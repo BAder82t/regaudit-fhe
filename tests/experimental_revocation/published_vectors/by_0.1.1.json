@@ -11,7 +11,7 @@
     "declared": 6
    },
    "input_commitments": [],
-   "issued_at": "2026-11-01T19:31:50.811624+00:00",
+   "issued_at": "2026-11-01T21:07:07.363377+00:00",
    "issuer": "vector-issuer",
    "parameter_set": {
     "backend": "plaintext",
@@ -28,9 +28,9 @@
    "receipt": {
     "key_id": "vec-key",
     "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcyZl70ijiYvdkTilWHj9V0L+LckKh+VUvGf45yybvXs=\n-----END PUBLIC KEY-----\n",
-    "sha256": "9036acffba9bb0fe2221e31209c2f3467a2ce9d3627f94dcb4c94239b850af2c",
+    "sha256": "6c74d0d41e5636634a275292e1fe23a5b4ff6271ecf8cf2c22017913b5090d06",
     "signature_alg": "Ed25519",
-    "signature_b64": "kENp/Kx+hBmbY4g1gYzM+fE8CSmpQSWPdh06v/WHLbM7xwCB2Phsd7zBkXN+syC3dS8K3LsPE2E3aTWKy0kDAw=="
+    "signature_b64": "8sTzGOutYoynUtPDTw9a3qCl4pGS8q/Di5AqZMNgaSfCmCZxrr71v0Ah43GfWuZusGun+WSFEAvPma+j0vyfDA=="
    },
    "regulations": [
     "EU_AI_ACT_ART15",
