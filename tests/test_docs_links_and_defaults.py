@@ -54,6 +54,10 @@ def test_there_are_links_to_check() -> None:
     assert len(_relative_targets()) > 20
 
 
+@pytest.mark.skipif(
+    not (ROOT / ".github" / "workflows").is_dir(),
+    reason="not a full source checkout (an sdist has docs/ but not COMPLIANCE.md, LICENSING.md or .github/)",
+)
 def test_every_relative_markdown_link_resolves() -> None:
     broken = []
     for f, n, target in _relative_targets():
