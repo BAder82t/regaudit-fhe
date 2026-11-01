@@ -284,9 +284,7 @@ def test_no_bootstrapping(case: Case, ctx) -> None:
         f"{case.name}: depth_consumed = {consumed} would require "
         f"bootstrapping the d=6 modulus chain"
     )
-    import regaudit_fhe.fhe as fhe_pkg
-
-    src = fhe_pkg.primitives.__file__
+    src = fhe_p.__file__
     with open(src) as fh:
         body = fh.read()
     callsites = [line for line in body.splitlines() if "bootstrap(" in line or ".bootstrap" in line]

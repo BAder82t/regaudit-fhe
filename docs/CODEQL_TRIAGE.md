@@ -41,8 +41,24 @@ changed to the recommended API if that is a genuine improvement.
 | 18, 19 | `py/ineffectual-statement` | `reports.py` `KeyProvider` | `...` bodies of a `Protocol`, which is idiomatic |
 | 20, 21 | `py/cyclic-import` | `fhe/backends.py` and `fhe/openfhe.py` | A deliberate lazy backend registry: `backends` imports `openfhe` inside a function and `openfhe` registers itself with `backends` |
 
-These are quality notes with no security impact. They are deferred so that this change
-stays confined to the security findings.
+These are quality notes with no security impact. They were deferred so that this change
+stayed confined to the security findings; they are closed in the section below.
+
+## Note-level backlog closed (19 alerts)
+
+All 19 open alerts were `note` severity with no security impact. Each is changed in code; none is dismissed or
+suppressed, and the CodeQL configuration is unchanged. No runtime behaviour changes.
+
+| # | Rule | Location | Change |
+|---|---|---|---|
+| 8, 9, 10, 11, 14 | `py/unused-import` | `benchmarks/bench_fhe.py`, `examples/` | Removed the imports |
+| 23 | `py/unused-import` | `fhe/openfhe.py` | The availability probe uses `importlib.import_module("openfhe")`, so it still catches every import failure but binds no name |
+| 17, 22 | `py/import-and-import-from` | `tests/test_fhe_equivalence_matrix.py`, `tests/test_dp.py` | One import form per module |
+| 18, 19 | `py/ineffectual-statement` | `reports.py` `KeyProvider` | The `...` bodies of the `Protocol` members are replaced by docstrings |
+| 20, 21 | `py/cyclic-import` | `fhe/backends.py`, `fhe/openfhe.py` | `backends` no longer imports `openfhe`; the package `__init__` calls `openfhe.register()` instead, so the cycle is gone. `regaudit_fhe.fhe.openfhe.register()` is unchanged |
+| 45 | `py/empty-except` | `scripts/resource_bounds_container.py` | Added the explanatory comment |
+| 46, 47 | `py/ineffectual-statement` | `server.py` request-timeout middleware | `_ = await task`. CodeQL's "no effect" is wrong for an `await`, which is what waits for the task; this is the same await with the same cancellation behaviour, and it silences the note rather than fixing a defect |
+| 48, 49, 50, 51 | `py/ineffectual-statement` | `tests/test_server_resource_bounds.py` | `_ = await ...`, for the same reason |
 
 ## 0.2.0 merge (PR #45): alerts #52–#57
 

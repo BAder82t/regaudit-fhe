@@ -7,8 +7,7 @@ import math
 import numpy as np
 import pytest
 
-import regaudit_fhe as rf
-from regaudit_fhe import dp
+from regaudit_fhe import AuditEnvelope, Signer, dp, envelope, fairness_oracle, verify_receipt
 
 
 def test_laplace_scale_and_gaussian_sigma_formulas():
@@ -56,7 +55,7 @@ def test_invalid_parameters_rejected():
 
 
 def test_privatize_report_noises_named_fields_only():
-    report = rf.fairness_oracle(
+    report = fairness_oracle(
         np.array([1, 0, 1, 1.0]),
         np.array([1, 0, 0, 1.0]),
         np.array([1, 1, 0, 0.0]),
@@ -72,7 +71,7 @@ def test_privatize_report_noises_named_fields_only():
 
 
 def test_privatize_report_rejects_boolean_and_unknown_fields():
-    report = rf.fairness_oracle(
+    report = fairness_oracle(
         np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, 1.0])
     )
     spec = dp.DPSpec(sensitivity=1.0, epsilon=1.0)
@@ -94,7 +93,7 @@ def test_accountant_basic_composition_and_budget():
 
 
 def test_dp_block_is_signed_into_envelope_and_tamper_evident():
-    report = rf.fairness_oracle(
+    report = fairness_oracle(
         np.array([1, 0, 1, 1.0]),
         np.array([1, 0, 0, 1.0]),
         np.array([1, 1, 0, 0.0]),
@@ -102,25 +101,25 @@ def test_dp_block_is_signed_into_envelope_and_tamper_evident():
     )
     spec = dp.DPSpec(sensitivity=0.5, epsilon=1.0)
     priv, block = dp.privatize_report(report, {"demographic_parity_diff": spec}, rng=dp.make_rng(2))
-    signer = rf.Signer.generate(issuer="acme", key_id="k1")
-    env = rf.envelope("fairness", priv, signer=signer, dp=block)
+    signer = Signer.generate(issuer="acme", key_id="k1")
+    env = envelope("fairness", priv, signer=signer, dp=block)
     keys = {"k1": signer.public_key_pem()}
 
     assert env.dp is not None and env.dp["applied"] is True
     assert "dp" in env.signed_body()
-    assert rf.verify_receipt(env, trusted_keys=keys, strict=True)
+    assert verify_receipt(env, trusted_keys=keys, strict=True)
 
     # Tampering with the disclosed epsilon breaks the signature.
     env.dp["fields"]["demographic_parity_diff"]["epsilon"] = 99.0
-    assert not rf.verify_receipt(env, trusted_keys=keys, strict=True)
+    assert not verify_receipt(env, trusted_keys=keys, strict=True)
 
 
 def test_dp_block_survives_envelope_roundtrip():
-    report = rf.fairness_oracle(
+    report = fairness_oracle(
         np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, 1.0])
     )
     spec = dp.DPSpec(sensitivity=1.0, epsilon=2.0, mechanism=dp.GAUSSIAN, delta=1e-5)
     priv, block = dp.privatize_report(report, {"demographic_parity_diff": spec}, rng=dp.make_rng(3))
-    env = rf.envelope("fairness", priv, dp=block)
-    restored = rf.AuditEnvelope.from_dict(env.to_dict())
+    env = envelope("fairness", priv, dp=block)
+    restored = AuditEnvelope.from_dict(env.to_dict())
     assert restored.dp == env.dp

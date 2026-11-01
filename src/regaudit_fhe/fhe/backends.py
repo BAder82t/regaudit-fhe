@@ -28,7 +28,6 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -166,13 +165,8 @@ def _register_builtin_backends() -> None:
         )
     )
 
-    # OpenFHE registers itself from its own module to keep its (heavier,
-    # optional) import off this module's import path. If the adapter is
-    # unimportable for any reason it simply stays unregistered.
-    with contextlib.suppress(Exception):
-        from . import openfhe as _openfhe
-
-        _openfhe.register()
+    # OpenFHE registers itself from its own module, driven by the package
+    # __init__ (see _register_openfhe there), so this module never imports it.
 
 
 def supported_matrix_kinds(name: str) -> Sequence[str]:

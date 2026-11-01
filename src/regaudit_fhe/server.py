@@ -841,11 +841,11 @@ class TimeoutMiddleware:
             task.result()
             return
         if started:
-            await task  # the response head is out; let the body finish rather than truncate it
+            _ = await task  # the response head is out; let the body finish rather than truncate it
             return
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await task
+            _ = await task
         body = json.dumps({"detail": "request timed out"}).encode("utf-8")
         await send(
             {

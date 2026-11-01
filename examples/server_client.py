@@ -25,7 +25,6 @@ try:
 except Exception as exc:
     sys.exit(f"[server] extra not installed: {exc}")
 
-import regaudit_fhe as rf
 from regaudit_fhe.server import ServerConfig, build_app
 
 
