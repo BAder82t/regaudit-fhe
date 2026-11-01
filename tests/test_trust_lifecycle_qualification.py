@@ -964,3 +964,11 @@ def test_new_store_and_backup_data_files_are_fsynced_before_the_replace(tmp_path
     assert events[:first].count("fsync-file") == 2  # new store bytes and backup bytes
     assert events.count("replace") == 2
     assert events[-1] == "fsync-dir" and "fsync-dir" not in events[:first]
+
+
+def test_cli_retire_also_carries_the_local_policy_notice_on_stderr(tmp_path):
+    _enrolled(tmp_path)
+    r = _cli(tmp_path, "trust", "retire", "--store", "s.json", "--key-id", "k-1")
+    assert r.returncode == 0
+    assert "LOCAL VERIFIER POLICY CHANGE" in r.stderr and "issuer authorised" in r.stderr
+    assert json.loads(r.stdout)["scope"] == "LOCAL VERIFIER POLICY CHANGE"

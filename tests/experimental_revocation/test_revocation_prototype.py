@@ -61,13 +61,13 @@ def test_golden_vectors_pin_canonical_bytes_digest_and_signature(w):
         w.anchor.fingerprint == "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518"
     )
     assert hashlib.sha256(proto.signing_input(doc)).hexdigest() == (
-        "b600722fffda841dc66a35f0d24dbc3c5aad0cfed68d627b24b0bdc7460360cc"
+        "767d48b3bcafd2f7f36902f8eb54d51e0423f647eb4c00a802314722fb84acac"
     )
     assert (
-        proto.list_digest(doc) == "66651f87f1e008445444031df614ab16e55b634f95b7e4cd0d5056eaa999345c"
+        proto.list_digest(doc) == "ef0eb8df23352856bc82c0a29e97179f6d4a721dc5bb1ee67d0a75ba17b67712"
     )
     assert doc["signature"]["signature_b64"] == (
-        "sOhC0J0zBG/usnpjYAZ6duAtwCY4L8Ni2BUKVzySfUJdApucGE3nAYZaNGQ3Kvzapmekca3WzHakOLwhjj0dDQ=="
+        "N+0APlAz/aSuMFOWubKJWgF1a5GXbmzEDVELuiuxESk4s2b1zcKJ90hW4fJyn1X+l38IvUIoiEJwosxNY00ECA=="
     )
 
 
@@ -181,7 +181,7 @@ def test_every_leaf_field_is_tamper_evident(w):
     doc = _full_doc(w)
     assert run(w, doc, store=w.store(w.old, w.new, w.third)).accepted
     paths = [p for p, _ in _leaves(doc)]
-    assert len(paths) == 23
+    assert len(paths) == 24
     for path in paths:
         bad = copy.deepcopy(doc)
         _set(bad, path, _mutated(copy.deepcopy(dict(_leaves(doc))[path])))
@@ -354,10 +354,23 @@ def test_effective_from_after_issuance_is_refused(w):
 
 def test_expired_list_gives_no_authenticated_history(w):
     res = run(w, retired_list(w))
-    assert proto.derive_trust_history(res, NOW) is not None
-    assert proto.derive_trust_history(res, proto.parse_rfc3339(UNTIL)) is None
+    ok = {"profile": "confidential", "owner_approved": True}
+    assert proto.derive_trust_history(res, NOW, **ok) is not None
+    assert proto.derive_trust_history(res, proto.parse_rfc3339(UNTIL), **ok) is None
     refused = run(w, retired_list(w), now=NOW.replace(year=2027))
-    assert proto.derive_trust_history(refused, NOW) is None
+    assert proto.derive_trust_history(refused, NOW, **ok) is None
+
+
+def test_list_derived_history_is_off_by_default_and_never_for_high_assurance(w):
+    """A cumulative current list is not an authenticated history (owner decision 7)."""
+    res = run(w, retired_list(w))
+    assert proto.derive_trust_history(res, NOW, profile="confidential") is None  # not approved
+    assert proto.derive_trust_history(res, NOW, profile="development") is None
+    assert proto.derive_trust_history(res, NOW, profile="development", owner_approved=True)
+    for profile in ("high-assurance", "unknown", ""):
+        assert proto.derive_trust_history(res, NOW, profile=profile, owner_approved=True) is None
+    out = proto.evaluate(w.store(), dump(retired_list(w)), w.anchor, proto.RevocationState(), NOW)
+    assert out.status == "VERIFIED" and out.history is None  # default evaluate() yields no history
 
 
 # ============================================================================ epochs, rollback, fork, gaps
@@ -375,7 +388,7 @@ def test_epoch_chain_advances_and_rejects_replay_of_older_list(w):
     state = _commit(w, l1)
     l2 = w.signed(2, [w.entry(w.old, "compromised", R_OLD)], prev=proto.list_digest(l1))
     state2 = _commit(w, l2, state)
-    assert state2.get(w.issuer, w.anchor.fingerprint).epoch == 2  # type: ignore[union-attr]
+    assert state2.get(w.issuer).epoch == 2  # type: ignore[union-attr]
     res = run(w, l1, state2)  # replay of an older, still-valid, authentic list
     assert res.code == "REVOCATION_ROLLBACK" and not res.accepted
     assert res.rollback_detection == "high-water-mark-present"
@@ -434,7 +447,7 @@ def test_commit_is_monotone_even_if_called_out_of_order(w):
     l2 = w.signed(2, [w.entry(w.old, "retired", R_OLD)], prev=proto.list_digest(l1))
     s2 = _commit(w, l2)
     r1 = run(w, l1)  # accepted against an EMPTY state, committed late
-    assert proto.commit(s2, w.anchor, r1).get(w.issuer, w.anchor.fingerprint).epoch == 2  # type: ignore[union-attr]
+    assert proto.commit(s2, w.anchor, r1).get(w.issuer).epoch == 2  # type: ignore[union-attr]
 
 
 def test_marks_are_per_issuer_and_authority(w):
@@ -678,7 +691,8 @@ def test_verified_list_makes_authenticated_history_producible_for_the_existing_s
     # no list: the key is still locally active -> accepted (the verifier has no revocation evidence)
     assert verify(env, VerificationPolicy(trust_store=store, now=lambda: NOW, **kw)).accepted
 
-    out = proto.evaluate(store, dump(retired_list(w)), w.anchor, proto.RevocationState(), NOW)
+    out = proto.evaluate(store, dump(retired_list(w)), w.anchor, proto.RevocationState(), NOW,
+                         owner_approved_history=True)  # OPTION for lower profiles, needs owner approval  # fmt: skip
     assert out.status == "VERIFIED" and out.history is not None and out.history.authenticated
     pol = VerificationPolicy(
         trust_store=out.store, now=lambda: NOW, trust_history=out.history, **kw
@@ -709,7 +723,8 @@ def test_compromise_in_a_verified_list_is_never_rescued_by_chronology_missing(w)
     for boundary, expect in ((None, "KEY_COMPROMISED_NO_CHRONOLOGY"), ("2026-07-01T00:00:00Z", "SIGNED_AFTER_COMPROMISE"),
                              ("2026-09-01T00:00:00Z", None)):  # fmt: skip
         doc = w.signed(1, [w.entry(w.old, "compromised", boundary)])
-        out = proto.evaluate(w.store(), dump(doc), w.anchor, proto.RevocationState(), NOW)
+        out = proto.evaluate(w.store(), dump(doc), w.anchor, proto.RevocationState(), NOW,
+                             owner_approved_history=True)  # fmt: skip
         res = verify(env, VerificationPolicy(trust_store=out.store, now=lambda: NOW,
                                              trust_history=out.history, timestamp_verifier=_tsa(signed_at)))  # fmt: skip
         assert res.accepted is (expect is None), (boundary, res.blocking_reasons)
@@ -723,7 +738,9 @@ def test_high_assurance_still_refuses_historical_acceptance_with_a_verified_list
         "drift", _report(), signer=w.old, deployment_id="p", audience=["reg"], issued_at=signed_at
     )
     env = env.with_timestamp(issuer="t", token=b"ok:" + env.sealed_digest(), issued_at=signed_at)
-    out = proto.evaluate(w.store(), dump(retired_list(w)), w.anchor, proto.RevocationState(), NOW)
+    out = proto.evaluate(w.store(), dump(retired_list(w)), w.anchor, proto.RevocationState(), NOW,
+                         profile="high-assurance", owner_approved_history=True)  # fmt: skip
+    assert out.history is None  # never produced for high-assurance, even when "approved"
     pol = VerificationPolicy(
         profile="high-assurance", trust_store=out.store, now=lambda: NOW, trust_history=out.history,
         timestamp_verifier=_tsa(signed_at), max_age=timedelta(days=90), verifier_id="reg",
@@ -854,7 +871,7 @@ def test_HONEST_LIMIT_deleting_or_lowering_the_state_defeats_rollback_detection(
     # lowering the recorded epoch has the same effect
     state.save(path)
     raw = json.loads(Path(path).read_text())
-    for mark in raw.values():
+    for mark in raw["marks"].values():
         mark["epoch"] = 1
         mark["digest"] = proto.list_digest(l1)
         mark["entries"] = {e["key_id"]: e for e in l1["entries"]}

@@ -1,289 +1,281 @@
-# Owner-signed revocation lists: proposed protocol, draft v1 (prototype only)
+# Owner-signed revocation: FROZEN protocol specification, draft v1 (prototype only)
 
-Status: **proposal with a tests-only prototype. Not implemented in the product, not part of the published
-protocol, no schema registered.** AI-assisted engineering work; not an audit, not a production or regulatory
-assurance.
+Status: **FROZEN DRAFT v1 for review. Not implemented in the product, not part of the published protocol,
+no schema registered, no public API, no change to verification acceptance semantics, no server wiring.**
+AI-assisted engineering work; not an audit, not a production or regulatory assurance.
 
-Owner decision recorded: the revocation authority model is **independent owner-signed revocation records,
-verifiable by recipients, signed by a designated revocation key that is distinct in purpose from ordinary
-report-signing keys.** This document is the complete proposed format, threat model, compatibility statement and
-test plan for that model. It refines `docs/TRUST_SPEC.md` sections 4.5 and 4.6 and does not override them.
+"Frozen" means the three draft schemas and the golden vectors in `docs/proposals/revocation-list.v1/` are pinned
+by SHA-256 in `tests/experimental_revocation/test_frozen.py`, and the adversarial corpus in
+`tests/experimental_revocation/corpus/` is pinned byte-for-byte to its generator. Any change needs a version bump
+(`schema_version: 2`) and a deliberate re-pin. This document refines `docs/TRUST_SPEC.md` 4.5/4.6 and does not
+override them.
 
-What is real today (shipped on this branch): only the local `trust status|retire|revoke` commands, which are a
-**LOCAL VERIFIER POLICY CHANGE** and not evidence of issuer-authorised revocation (section 10).
-What is prototype: everything else here, in `tests/experimental_revocation/` and
-`docs/proposals/revocation-list.v1/` (section 14).
+## 0. Owner decisions encoded
 
-## 1. Roles and the purpose-separated key
+| # | Decision | Where encoded |
+|---|---|---|
+| 1 | Revocation authority = issuer-designated owner authority; its key is separate from report keys | 2, 3.1 |
+| 2 | Verifier trust = explicit LOCAL ENROLLMENT of the authority public key (never learned from a list) | 2, 6 |
+| 3 | Routine rotation = authenticated old-to-new transition; compromise recovery = separate path through an independently enrolled recovery anchor | 3.2, 3.3, 8 |
+| 4 | Single authorized signer; multi-signature is FUTURE WORK and nothing here implies a quorum guarantee | 1 |
+| 5 | Distribution is independent of trust establishment | 10 |
+| 6 | Rollback protection = verifier-persisted monotonic high-water mark OUTSIDE the list file | 7 |
+| 7 | High-assurance: no historical acceptance from list history; a cumulative current list is not an authenticated history | 9 |
+| 8 | Retirement = no NEW signatures after the effective time; explicit compromise policy for historical signatures with worked examples | 5, 9 |
 
-* **Issuer report keys** sign reports (existing). They are never trusted to speak about their own revocation.
-* **Revocation key** (one per issuer, held by the issuer's owner): Ed25519, used *only* to sign revocation lists.
-  Identified by its SPKI SHA-256 fingerprint. It must never be enrolled as a report key; a verifier refuses a
-  list when the pinned revocation key's fingerprint also appears in its trust store
-  (`REVOCATION_KEY_IS_REPORT_KEY`). Separation is also cryptographic: lists are signed under their own domain
-  prefix, so a report signature (or a seal digest) is not a valid list signature and vice versa.
-* **Verifier**: pins `(issuer, revocation-key public key)` out of band (never read from a list or from the
-  channel that delivered it, never trust-on-first-use) and keeps verifier-side high-water marks.
+## 1. Scope and plain non-claims
 
-## 2. The format: `regaudit-fhe.revocation-list`, `schema_version` 1
+* One authorized signer per role. The transition and recovery statements carry two signatures (outgoing and
+  incoming key, or anchor and incoming key) but that is proof of possession, **not a quorum**. Multi-signature,
+  threshold or two-person rules are future work (would be v2); no document, output or test may imply otherwise.
+* Nothing here proves completeness of all revocations ever issued. A list is the owner's attestation at
+  `issued_at`.
+* The existing lenient APIs (`verify_receipt`, `verify_envelope`, `verify_report`) and every existing verdict are
+  untouched; the prototype only produces inputs for the unchanged `TrustStore`/`TrustHistory`/`verify()`.
 
-One cumulative list per `(issuer, revocation key)`; each new list states the complete current set.
+## 2. Principals and keys (purpose separation)
 
-```json
-{
-  "schema": "regaudit-fhe.revocation-list",
-  "schema_version": 1,
-  "algorithm_version": 1,
-  "issuer": "acme",
-  "authority": {"key_id": "acme-rev-1", "key_fingerprint": "<64 hex: SPKI SHA-256 of the revocation key>"},
-  "epoch": 7,
-  "prev_list_digest": "<64 hex digest of epoch 6, or null when epoch == 1>",
-  "issued_at": "2026-11-01T09:00:00Z",
-  "valid_from": "2026-11-01T09:00:00Z",
-  "valid_until": "2026-11-08T09:00:00Z",
-  "entries": [
-    {"key_id": "acme-2025", "key_fingerprint": "<64 hex>", "status": "compromised",
-     "effective_from": "2026-08-15T00:00:00Z"},
-    {"key_id": "acme-2026a", "key_fingerprint": "<64 hex>", "status": "replaced",
-     "effective_from": "2026-10-01T00:00:00Z",
-     "successor": {"key_id": "acme-2026b", "key_fingerprint": "<64 hex>"}}
-  ],
-  "signature": {"algorithm": "ed25519", "signature_b64": "<canonical base64, 64-byte signature>"}
-}
-```
+| Principal | Key | Purpose | Enrolled how |
+|---|---|---|---|
+| Issuer report keys | Ed25519 | sign reports | `trust add` + out-of-band fingerprint (existing) |
+| Revocation authority | Ed25519, distinct | signs revocation lists and routine transitions | operator enrolls `(issuer, public key)` locally, out of band |
+| Recovery anchor | Ed25519, distinct, offline | signs compromise-recovery statements only | operator enrolls locally, out of band, at the same ceremony |
+| Verifier state | files/store | enrollments, high-water mark, archive of accepted lists | created by the verifier |
 
-Rules enforced by the prototype (and by the draft schema where JSON Schema can express them):
-* exactly these members, at every level; unknown or missing members are refused (no forward-compat fallback);
-* integers only (`epoch >= 1`), RFC 3339 strict times, fingerprints 64 lowercase hex;
-* `issued_at <= valid_from < valid_until` (the validity period); `effective_from` may not be later than
-  `issued_at + 5 min` (a list is evidence about the past, not a schedule);
-* `entries` strictly sorted by `key_id`, unique; an entry identifies a key by `(key_id, key_fingerprint)`,
-  never by `key_id` alone;
-* `status` is one of `retired`, `compromised`, `replaced` (section 3); only `compromised` may have
-  `effective_from: null` (unknown boundary); `replaced` requires `successor`; a successor may not equal the key
-  (by id or fingerprint) and successor chains may not cycle;
-* `signature` is outside the signed body.
+Enforcement: enrollment refuses an authority or anchor equal to a report key in the store or to each other;
+a list, transition or recovery that would install a key that is a report key or the recovery anchor is refused
+(`REVOCATION_KEY_IS_REPORT_KEY`); signatures use role-specific domain prefixes (section 4).
 
-Draft schema file: `docs/proposals/revocation-list.v1/revocation-list.v1.schema.json` (not shipped, not
-registered). The prototype and the schema are tested to agree on structural tamper; ordering/uniqueness,
-cycles and chaining are semantic checks that JSON Schema cannot express and stay in the verifier.
+## 3. Frozen formats (draft schemas: `docs/proposals/revocation-list.v1/*.schema.json`, golden vectors: `golden-vectors.json`)
 
-## 3. Retirement, compromise revocation and replacement (explicitly distinct)
+All three: exact member sets (unknown or missing members refused), integers only, strict RFC 3339 times,
+fingerprints 64 lowercase hex (SPKI SHA-256), `schema_version` 1 / `algorithm_version` 1 (anything else is
+`REVOCATION_VERSION_UNSUPPORTED`; there is no fallback), canonical base64 64-byte Ed25519 signatures.
 
-| Status | Meaning | Boundary | Effect when applied to a trust store | History |
-|---|---|---|---|---|
-| `retired` | planned end of use; **no** belief of exposure | `effective_from` = R, required | store `retired`, `retired_at = R` | a report is acceptable only if provably signed strictly before R |
-| `replaced` | planned rotation with a signed successor | `effective_from` = R, required; `successor` required | store `retired`, `retired_at = R` (the store format has no successor member) | same as retired; the successor is evidence, never trust |
-| `compromised` | key believed exposed from C | `effective_from` = C, or `null` = unknown | store `compromised`, `compromised_from = C` or unknown | only authenticated chronology strictly before C; unknown refuses everything; signer-asserted time never counts |
+### 3.1 Revocation list `regaudit-fhe.revocation-list`
 
-`replaced` is a retirement plus authenticated successor information; it is not a compromise. A key that is both
-compromised and replaced is listed `compromised` with a `successor` (the successor member is allowed on any
-status; only `replaced` requires it). Choosing `retired`/`replaced` for a key that is actually compromised leaves
-its pre-R history acceptable under chronology rules; nothing can detect that owner error, which is why the
-revocation key holder, not an ordinary operator, signs these.
+Members: `schema, schema_version, algorithm_version, issuer` (issuer scope), `authority{key_id, key_fingerprint,
+generation}` (authority identity), `epoch` (>= 1), `prev_list_digest` (null iff epoch 1), `issued_at`, `valid_from`,
+`valid_until` (validity interval, `issued_at <= valid_from < valid_until`), `entries`, `signature`.
+Each entry (key action): `{key_id, key_fingerprint, status, effective_from, successor?}`, strictly sorted by
+`key_id`; a key is identified by `(key_id, fingerprint)`, never by `key_id` alone. `status` is `retired`,
+`replaced` (requires `successor{key_id, key_fingerprint}`) or `compromised` (only this status may have
+`effective_from: null` = unknown boundary). `effective_from` may not exceed `issued_at` + 5 min. A list may only
+name keys of its own `issuer` (`REVOCATION_ISSUER_SCOPE` if the local entry belongs to another issuer).
+Cumulative: each list states the complete current set.
 
-## 4. Canonical signing form (existing rules, unchanged)
+### 3.2 Authority transition (ROUTINE rotation) `regaudit-fhe.revocation-authority-transition`
 
-`signing_input = b"regaudit-fhe/revocation-list/v1/sign\x00" || canonical_bytes(signed_body)`
+`issuer, from_authority{key_id, key_fingerprint, generation}, to_authority{key_id, key_fingerprint, generation,
+public_key_pem}, issued_at, valid_until, signatures{from, to}`. `from` is signed by the current enrolled authority,
+`to` by the incoming key (proof of possession). `to.generation == from.generation + 1`; the incoming key must be
+fresh (never an earlier, superseded or compromised authority) and not a report key or the recovery anchor.
 
-* `canonical_bytes` is the existing `regaudit_fhe.canonical.canonical_bytes` (sorted keys, `,`/`:` separators,
-  UTF-8 without ASCII escaping, finite numbers, depth limit). `canonical.py` is not modified.
-* `signed_body` is every member except `signature`.
-* Parsing uses the existing `loads_strict` (no duplicate keys, no NaN/Infinity, no BOM, size cap 4 MiB).
-* Signature: Ed25519 over `signing_input`, canonical base64 of 64 bytes (the existing `verify_signature`).
-* Chain digest: `sha256(b"regaudit-fhe/revocation-list/v1/digest\x00" || canonical_bytes(signed_body))`, hex.
-* Domain prefixes differ from the report prefix (`regaudit-fhe/report/v2/sign\x00`) and from each other.
-  The prototype pins a golden vector (signing-input sha256, list digest, deterministic signature) so any
-  change to canonicalisation is caught.
+### 3.3 Recovery anchor statement (COMPROMISE RECOVERY) `regaudit-fhe.revocation-authority-recovery`
 
-## 5. Verifier algorithm (order matters; every refusal is fail-closed and writes nothing)
+`issuer, recovery_anchor{key_id, key_fingerprint}, recovery_epoch (>= 1), declares_compromised[{key_fingerprint,
+compromised_from|null}] (non-empty, sorted, unique), new_authority{key_id, key_fingerprint, generation,
+public_key_pem}, rebase (null | {epoch, list_digest}), issued_at, valid_until, signatures{anchor, new_authority}`.
+Signed by the separately enrolled **recovery anchor**, never by the authority being replaced; the new authority
+co-signs as proof of possession.
 
-1. parse strictly and validate the shape: `REVOCATION_MALFORMED`;
-2. `schema_version`/`algorithm_version` supported: `REVOCATION_VERSION_UNSUPPORTED`;
-3. `issuer` equals the pinned issuer: `REVOCATION_WRONG_ISSUER`;
-4. `authority.key_fingerprint` equals the pinned key's fingerprint: `REVOCATION_AUTHORITY_MISMATCH`
-   (the key itself comes from the pin, never from the list);
-5. pinned key is not a report key in the verifier's trust store: `REVOCATION_KEY_IS_REPORT_KEY`;
-6. signature valid under the pinned key and the list domain prefix: `REVOCATION_SIGNATURE_INVALID`;
-7. validity: `issued_at`/`valid_from` not after now + skew (`REVOCATION_NOT_YET_VALID`); now strictly before
-   `valid_until` (`REVOCATION_EXPIRED`);
-8. semantic entry checks (effective_from not after issuance, no successor cycle): `REVOCATION_MALFORMED`;
-9. for each entry (and each successor) whose key_id is in the local store, the fingerprint must equal the
-   store's key: `REVOCATION_KEY_MISMATCH` (a list is never merged over a different key);
-10. epoch, rollback, fork and monotone merge against the high-water mark (section 7).
+### 3.4 Signing domains (canonical bytes reused UNCHANGED)
 
-Verification is pure; the mark advances only through a separate `commit` after full acceptance.
+`signing_input = DOMAIN || canonical_bytes(body without the signature member(s))`, where `canonical_bytes` is
+`regaudit_fhe.canonical.canonical_bytes` (not modified) and parsing uses `loads_strict`.
 
-## 6. Monotone merge (a list can only tighten)
-
-Against the retained previous list: no entry is removed; a key's fingerprint is never rebound; `retired` and
-`replaced` keep their `effective_from`; a retired/replaced key may become `compromised` only with a boundary at
-or before its `effective_from` or unknown; a compromised boundary may move earlier or become unknown, never
-later and never from unknown to known; `successor` once present is never changed or removed (it may be added).
-Violation: `REVOCATION_NOT_MONOTONE`. The list therefore cannot un-revoke, re-date or loosen; a revocation-key
-thief can only add restrictions (denial of service), not lift one.
-
-Applying an accepted list to an `entries` store takes the **stricter of local and list** per key (never
-loosens a local retirement or compromise; unknown boundary dominates); legacy and bare-mapping stores cannot
-carry lifecycle state and are refused (`REVOCATION_STORE_UNSUPPORTED`).
-
-## 7. Epochs, high-water marks, rollback and fork detection, and the honest limit
-
-Persisted by the verifier, per `(issuer, revocation-key fingerprint)`: `epoch`, list digest, `issued_at`,
-`valid_until`, and the accepted entries. Decisions for a candidate list (all after steps 1-9):
-
-| Condition | Outcome |
+| Use | Domain prefix |
 |---|---|
-| no mark | accepted with note `REVOCATION_NO_HIGH_WATER_MARK`; `rollback_detection: none` |
-| `epoch` < mark | `REVOCATION_ROLLBACK` |
-| same epoch, same digest | accepted, `REVOCATION_REPEAT` |
-| same epoch, different digest | `REVOCATION_FORK` (equivocation by the key holder or a forged list) |
-| `epoch` == mark + 1 | `prev_list_digest` must equal the mark's digest, else `REVOCATION_FORK` |
-| `epoch` > mark + 1 | accepted with note `REVOCATION_EPOCH_GAP` if monotone over the retained list; refused with `allow_gap=False` |
+| list signature | `regaudit-fhe/revocation-list/v1/sign\x00` |
+| list digest (chain) | `regaudit-fhe/revocation-list/v1/digest\x00` (sha256) |
+| transition, outgoing / incoming | `.../revocation-authority-transition/v1/sign-from\x00` / `sign-to\x00` |
+| transition digest | `.../revocation-authority-transition/v1/digest\x00` |
+| recovery, anchor / new authority | `.../revocation-authority-recovery/v1/sign-anchor\x00` / `sign-new-authority\x00` |
+| recovery digest | `.../revocation-authority-recovery/v1/digest\x00` |
 
-**Honest limit (stated in every result's `limit` field and in the CLI/status output of the local tool):**
-*a verifier with no independently preserved high-water mark cannot reliably detect a rollback of both the
-revocation data and its local state.* A present mark detects replay of an older authentic list; it does not
-protect against anyone who can also rewrite, lower or delete the mark (the prototype asserts exactly this: deleting
-or lowering the state makes the older list acceptable with `rollback_detection: none`). First use has no mark.
-Independent preservation (a second verifier, write-once storage, an external witness of the list head) is a
-deployment decision and is not supplied by this library. A hash chain proves linkage of the lists supplied, not
-completeness of everything ever issued.
+All eight prefixes are distinct and differ from the report prefix; a signature in one role never verifies in another
+(tested, including swapped roles). Golden vectors pin signing-input hashes, digests and deterministic signatures.
 
-## 8. Evaluating historical signatures; making "authenticated history" producible
+## 4. Key actions (retirement, revocation, replacement)
 
-Policy (reuses `VerificationPolicy`, `TrustHistory`, chronology; **`verification.py` is not changed**):
+* `retired` (R = `effective_from`): the key is **no longer approved for NEW signatures at or after R**. A report is
+  acceptable only if provably signed strictly before R (existing engine rule: verified timestamp
+  `genTime + accuracy < R`).
+* `replaced`: a retirement plus an authenticated successor. The successor is evidence, never trust: it does not
+  enroll the successor, and a successor already enrolled with a different key is refused.
+* `compromised` (C): only authenticated chronology strictly before C can qualify; unknown C refuses everything;
+  signer-asserted `issued_at` never counts.
+* Applying an accepted list to an `entries` trust store takes the stricter of local and list per key; it never
+  loosens (retired date never later, compromise boundary never later, unknown dominates). Legacy and bare stores
+  cannot carry this state (`REVOCATION_STORE_UNSUPPORTED`).
+* Monotone merge across lists: no entry removed, no fingerprint rebound, retired/replaced dates fixed,
+  retired to compromised only at or before the retirement, boundary only earlier, unknown never becomes known,
+  successor never changed or removed (`REVOCATION_NOT_MONOTONE`).
 
-* The list never rewrites or invalidates a stored report. It changes the verifier's *current* trust-store entries
-  and supplies the freshness statement the engine already asks for.
-* Let T be the report's authenticated chronology (verified timestamp `genTime + accuracy`; the engine's
-  `AUTHENTICATED`) and B the entry's boundary.
-  * active / not listed: unchanged from 0.2.0.
-  * `retired`/`replaced` (B = R): accepted only if T exists, T < R strictly, and an authenticated fresh
-    `TrustHistory` is present (below); otherwise `KEY_RETIRED_NO_CHRONOLOGY`, `SIGNED_AFTER_RETIREMENT` or
-    `TRUST_STORE_FRESHNESS_UNPROVEN`.
-  * `compromised` with C: T < C strictly plus fresh history; no T: `KEY_COMPROMISED_NO_CHRONOLOGY`; unknown C:
-    always refused; signer-asserted `issued_at` is never accepted for a compromised key.
-  * reports without a verified timestamp get nothing from a list; reports after the boundary are refused.
-* **Producing authenticated history** (the seam `TrustHistory(authenticated=True)` was reserved for):
-  after a list verifies (section 5) and is inside `valid_until`, a caller-side module returns
-  `TrustHistory(as_of=list.issued_at, authenticated=True)`; it returns `None` for a missing, unverifiable,
-  expired or refused list. The engine's existing 24 h `trust_history_max_age` then applies to `as_of`, so a list
-  that stays current must be **re-issued at least daily** (a heartbeat list is a new epoch with unchanged
-  entries). `authenticated=True` means "owner-signed, fresh, under the pinned key"; it is the owner's attestation
-  at `issued_at`, not proof that no other revocation exists.
-* `high-assurance` keeps refusing historical acceptance of retired/compromised keys (the engine's
-  `history_ok()` is false there). Relaxing it would be a `verification.py` change and is **not** proposed here; it
-  would need its own verdict-preservation proof and owner approval.
-* **Missing or unverifiable list never means "nothing revoked".** `evaluate()` returns status `NO_LIST` or
-  `UNVERIFIED`, the store unchanged, no history, and `revocation_evidence: "unproven"`. A previously accepted list
-  is not reused after its `valid_until`. Consequently a locally-retired key's historical report stays refused
-  (`TRUST_STORE_FRESHNESS_UNPROVEN`) until a verified list supplies history. A key that is merely *active* locally
-  and absent from every list is not protected by an absent list: the verifier only learns of a revocation by
-  holding a verified list, and the result says the evidence is unproven rather than clean.
+## 5. Verifier algorithms (pure; refusal writes nothing)
 
-## 9. Rotation: authenticated successor information
+List (in order): shape (`MALFORMED`), version, enrolled issuer (`NOT_ENROLLED`), issuer match (`WRONG_ISSUER`),
+authority compromised/superseded (`AUTHORITY_COMPROMISED` / `AUTHORITY_SUPERSEDED`), pinned fingerprint and
+generation (`AUTHORITY_MISMATCH`), authority not a report key, signature, validity (`NOT_YET_VALID`, `EXPIRED`;
+upper bound exclusive), entry semantics, store checks (`KEY_MISMATCH`, `ISSUER_SCOPE`), then epoch rules (section 7).
+Transition: shape, version, enrolled, from-authority compromised / superseded / mismatch, generation
+(`TRANSITION_GAP`), key reuse (`TRANSITION_CYCLE`), role conflict, both signatures, validity.
+Recovery: shape, version, enrolled, anchor present (`RECOVERY_ANCHOR_ABSENT`), anchor fingerprint
+(`RECOVERY_ANCHOR_MISMATCH`), both signatures, validity, `recovery_epoch` (`RECOVERY_REPLAY`, `FORK`), fresh new key,
+generation increases, rebase baseline known (`RECOVERY_BASELINE_UNKNOWN`).
 
-* `successor {key_id, key_fingerprint}` is signed by the revocation key and bound to fingerprints.
-  `resolve_successors` follows the chain with fingerprint binding at each hop and stops (no chain) when a
-  hop's fingerprint does not match.
-* It is **evidence, not trust**: naming B does not enrol B, does not make B's reports acceptable, and does not
-  treat A's reports as B's. B must be enrolled with `trust add` and an out-of-band fingerprint. If B is enrolled
-  with a different key than the list names, the list is refused (`REVOCATION_KEY_MISMATCH`).
-* A key_id is never reused: an entry's fingerprint is never rebound, and the verifier's store never frees an id.
-* Compromise semantics: if A is compromised, only the revocation-key-signed successor counts; anything signed by
-  A after C is worthless, so A-signed "I am replaced by B" statements are not part of this format.
+## 6. Enrollment
 
-## 10. The local, unsigned `trust revoke` is a local verifier policy change
+Only an operator action creates an enrollment `(issuer, authority public key, optional recovery anchor)`. Nothing is
+learned from a list, a transition, a recovery statement or the channel; an unenrolled issuer gets `NOT_ENROLLED`.
+Deleting the state forgets enrollments and compromise knowledge and fails closed (nothing is trusted until
+re-enrolled).
 
-`trust retire` and `trust revoke` edit the verifier's own file. They are **not** evidence that the issuer
-authorised anything, they are not distributed, and whoever can write the file can undo them. Wording now used:
-JSON `scope: "LOCAL VERIFIER POLICY CHANGE"`, `issuer_authorized: false`, a `notice` and `rollback_detection`
-field, the same notice on stderr, and `--help` descriptions. `trust status` carries the same scope and the
-no-high-water-mark statement. These commands remain useful for an operator who wants to stop trusting a key
-immediately; they must not be presented as revocation by the issuer.
+## 7. Epochs, high-water mark and its precise assumption
+
+The verifier persists, per issuer (the epoch chain spans authority rotations): the last accepted list
+(`epoch`, digest, entries), an archive of accepted lists, and the enrollments. Rules: lower epoch
+`ROLLBACK`; same epoch same digest repeat; same epoch different digest `FORK`; epoch + 1 must chain
+`prev_list_digest` else `FORK`; larger jump accepted with note `EPOCH_GAP` only if monotone (or refused with
+`allow_gap=False`). The mark advances only through a separate commit after full acceptance; recovery is the only
+operation that may lower it (rebase to an archived list).
+
+**Assumption, stated precisely.** The mark must live OUTSIDE the list file in verifier-persisted state. If an attacker
+can roll back both the signed list and the verifier's remembered version (delete, lower or replace the state), detection
+fails and the older authentic list is accepted (the prototype asserts exactly this, and every result carries
+`limit`: *a verifier with no independently preserved high-water mark cannot reliably detect a rollback of both the
+revocation data and its local state*). A local editable file is **not sufficient** for that stronger threat model;
+it needs an independent store with compare-and-set semantics or an external witness (section 14). First use has no mark.
+
+## 8. Authority rotation versus authority compromise (distinct paths)
+
+**Routine rotation** (3.2): the current authority and the incoming key both sign. Effects: generation +1, old key
+superseded forever, epoch chain continues, old-authority lists refused (`AUTHORITY_SUPERSEDED`).
+Chains: applied in order; a missing hop is `TRANSITION_GAP`/`AUTHORITY_MISMATCH`, key reuse or a loop is
+`TRANSITION_CYCLE`, a duplicate or replayed record is `AUTHORITY_SUPERSEDED`; the first refusal stops the chain.
+
+**Compromise recovery** (3.3) does NOT rely on the compromised authority signing its own replacement. It requires the
+**recovery anchor**: an independent Ed25519 key, held offline by the owner, distinct from the authority and every
+report key, enrolled on the verifier out of band at the same ceremony as the authority (fingerprint confirmed
+like `trust add`). Without an enrolled anchor, recovery is refused (`RECOVERY_ANCHOR_ABSENT`); the only remedy is
+operator re-enrollment with a fresh out-of-band ceremony. The anchor is a total trust root for the authority: whoever
+holds it can replace the authority (tested as a documented limit), so it must be offline and rarely used.
+
+**A transition signed by a key later declared compromised.**
+1. Before any recovery statement the verifier cannot know: a valid transition is accepted (honest limit; the thief
+   may take the authority).
+2. After a recovery statement declares key K compromised (from C, or unknown), any transition or list signed by K
+   is refused (`AUTHORITY_COMPROMISED`), including a transition K signs after the declaration.
+3. Transitions already accepted that K signed at or after C (all, if C is unknown) are recorded as void; the
+   recovery statement replaces whatever authority the verifier currently holds, even one installed by those
+   transitions, provided `recovery_epoch` is newer and the new key is fresh.
+4. Lists accepted from the thief: with `rebase = {epoch, list_digest}` the verifier restores its mark to that archived
+   list (otherwise its mark, possibly inflated, stays and the new authority must exceed it); an unknown baseline
+   is refused, never guessed. Recovery never loosens the local trust store: tightening done by lists stays until an
+   operator edits it (the tool never auto-loosens). A thief can only tighten, so the worst case is denial of service.
+
+## 9. Historical signatures: policy and worked examples
+
+Rules (existing engine, unchanged): a report signed by a retired or compromised key needs authenticated chronology
+(verified timestamp) strictly before the boundary AND a fresh authenticated `TrustHistory`. Claimed `issued_at` is
+not independently trusted and is used only in `development` signer-asserted mode for a retired (never a compromised) key.
+
+**A cumulative current list is not an authenticated history.** It attests the current set at `issued_at` and says
+nothing verifiable about earlier states or completeness. Therefore:
+* `high-assurance`: never accepts historical retired/compromised keys on list evidence; `derive_trust_history`
+  returns `None` for it even if "approved", and the engine's `history_ok()` stays false there. Without separately
+  authenticated historical evidence and chronology the profile keeps refusing.
+* `development` / `confidential`: a list-derived `TrustHistory(authenticated=True)` is a **documented option that
+  needs explicit owner approval and is NOT implemented**; default is none. (Prototype flag `owner_approved`.)
+
+Scenario table (every row executed against the real `verify()`; `OK` = accepted; blank history = default). Codes:
+FRESH=`TRUST_STORE_FRESHNESS_UNPROVEN`.
+
+| Scenario | development | confidential | high-assurance |
+|---|---|---|---|
+| A. active key, not listed | OK | OK | OK |
+| B. retired R, timestamp before R, default (no list history) | FRESH | FRESH | FRESH |
+| C. same, OPTIONAL owner-approved list history | OK | OK | FRESH |
+| D. retired R, timestamp after R (a new signature) | SIGNED_AFTER_RETIREMENT | same | same |
+| E. retired R, claimed issued_at before R, no timestamp | KEY_RETIRED_NO_CHRONOLOGY | same | same |
+| F. same as E, development signer-asserted mode | OK (note CHRONOLOGY_UNAUTHENTICATED) | not selectable | not selectable |
+| G. retired R, backdated issued_at, timestamp after R, signer-asserted | OK (!) development only: that mode ignores timestamps | not selectable | not selectable |
+| H. compromised C, timestamp before C, OPTIONAL history | OK | OK | FRESH |
+| I. same, default | FRESH | FRESH | FRESH |
+| J. compromised C, attacker backdates issued_at, no timestamp | KEY_COMPROMISED_NO_CHRONOLOGY | same | same |
+| K. compromised C, timestamp after C | SIGNED_AFTER_COMPROMISE | same | same |
+| L. compromised, unknown boundary | KEY_COMPROMISED_NO_CHRONOLOGY | same | same |
+| M. compromised, signer-asserted mode | KEY_COMPROMISED_NO_CHRONOLOGY | not selectable | not selectable |
+| N. replaced A by B, report signed by enrolled B | OK | OK | OK |
+| O. replaced A by B, B not enrolled | ISSUER_UNKNOWN | same | same |
+| P. list missing or unverifiable, key locally active | store unchanged; accepted by the engine, but the outcome says `revocation_evidence: unproven` | same | same |
+
+Row G is an existing development-mode weakness documented here, not introduced by this proposal. Row P: absence of a
+list never means "nothing revoked"; callers must surface `revocation_evidence`.
+
+## 10. Distribution is independent of trust
+
+Lists, transitions and recovery statements are public. Any channel may carry them (file drop, HTTPS pull, queue,
+mirror); none is trusted for authenticity. Acceptance rests only on enrolled keys, signatures, epochs, generations and
+the validity interval. A failed or absent fetch is "no new evidence", never "nothing revoked". Owners should re-issue
+(heartbeat, a new epoch with unchanged entries) so that `valid_until` and the 24 h history freshness never lapse.
 
 ## 11. Threat model
 
 | Threat | Handled by | Residual |
 |---|---|---|
-| Forged list by a party without the revocation key | pinned key, signature, domain separation | none beyond key compromise |
-| Report key used to sign a list | purpose check (pinned key not in store), different domain prefix, pin mismatch | none for lists; a store that enrols the revocation key as a report key disables lists (fail-closed) |
-| Replay of an older authentic list | high-water mark, `valid_until`, epoch chain | undetected with no/deleted/lowered mark (section 7) |
-| Fork / equivocation by the key holder | same-epoch digest check, `prev_list_digest` | only detected by a verifier that sees both lists |
-| Silent drop of an entry | monotone merge, cumulative lists | first-use verifier cannot know what it was never shown |
-| Stale list presented as current | `valid_until`, 24 h `TrustHistory` freshness | owner must heartbeat |
-| Revocation key theft | monotone: thief can only tighten (DoS); pin re-provisioning recovers | needs owner decision (section 15) |
-| Report key compromise before listing | `compromised` + boundary + chronology | window between compromise and publication is not closable by any list |
-| Wrong status chosen (`retired` for a compromised key) | owner process | undetectable |
-| Key relabelling | `(key_id, fingerprint)` identity, store fingerprint uniqueness, mismatch refusal | none |
-| Clock manipulation on the verifier | skew-bounded validity checks | a verifier with a wrong clock misjudges expiry |
-| Local writer on the verifier host | none | can delete/lower marks, edit store, re-pin: out of scope |
-| Missing/unverifiable list treated as clean | `evaluate()`: unproven, no history, store unchanged | caller must surface `revocation_evidence` |
+| Forged list / wrong issuer / cross-issuer revocation | enrolled key, signature, issuer match, issuer scope | none beyond key theft |
+| Report key used as authority | purpose checks, role domains | none for statements |
+| Replay of older authentic list | mark, validity, epoch chain | undetected if mark deleted/lowered (7) |
+| Fork / equivocation | same-epoch digest, `prev_list_digest`, recovery fork | seen only by verifiers holding both |
+| Omitted (previously revoked) key | monotone merge | first-use verifier cannot know |
+| Authority key theft | monotone (tighten only), recovery path | DoS until recovered; thief can hand over before detection (8.1) |
+| Authority AND anchor theft | none | total; custody decision |
+| Epoch inflation by a thief | rebase to archived list | needs archive; else new authority must exceed |
+| Stale list | validity interval, history freshness | owner heartbeat |
+| Local writer on verifier host | none | out of scope |
+| Wrong status chosen by owner | process | undetectable |
+| Clock error on verifier | skew-bounded checks | wrong clock misjudges expiry |
 
-## 12. Compatibility
+## 12. Compatibility (existing behaviour preserved)
 
-* No existing format, schema, verification rule or verdict changes. With no list configured the prototype is not
-  used, and the published 0.2.0 wheel and this branch produce **byte-identical** verdicts on every fixture:
-  signers 0.1.0/0.1.1/0.2.0 x report.v1/v2 x six primitives x 12 stores (bare, legacy active/revoked, entries
-  active/retired/compromised, and command-edited retired/revoked): 1368 records, sha256
-  `9a1eb45ba6b4831a7f8ce23e645905a7b4d55bcc058086c4e15844172f3809b4` for both.
-* A list-derived store is an ordinary `entries` store (existing members only), so old verifiers load it.
-* Lists are a new artifact: old verifiers ignore them entirely, and a new verifier given no list behaves as 0.2.0.
-* The prototype produces inputs for the unchanged engine; the end-to-end tests run the real `verify()`.
+No schema is registered, no source file under `src/regaudit_fhe` mentions the format (guard test), lenient APIs and
+every verdict are unchanged. The published 0.2.0 wheel and this branch were compared on 1368 records (signers
+0.1.0/0.1.1/0.2.0 x report.v1/v2 x six primitives x 12 stores incl. command-edited ones): byte-identical, see the
+delivery report for the digest.
 
-## 13. Test plan and prototype coverage (`tests/experimental_revocation/`)
+## 13. Test corpus (tests only, `tests/experimental_revocation/`)
 
-Pinned: golden canonical bytes/digest/signature; canonical stability (member order, whitespace, Unicode);
-tamper of **every** one of the 23 leaf fields of a two-entry list, plus removal/addition of every member;
-malformed/oversized/deeply nested input; unsupported versions; wrong issuer; unpinned authority; claiming the
-pinned fingerprint without the key; report key as revocation key (three ways) and as anchor; other domains;
-non-canonical base64; fingerprint mismatch with the store; validity period including exact boundaries; epochs
-(first use, advance, rollback, repeat, fork, bad chain, gap allowed/forbidden, refused list never advances,
-out-of-order commit, per-issuer marks); every monotone rule in both directions; successor chains, cycles,
-self-succession, fingerprint binding, mismatch with an enrolled successor, successor-is-not-trust; apply as
-stricter-of (14 cases); missing/unverifiable list gives no history and no store change; legacy store
-refused; end-to-end through `verify()` for retired/compromised/high-assurance; state file round trip, mode
-0600, atomic failure; the honest-limit test; draft schema vs prototype agreement; deterministic fixture
-generator; not-shipped guards (no `src` mention, no registered schema). Mutation: 42 mutants of the prototype,
-42 killed (4 initial survivors were killed by added tests; one redundant check was removed).
+`test_revocation_prototype.py` (lists: golden, tamper of every leaf, versions, issuer/authority, purpose
+separation, validity, epochs, monotone rules, successors, apply, state, schema agreement),
+`test_authority_lifecycle.py` (enrollment, routine rotation, chains with gaps/cycles/replay, recovery distinct from
+rotation, old authority signing after declaration, anchor absent, epoch poisoning and rebase, boundary merging, every
+leaf of transition/recovery tampered, omitted keys, duplicates, conflicting epochs, malformed signatures),
+`test_worked_examples.py` (15 scenarios x 3 profiles through the real engine), `test_corpus.py` + `corpus/`
+(41 byte-exact adversarial cases with expected outcome, pinned to the generator), `test_frozen.py` (pins and schema
+agreement), `test_not_shipped.py` (guards). Prototype mutation results are in the delivery report.
 
-## 14. Prototype versus production
+## 14. Trust-ownership table
 
-| Item | Location | Shipped? |
-|---|---|---|
-| Local `trust status/retire/revoke` | `src/regaudit_fhe/_trust_lifecycle.py`, `cli.py` | yes (candidate 0.3.0), local policy only |
-| Reference sign/verify, state, apply, history derivation | `tests/experimental_revocation/proto.py` | **no**, tests only |
-| Fixture generator | `tests/experimental_revocation/gen_fixtures.py` | no |
-| Draft JSON schema | `docs/proposals/revocation-list.v1/revocation-list.v1.schema.json` | no, not registered |
-| Everything in this document | `docs/` | proposal |
+| Credential / state | Holder | Lives | Attacker who obtains it can |
+|---|---|---|---|
+| Report signing key | issuer operations | issuer's key store | sign reports as that key until retired/revoked; cannot revoke anything |
+| Revocation authority private key | issuer OWNER | offline/HSM (owner decision) | publish stricter-only lists (DoS), hand the authority to their key before detection; cannot loosen; cannot recover once anchor acts |
+| Recovery anchor private key | issuer OWNER, separate custody | offline, rarely used | replace the authority entirely (total control of revocation); cannot sign reports or lists |
+| Pinned authority + anchor public keys | each verifier operator | verifier-persisted enrollment | change who is trusted (re-pin), i.e. defeat revocation for that verifier |
+| High-water mark and list archive | each verifier | verifier-persisted store, ideally independent with compare-and-set | roll back to an older authentic list undetected; drop knowledge of compromise |
+| Local trust store | each verifier | file | un-revoke, enrol own keys (as today) |
+| Distribution channel | operator/mirror | any | withhold or delay lists (verifier stays "unproven"), replay old ones (caught only with an intact mark) |
 
-Nothing in `src/regaudit_fhe` (including `schemas.py`, `trust.py`, `verification.py`, `canonical.py`, `_keys.py`,
-`replay.py`) was changed for the prototype; a guard test fails if the source tree starts mentioning the format.
+## 15. MISSING for deployment (none of this exists)
 
-## 15. Remaining owner decisions and exact blockers to ship
-
-Owner decisions (software cannot decide these):
-1. **Revocation key custody**: who holds it, where (HSM/offline), backup and access rules; one per issuer or per
-   deployment.
-2. **Pinning**: the ceremony and storage for `(issuer, revocation public key)` on each verifier, and how a new
-   verifier first obtains the fingerprint out of band (never from the list channel).
-3. **Rotation of the revocation key**: the succession statement (outgoing key names incoming) is only sketched
-   (`regaudit-fhe/revocation-authority-succession/v1`), not specified or prototyped; needs approval.
-4. **Quorum and recovery**: whether one key suffices or multiple signatures are required (v1 has a single
-   `signature`; multi-signature would be v2), and the procedure after loss or theft of the revocation key.
-5. **Distribution and heartbeat**: channel(s), cadence (daily if `trust_history_max_age` stays 24 h), who runs it.
-6. **Independent preservation of the high-water mark** (second verifier, write-once store, witness), because a
-   local mark is bypassable by whoever can write it.
-7. **High-assurance policy**: whether the profile may ever accept historical retired/compromised keys with a
-   list-derived history (requires a separate `verification.py` change and verdict proof).
-
-Engineering blockers (do not exist yet; not done, as instructed):
-* publish the schema: add the file to `src/regaudit_fhe/schemas/`, register it in `schemas.py`, fix `$id`;
-* a production module equivalent to the prototype and CLI/server wiring (`--revocation-list`, `--revocation-anchor`,
-  `--revocation-state`), including a compare-and-set state store modelled on `SqliteReplayCache`;
-* cross-signature / `retired_at` coexistence in the entries format are **not** needed by this design.
-
-Recommendation: ship the local commands (clearly labelled) in the next minor; hold the signed list until owner
-decisions 1, 2 and 6 are made and the schema publication is approved. No compatibility fallback may treat a
-missing or unverifiable list as "nothing revoked".
+1. Revocation-authority key custody and ceremony (who, where, backup, access, signing procedure).
+2. A pinned-authority store: protected persistence of enrollments, with a defined enrollment/re-enrollment ceremony.
+3. An independent high-water-mark store with compare-and-set semantics (and ideally an external witness); the prototype
+   JSON file is bypassable by whoever can write it.
+4. The recovery anchor: generation, offline custody, out-of-band enrollment on every verifier, and recovery runbook.
+5. A distribution and heartbeat operator (who publishes at least daily, monitoring, alerting).
+6. A production module (the prototype lives under `tests/` only), CLI/server wiring, and operator tooling for lists.
+7. Schema publication: files in `src/regaudit_fhe/schemas/`, registration in `schemas.py`, final `$id`.
+8. Owner approval for any list-derived `TrustHistory` option (lower profiles only) and a verdict-preservation proof for it.
+9. Multi-signature/quorum (future work, v2); revocation of the authority-succession tooling beyond this draft.

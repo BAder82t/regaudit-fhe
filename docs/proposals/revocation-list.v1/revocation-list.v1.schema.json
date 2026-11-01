@@ -17,10 +17,11 @@
     "authority": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key_id", "key_fingerprint"],
+      "required": ["key_id", "key_fingerprint", "generation"],
       "properties": {
         "key_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "key_fingerprint": {"$ref": "#/$defs/fingerprint"}
+        "key_fingerprint": {"$ref": "#/$defs/fingerprint"},
+        "generation": {"type": "integer", "minimum": 1}
       }
     },
     "epoch": {"type": "integer", "minimum": 1},
