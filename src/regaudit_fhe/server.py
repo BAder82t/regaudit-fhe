@@ -103,6 +103,7 @@ try:
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import ClientDisconnect
 
     HAVE_FASTAPI = True
 except Exception:
@@ -202,6 +203,16 @@ class ServerConfig:
     # Request-body bytes that may be buffered at once across all requests (None: the larger of 32 MiB and twice
     # the body limit). Must be at least ``max_body_bytes``.
     max_inflight_body_bytes: int | None = None
+    # Longest gap, in seconds, between two chunks of a request body (and before the first one). A body that
+    # stalls longer is answered 408 and its share of the in-flight budget is released. 0 disables.
+    body_idle_timeout_s: float = 10.0
+    # Authenticate before the body of /v1/audit is read and parsed. Off by default: switching it on changes
+    # the answer to an unauthenticated or unauthorised request with a malformed body from 422 to 401/403.
+    auth_before_body: bool = False
+    # Structural limits for the body of /v1/verify (depth counts the ``{"envelope": ...}`` wrapper as 1).
+    # A genuine envelope is depth 4 or less and holds fewer than 20 members per container.
+    verify_max_json_depth: int = 16
+    verify_max_elements: int = 65536
 
     def verification_policy(self) -> VerificationPolicy:
         """The single verification policy for this deployment (raises PolicyError)."""
@@ -508,6 +519,22 @@ def validate_numeric_config(config: ServerConfig) -> None:
         raise PolicyError(
             f"request_timeout_s must be a finite number of seconds between 0 and {MAX_SECONDS_SETTING:g}"
         )
+    idle = config.body_idle_timeout_s
+    if (
+        isinstance(idle, bool)
+        or not isinstance(idle, (int, float))
+        or not math.isfinite(idle)
+        or not 0 <= idle <= MAX_SECONDS_SETTING
+    ):
+        raise PolicyError(
+            f"body_idle_timeout_s must be a finite number of seconds between 0 (disabled) and {MAX_SECONDS_SETTING:g}"
+        )
+    if not isinstance(config.auth_before_body, bool):
+        raise PolicyError("auth_before_body must be a boolean")
+    for name, floor in (("verify_max_json_depth", 8), ("verify_max_elements", 1024)):
+        value = getattr(config, name)
+        if isinstance(value, bool) or not isinstance(value, int) or not floor <= value <= 1 << 31:
+            raise PolicyError(f"{name} must be a whole number between {floor} and {1 << 31}")
 
 
 def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig:
@@ -567,6 +594,14 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
         ),
         max_inflight_body_bytes=_env_optional_int(
             "REGAUDIT_FHE_MAX_INFLIGHT_BODY_BYTES", minimum=1
+        ),
+        body_idle_timeout_s=_env_seconds("REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S", 10.0),
+        auth_before_body=os.environ.get("REGAUDIT_FHE_AUTH_BEFORE_BODY", "0") == "1",
+        verify_max_json_depth=_env_int(
+            "REGAUDIT_FHE_VERIFY_MAX_JSON_DEPTH", 16, minimum=8, maximum=1 << 31
+        ),
+        verify_max_elements=_env_int(
+            "REGAUDIT_FHE_VERIFY_MAX_ELEMENTS", 65536, minimum=1024, maximum=1 << 31
         ),
     )
     validate_trust_config(config)
@@ -1011,13 +1046,41 @@ RETRY_AFTER_BUSY_S = "1"
 
 
 async def _read_body(
-    request: Request, max_bytes: int, budget: IngressBudget, operation: str
+    request: Request,
+    max_bytes: int,
+    budget: IngressBudget,
+    operation: str,
+    idle_s: float = 0.0,
 ) -> bytes:
-    """Read the request body (chunked bodies included) within the per-request and the shared byte budget."""
+    """Read the request body (chunked bodies included) within the per-request and the shared byte budget.
+
+    ``idle_s > 0`` is a body-inactivity deadline: if no chunk arrives for that long (also before the first
+    one) the read is abandoned with a 408 and the bytes already charged are released at once. It bounds the
+    time a *stalled* client can hold the shared budget; it is not a minimum transfer rate. The budget is
+    released on every exit path (success, refusal, deadline, client disconnect, cancellation).
+    """
     received = bytearray()
     charged = 0
+    stream = request.stream().__aiter__()
     try:
-        async for chunk in request.stream():
+        while True:
+            try:
+                if idle_s > 0:
+                    chunk = await asyncio.wait_for(stream.__anext__(), idle_s)
+                else:
+                    chunk = await stream.__anext__()
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                raise _Refusal(
+                    408,
+                    "BODY_TIMEOUT",
+                    "the request body was not received in time",
+                    operation=operation,
+                ) from None
+            except ClientDisconnect:
+                # Nobody is left to read an answer; end quietly instead of an unhandled exception.
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "client disconnected") from None
             received.extend(chunk)
             if len(received) > max_bytes:
                 raise HTTPException(
@@ -1037,11 +1100,30 @@ async def _read_body(
         return bytes(received)
     finally:
         budget.release(charged)
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(Exception):
+                await aclose()
+
+
+# A 422 for a schema violation names the offending values, one message per element, so a body of wrong-typed
+# elements produced an answer about 19 times its size. The detail is cut at this length.
+MAX_SCHEMA_DETAIL_CHARS = 2048
+
+
+def _bounded_detail(message: str) -> str:
+    if len(message) <= MAX_SCHEMA_DETAIL_CHARS:
+        return message
+    return f"{message[:MAX_SCHEMA_DETAIL_CHARS]} ... [truncated, {len(message)} characters in all]"
 
 
 def _strict_body_dependency(
-    max_bytes: int, budget: IngressBudget, operation: str
-) -> Callable[[Request], Any]:
+    max_bytes: int,
+    budget: IngressBudget,
+    operation: str,
+    idle_s: float = 0.0,
+    after: Callable[..., Any] | None = None,
+) -> Callable[..., Any]:
     """Body dependency parsed under the strict policy of /v1/verify.
 
     A duplicate key, NaN/Infinity, a BOM or trailing data would otherwise be resolved silently by
@@ -1049,10 +1131,20 @@ def _strict_body_dependency(
     """
 
     async def dependency(request: Request) -> dict[str, Any]:
-        raw = await _read_body(request, max_bytes, budget, operation)
+        raw = await _read_body(request, max_bytes, budget, operation, idle_s)
         return _parse_strict_json_object(raw, max_bytes)
 
-    return dependency
+    if after is None:
+        return dependency
+
+    # ``after`` (the authentication dependency) is resolved first, so the body is neither read nor parsed
+    # for a caller that is refused. The result is cached per request, so it runs once.
+    async def authenticated_first(
+        request: Request, _caller: Any = Depends(after)
+    ) -> dict[str, Any]:
+        return await dependency(request)
+
+    return authenticated_first
 
 
 def _parse_strict_json_object(raw: bytes, max_bytes: int) -> dict[str, Any]:
@@ -1178,6 +1270,11 @@ def build_app(
     if inflight < config.max_body_bytes:
         raise PolicyError("max_inflight_body_bytes must be at least max_body_bytes")
     ingress_budget = IngressBudget(inflight)
+    verify_limits = InputLimits(
+        max_array_elements=config.verify_max_elements,
+        max_total_elements=config.verify_max_elements,
+        max_depth=config.verify_max_json_depth,
+    )
     audit_gate = AdmissionGate(
         config.max_concurrent_audits, config.max_queued_audits, config.queue_wait_s
     )
@@ -1210,6 +1307,8 @@ def build_app(
             return _check_scopes(caller, scopes)
 
         return dep
+
+    run_auth = authed_with(SCOPE_RUN)  # one callable, so FastAPI resolves it once per request
 
     def rate_limit_or_raise(caller: Caller) -> None:
         if not rate_limiter.acquire(caller.key_id):
@@ -1297,9 +1396,15 @@ def build_app(
         # Declared before the caller so the body is still read (and size-limited) before
         # authentication, exactly as the former ``Body(...)`` parameter was.
         payload: dict[str, Any] = Depends(
-            _strict_body_dependency(config.max_body_bytes, ingress_budget, "audit")
+            _strict_body_dependency(
+                config.max_body_bytes,
+                ingress_budget,
+                "audit",
+                config.body_idle_timeout_s,
+                run_auth if config.auth_before_body else None,
+            )
         ),
-        caller: Caller = Depends(authed_with(SCOPE_RUN)),
+        caller: Caller = Depends(run_auth),
     ) -> dict[str, Any]:
         rate_limit_or_raise(caller)
         if primitive not in SCHEMAS:
@@ -1334,7 +1439,7 @@ def build_app(
                 "audit",
             )
         except SchemaError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            raise HTTPException(422, _bounded_detail(str(exc))) from exc
         except (ValueError, OverflowError) as exc:
             # The primitives reject inputs the schema cannot express (for example arrays of unequal length).
             # Say so with a 422. The log carries a fixed message and the exception class only: the exception
@@ -1384,16 +1489,21 @@ def build_app(
                 )
         # Read the body ourselves so the size limit also covers chunked uploads
         # that carry no Content-Length, then parse it strictly.
-        raw = await _read_body(request, config.max_body_bytes, ingress_budget, "verify")
+        raw = await _read_body(
+            request, config.max_body_bytes, ingress_budget, "verify", config.body_idle_timeout_s
+        )
         try:
             payload = loads_strict(raw, max_bytes=config.max_body_bytes)
+            # Bound the structure before the (much costlier) strict envelope parse. A genuine envelope is far
+            # inside these limits; a refusal is the same 422 as any other malformed envelope.
+            check_input_bounds(payload, verify_limits)
             if not isinstance(payload, dict) or set(payload) != {"envelope"}:
                 raise EnvelopeFormatError("BAD_TYPE", 'body must be {"envelope": {...}}')
             env = parse_envelope_strict(payload["envelope"])
             if not isinstance(env.primitive, str):
                 # Strict parsing already refuses this; kept so the 0.1.1 guarantee stays explicit.
                 raise EnvelopeFormatError("BAD_TYPE", "primitive must be a string")
-        except (CanonicalError, EnvelopeFormatError) as exc:
+        except (CanonicalError, EnvelopeFormatError, InputLimitError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "malformed envelope") from exc
         try:
             # verify() may block (sqlite replay store), so keep it off the event loop, and bound how many run.
@@ -1403,6 +1513,11 @@ def build_app(
                 threading.Event(),
                 "verify",
             )
+        except asyncio.CancelledError:
+            # The request timed out or the client left, but a verification already submitted keeps running
+            # and, in replay "record" mode, can still record the report as seen.
+            logger.warning("verify_request_abandoned", extra={"key_id": caller.key_id})
+            raise
         except VerificationUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
