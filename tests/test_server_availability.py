@@ -118,18 +118,33 @@ def _stalled(first: bytes) -> Any:
     return receive
 
 
-def _paced(body: bytes, pieces: int, gap: float) -> Any:
-    """The body in ``pieces`` chunks with ``gap`` seconds between them (slow but alive)."""
+def _paced(
+    body: bytes,
+    pieces: int,
+    gap: float,
+    delivered: list[bytes] | None = None,
+    stop_after: int | None = None,
+) -> Any:
+    """The body in ``pieces`` chunks with ``gap`` seconds between them (slow but alive).
+
+    Every chunk handed to the server is appended to ``delivered``. With ``stop_after``
+    the client goes silent (neither sends nor disconnects) after that many chunks.
+    """
     size = -(-len(body) // pieces)
     chunks = [body[i : i + size] for i in range(0, len(body), size)]
+    assert len(chunks) == pieces
     i = 0
 
     async def receive() -> dict[str, Any]:
         nonlocal i
+        if stop_after is not None and i >= stop_after:
+            await asyncio.sleep(3600)
         if i:
             await asyncio.sleep(gap)
         chunk = chunks[i]
         i += 1
+        if delivered is not None:
+            delivered.append(chunk)
         return {"type": "http.request", "body": chunk, "more_body": i < len(chunks)}
 
     return receive
@@ -206,11 +221,32 @@ def test_a_body_that_never_starts_is_also_cut_off() -> None:
 def test_a_slow_but_active_client_and_a_large_legal_body_are_unaffected_control(
     budgets: list[IngressBudget],
 ) -> None:
+    idle, pieces, gap = 1.5, 24, 0.1
+    body = GOOD_BODY + b" " * 800
+
     async def go() -> None:
-        app = build_app(config=_cfg(body_idle_timeout_s=0.5))
-        # Eight chunks, 0.15 s apart: well past 0.5 s in total, never idle for 0.5 s.
-        status, _, dt = await _call(app, AUDIT, _paced(GOOD_BODY + b" " * 800, 8, 0.15))
-        assert status == 200 and dt > 0.9
+        app = build_app(config=_cfg(body_idle_timeout_s=idle))
+        expected = json.loads((await _call(app, AUDIT, _whole(body)))[1])
+        # 24 chunks, 0.1 s apart: ~2.4 s in total, longer than the 1.5 s idle deadline,
+        # but never idle for more than 0.1 s. The 1.4 s margin per gap absorbs
+        # event-loop stalls on a loaded runner (a ~0.35 s stall broke the old 0.5 s/0.15 s
+        # version). Elapsed time comes from time.perf_counter, a monotonic clock.
+        delivered: list[bytes] = []
+        status, raw, dt = await _call(app, AUDIT, _paced(body, pieces, gap, delivered))
+        assert status == 200, raw
+        assert len(delivered) == pieces and b"".join(delivered) == body
+        served = json.loads(raw)
+        # The whole body was parsed: same input commitments and result as a one-piece send.
+        assert served["input_commitments"] == expected["input_commitments"]
+        assert served["result"] == expected["result"]
+        assert dt > idle
+        # Negative control, same config: a client that sends 4 chunks and then goes
+        # silent is cut off by the idle deadline, which cannot fire before it is due.
+        delivered = []
+        status, raw, dt = await _call(app, AUDIT, _paced(body, pieces, gap, delivered, 4))
+        assert status == 408 and json.loads(raw)["code"] == "BODY_TIMEOUT"
+        assert len(delivered) == 4
+        assert dt > idle
         # A 900 KB legal body in one piece.
         assert (await _call(app, AUDIT, _whole(_padded(900_000))))[0] == 200
         assert budgets[-1].held == 0
