@@ -329,10 +329,10 @@ class KeyProvider(Protocol):
     key_id: str
 
     def public_key_pem(self) -> str:  # pragma: no cover - structural
-        ...
+        """Return the public key as PEM."""
 
     def sign(self, body: bytes) -> bytes:  # pragma: no cover - structural
-        ...
+        """Return a detached signature over ``body``."""
 
 
 @dataclass

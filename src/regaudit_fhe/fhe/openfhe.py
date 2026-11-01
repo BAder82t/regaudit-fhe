@@ -3,9 +3,8 @@
 A second CKKS implementation behind the same :class:`EncryptedSlotVec`
 interface the audit primitives are written against, so the six circuits
 can run on OpenFHE as well as TenSEAL and a verifier is not locked to a
-single library. Loaded only when the ``openfhe`` Python package is
-importable; otherwise this module registers nothing and the backend
-reports ``available = False``.
+single library. Usable only when the ``openfhe`` Python package is
+importable; otherwise the backend reports ``available = False``.
 
 Status: EXPERIMENTAL
 -------------------
@@ -34,6 +33,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,7 +43,7 @@ from numpy.typing import ArrayLike
 from .._slot import MAX_DEPTH, DepthBudgetExceeded
 
 try:
-    import openfhe as _openfhe  # noqa: F401
+    importlib.import_module("openfhe")
 
     _HAVE_OPENFHE = True
 except Exception:
@@ -331,20 +331,3 @@ def sign_poly_d3(x: OpenFHESlotVec) -> OpenFHESlotVec:
     x_sq = x.mul_ct(x)
     x_cube = x_sq.mul_ct(x)
     return x.mul_scalar(1.5) + x_cube.mul_scalar(-0.5)
-
-
-def register() -> None:
-    """Register the OpenFHE backend with the backend registry."""
-    from .backends import FHEBackend, register_backend
-
-    register_backend(
-        FHEBackend(
-            name="openfhe-ckks",
-            description="OpenFHE CKKS (install the `openfhe` Python package). EXPERIMENTAL.",
-            available=_HAVE_OPENFHE,
-            _build_context=build_d6_context,
-            _slotvec_cls=lambda: OpenFHESlotVec,
-            _sign_poly=lambda: sign_poly_d3,
-            experimental=True,
-        )
-    )

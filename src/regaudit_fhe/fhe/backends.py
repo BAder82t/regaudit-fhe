@@ -166,13 +166,23 @@ def _register_builtin_backends() -> None:
         )
     )
 
-    # OpenFHE registers itself from its own module to keep its (heavier,
-    # optional) import off this module's import path. If the adapter is
-    # unimportable for any reason it simply stays unregistered.
+    # OpenFHE is imported here to keep its (heavier, optional) import off this
+    # module's import path. If the adapter is unimportable for any reason it
+    # simply stays unregistered.
     with contextlib.suppress(Exception):
         from . import openfhe as _openfhe
 
-        _openfhe.register()
+        register_backend(
+            FHEBackend(
+                name="openfhe-ckks",
+                description="OpenFHE CKKS (install the `openfhe` Python package). EXPERIMENTAL.",
+                available=_openfhe.available(),
+                _build_context=_openfhe.build_d6_context,
+                _slotvec_cls=lambda: _openfhe.OpenFHESlotVec,
+                _sign_poly=lambda: _openfhe.sign_poly_d3,
+                experimental=True,
+            )
+        )
 
 
 def supported_matrix_kinds(name: str) -> Sequence[str]:

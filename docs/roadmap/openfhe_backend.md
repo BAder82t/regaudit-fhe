@@ -1,7 +1,7 @@
 # OpenFHE backend — design note (EXPERIMENTAL, PARTIAL)
 
 > **Status: experimental, partially shipping.** An OpenFHE-CKKS backend
-> now exists at `regaudit_fhe.fhe.openfhe` and registers itself with the
+> now exists at `regaudit_fhe.fhe.openfhe` and is registered with the
 > backend registry (`regaudit_fhe.fhe.get_backend("openfhe-ckks")`),
 > installed via the separate `[openfhe]` extra (the `[fhe]` extra still
 > installs **TenSEAL**, which remains the verified reference backend).
