@@ -145,6 +145,10 @@ def _recv_response(sock: socket.socket, timeout: float) -> tuple[int | None, byt
                 if length is not None and len(rest) >= length:
                     break
     except (TimeoutError, OSError):
+        # The server went quiet or closed/reset the connection: parse what arrived. A
+        # short or missing response yields status None, which the caller's assertion
+        # rejects, so nothing is hidden. OSError stays broad because the errno a peer
+        # reset surfaces as differs by platform (ECONNRESET, EPIPE, ENOTCONN, ...).
         pass
     if not data.startswith(b"HTTP/"):
         return None, b""
@@ -413,6 +417,8 @@ def test_steady_drip_is_not_cut_by_the_idle_deadline_only_by_the_request_timeout
                 status = int(data.split(b" ")[1])
                 break
         except (TimeoutError, OSError):
+            # No answer yet (or the socket is unusable): keep dripping until the
+            # 25 s bound; the assertion below fails unless a 504 was read.
             pass
     took = time.perf_counter() - t0
     s.close()
@@ -521,6 +527,8 @@ def _finish(s: socket.socket, first: bytes, t0: float) -> tuple[int | None, byte
                 break
             data += more
     except (TimeoutError, OSError):
+        # Same as _recv_response: keep what arrived; an incomplete response parses to
+        # status None and the caller's assertion rejects it.
         pass
     head, _, body = data.partition(b"\r\n\r\n")
     status = int(head.split(b" ")[1]) if head.startswith(b"HTTP/") else None

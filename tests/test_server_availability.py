@@ -19,8 +19,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-import regaudit_fhe as rf
-from regaudit_fhe import server
+from regaudit_fhe import Signer, audit_fairness, envelope, server
 from regaudit_fhe._limits import IngressBudget
 from regaudit_fhe.replay import InMemoryReplayCache
 from regaudit_fhe.report_v2 import envelope_v2
@@ -268,7 +267,7 @@ def test_budget_is_released_after_disconnect_cancellation_and_timeout(
         assert b.held == 30000
         t.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await t
+            await asyncio.wait_for(t, timeout=5)
         await asyncio.sleep(0.3)
         assert b.held == 0
         # a refused (over-budget) request releases what it had read
@@ -371,11 +370,11 @@ def test_bounded_detail_boundaries() -> None:
 
 
 def _envelopes() -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    signer = rf.Signer.generate(issuer="acme", key_id="acme-1")
-    rep = rf.audit_fairness(
+    signer = Signer.generate(issuer="acme", key_id="acme-1")
+    rep = audit_fairness(
         *(np.array(GOOD[k], float) for k in ("y_true", "y_pred", "group_a", "group_b"))
     )
-    v1 = rf.envelope("fairness", rep, signer=signer).to_dict()
+    v1 = envelope("fairness", rep, signer=signer).to_dict()
     v2 = envelope_v2("fairness", rep, signer=signer, deployment_id="d").to_dict()
     return signer, v1, v2
 
