@@ -26,6 +26,7 @@ from typing import Any
 
 from . import _revocation as rv
 from . import _revocation_state as st
+from . import _verification_response as vr
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
 from .report_v2 import AuditEnvelopeV2
@@ -46,15 +47,6 @@ HIGH_ASSURANCE_UNAVAILABLE = (
     "protected, durable, monotonic state store and none is qualified. It does not fall back to a local file. "
     "Existing high-assurance verification with revocation off does not evaluate revocation."
 )
-NOT_EVALUATED_NOTE = (
-    "Revocation was not evaluated. A policy_id without '+revocation-' means no revocation data was consulted, "
-    "and this result does not satisfy any revocation-aware profile."
-)
-GOVERNANCE_NOTE = (
-    "The enrolled pin and recovery anchor are the root and the list signer is a delegate. There is no independent "
-    "approver and no quorum in this profile."
-)
-
 # Infrastructure failures (CLI exit 3, HTTP 503). Every other gate code is a policy refusal (exit 1).
 INFRASTRUCTURE_CODES = frozenset(
     {
@@ -226,32 +218,13 @@ class Decision:
 
 
 def policy_evidence(decision: Decision | None = None) -> dict[str, Any]:
-    """The versioned, optional policy-evidence section. Never part of the default output.
+    """The versioned, optional policy-evidence section. Never part of the default output."""
+    return vr.policy_evidence(None if decision is None else decision.revocation)
 
-    With no decision, or under ``off``, revocation is NOT_EVALUATED. No shipped path produces a result that
-    satisfies the revocation-aware high-assurance profile, so that field is always false.
-    """
-    section: dict[str, Any]
-    if decision is None or decision.revocation is None:
-        section = {"status": "NOT_EVALUATED", "mode": MODE_OFF, "note": NOT_EVALUATED_NOTE}
-    else:
-        evidence = decision.revocation.get("revocation_evidence", "unproven")
-        section = {
-            "status": "VERIFIED_AS_OF" if decision.revocation.get("gate") == "ok" else "UNPROVEN",
-            "revocation_evidence": evidence,
-            **decision.revocation,
-        }
-    section["satisfies_revocation_aware_high_assurance"] = False
-    return {
-        "policy_evidence_version": 1,
-        "revocation": section,
-        "governance": {
-            "authority_model": "pin-and-recovery-anchor-root-with-delegate-signer",
-            "independent_approver": False,
-            "quorum": False,
-            "note": GOVERNANCE_NOTE,
-        },
-    }
+
+def response_v2(decision: Decision) -> dict[str, Any]:
+    """The opt-in response for a decision. See :mod:`regaudit_fhe._verification_response`."""
+    return vr.response_v2(decision.result.to_dict(), decision.revocation)
 
 
 def _check_config(policy: VerificationPolicy, ctx: RevocationContext) -> None:
@@ -326,6 +299,7 @@ def _run_gate(
     entry = store.entry(key_id) if isinstance(key_id, str) else None
     policy_id = f"regaudit-fhe/{policy.profile}+revocation-{ctx.mode}/v1"
     always = {
+        "mode": ctx.mode,
         "state_store_scope": ctx.store.scope,
         "max_evidence_age_s": ctx.max_evidence_age.total_seconds(),
         "limit": rv.ROLLBACK_LIMIT,

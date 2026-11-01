@@ -443,11 +443,13 @@ Requirements for `confidential` and `high-assurance`:
   setting is not honoured against that store (`REPLAY_POLICY_FLOOR_APPLIED`).
   Otherwise raising `max_age` would let the same report be accepted twice, and
   evidence refused as stale become acceptable merely because a setting changed.
-  A file from a published version has no floor and adopts the policy in force at
-  its first `record` under this code; a raise before that moment cannot be seen.
   Going back to a larger `max_age` needs a new replay file, which forgets the
-  old identifiers, so it is an explicit operator decision. If capacity is exhausted the verifier fails closed
-  (`REPLAY_STATE_UNAVAILABLE`); it MUST NOT evict to make room.
+  old identifiers, so it is an explicit operator decision. A file from a published
+  version never recorded its policy, so it is refused until migrated
+  (`docs/DEPLOYMENT.md`): the operator states the earlier `max_age`, which becomes
+  the floor, or states that it is unknown, in which case every report issued up to
+  the migration is refused (`REPLAY_HISTORY_UNKNOWN`). The same floor applies to
+  `trust_history_max_age`; with no durable store it has a fixed ceiling of 24 hours.
 * **Failure.** If the cache is unreachable or errors, verification fails closed
   with `REPLAY_STATE_UNAVAILABLE`. `development` MAY fail open and MUST say so
   in `reasons`.
@@ -587,10 +589,11 @@ report is distinguishable from a forgery.
 `TRUST_STORE_ROLLBACK`, `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`,
 `TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
 `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`, `PROVENANCE_CONTRADICTION`,
-`PROVENANCE_UNVERIFIABLE`, `REPLAY_POLICY_FLOOR_APPLIED`.
+`PROVENANCE_UNVERIFIABLE`, `REPLAY_POLICY_FLOOR_APPLIED`, `REPLAY_HISTORY_UNKNOWN`,
+`TRUST_HISTORY_FLOOR_APPLIED`.
 
 Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT`,
-`SELF_SIGNED_NO_TRUST_MATERIAL` and `REPLAY_POLICY_FLOOR_APPLIED` are informational unless a policy also refuses on
+`SELF_SIGNED_NO_TRUST_MATERIAL`, `REPLAY_POLICY_FLOOR_APPLIED` and `TRUST_HISTORY_FLOOR_APPLIED` are informational unless a policy also refuses on
 them; the result's `blocking_reasons` lists the codes that caused a refusal. The
 `TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
 the held O8 / reserve-commit work and are not emitted in Phase 3A.

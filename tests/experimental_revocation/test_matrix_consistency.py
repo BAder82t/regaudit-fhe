@@ -35,6 +35,8 @@ NEW = (
     "../test_revocation_public_gate.py",
     "../test_revocation_tooling_and_cli.py",
     "../test_revocation_hostile_sequences.py",
+    "../test_replay_migration.py",
+    "../test_response_mode.py",
 )
 SOURCES = ("_revocation.py", "_revocation_state.py", "_revocation_gate.py")
 SRC = ROOT / "src" / "regaudit_fhe"

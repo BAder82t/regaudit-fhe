@@ -239,14 +239,14 @@ def test_high_assurance_off_keeps_decisions_and_policy_id_and_is_not_evaluated(w
     assert set(d.result.to_dict()) == RESULT_FIELDS
     section = gate.policy_evidence(d)
     assert section["policy_evidence_version"] == 1
-    assert section["revocation"]["status"] == "NOT_EVALUATED"
+    assert section["revocation"]["revocation_evaluation"] == "not_evaluated"
     assert section["revocation"]["satisfies_revocation_aware_high_assurance"] is False
 
 
 def test_no_evidence_section_ever_claims_the_revocation_aware_profile(world):
     ingest(world, W.signed(1, []))
     section = gate.policy_evidence(decide(world))
-    assert section["revocation"]["status"] == "VERIFIED_AS_OF"
+    assert section["revocation"]["revocation_evaluation"] == "evaluated"
     assert section["revocation"]["satisfies_revocation_aware_high_assurance"] is False
 
 
@@ -303,8 +303,14 @@ def test_default_cli_output_has_exactly_the_published_fields(signed):
 def test_the_evidence_section_appears_only_when_asked_for(signed):
     proc = _cli("verify", "-i", "r.json", "--trusted-keys", "t.json", "--policy-evidence", cwd=signed)
     payload = json.loads(proc.stdout)
-    assert proc.returncode == 0 and set(payload) == RESULT_FIELDS | {"trusted_issuer", "policy_evidence"}
-    assert payload["policy_evidence"]["revocation"]["status"] == "NOT_EVALUATED"
+    assert proc.returncode == 0
+    assert set(payload) == RESULT_FIELDS | {
+        "trusted_issuer",
+        "policy_evidence",
+        "response_format",
+        "revocation_evaluation",
+    }
+    assert payload["policy_evidence"]["revocation"]["revocation_evaluation"] == "not_evaluated"
 
 
 def test_http_verify_output_has_exactly_the_published_fields(tmp_path):

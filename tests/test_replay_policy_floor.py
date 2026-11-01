@@ -2,7 +2,8 @@
 
 Reproduced on the published 0.2.1. Control: record under max_age=1h, verify at +2h under max_age=1d gave TRUSTED twice,
 because the entry had expired under the retention of the policy in force when it was recorded. The replay store now
-keeps a floor: the smallest effective max_age it has served under ``record``. It only goes down and survives restarts.
+keeps a floor: the smallest effective max_age it has served. It only goes down and survives restarts. Files written by
+published versions are covered in test_replay_migration.py.
 """
 
 from __future__ import annotations
@@ -136,52 +137,6 @@ def test_retention_follows_the_effective_max_age(db):
     assert expires == (T0 + timedelta(minutes=5) + HOUR + 2 * timedelta(minutes=5)).timestamp()
 
 
-def _published_file(db: Path, *rows: tuple[str, str, float]) -> None:
-    """Exactly what the published versions create: one table, no floor."""
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "CREATE TABLE replay (key_id TEXT NOT NULL, run_id TEXT NOT NULL, expires_at REAL NOT NULL, "
-        "PRIMARY KEY (key_id, run_id))"
-    )
-    conn.executemany("INSERT INTO replay VALUES (?, ?, ?)", rows)
-    conn.commit()
-    conn.close()
-
-
-def test_a_file_from_a_published_version_keeps_its_entries_and_adopts_a_floor_at_first_record(db):
-    env = report()
-    _published_file(db, ("k", env.audit_run_id, (T0 + DAY).timestamp()))
-    cache = SqliteReplayCache(db)
-    assert cache.max_age_floor() is None
-    res = check(cache, DAY, T0 + HOUR, env)
-    assert res.blocking_reasons == ("REPLAY_DETECTED",) and FLOOR_CODE not in res.reasons
-    assert cache.max_age_floor() == DAY
-
-
-def test_limit_a_raise_made_before_first_use_of_a_published_file_cannot_be_seen(db):
-    """A published file does not say what policy wrote it, and its expired rows may be purged. Stated limit."""
-    env = report()
-    _published_file(db, ("k", env.audit_run_id, (T0 + HOUR).timestamp()))  # written under one hour
-    res = check(SqliteReplayCache(db), DAY, T0 + 2 * HOUR, env)
-    assert res.accepted  # the same report again: undetectable at the moment of adoption
-    # from then on the floor holds
-    assert check(SqliteReplayCache(db), DAY * 2, T0 + 2 * HOUR, env).blocking_reasons == (
-        "REPLAY_DETECTED",
-    )
-
-
-def test_check_mode_on_a_published_file_adds_only_the_floor(db):
-    _published_file(db)
-    res = check(SqliteReplayCache(db), DAY, T0 + HOUR, mode="check")
-    assert res.accepted and res.consumption == "CHECKED_NOT_CONSUMED"
-    conn = sqlite3.connect(db)
-    try:
-        assert conn.execute("SELECT COUNT(*) FROM replay").fetchone() == (0,)  # records no identifier
-    finally:
-        conn.close()
-    assert SqliteReplayCache(db).max_age_floor() == DAY
-
-
 def test_check_mode_is_held_to_the_floor_as_well(db):
     check(SqliteReplayCache(db), DAY, T0)
     env = report(T0, run="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e605")
@@ -195,7 +150,7 @@ def test_check_mode_is_held_to_the_floor_as_well(db):
 def test_a_corrupt_floor_fails_closed_with_the_existing_code(db):
     check(SqliteReplayCache(db), DAY, T0)
     conn = sqlite3.connect(db)
-    conn.execute("UPDATE replay_policy_floor SET max_age_us = -5")
+    conn.execute("UPDATE replay_meta SET max_age_us = -5")
     conn.commit()
     conn.close()
     other = report(T0, run="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e606")
@@ -207,7 +162,7 @@ def test_an_earlier_refusal_keeps_its_exit_path_when_the_floor_is_broken(db):
     """The store failure is reported at the replay step, as before: a refused report stays a policy refusal."""
     check(SqliteReplayCache(db), DAY, T0)
     conn = sqlite3.connect(db)
-    conn.execute("UPDATE replay_policy_floor SET max_age_us = -5")
+    conn.execute("UPDATE replay_meta SET max_age_us = -5")
     conn.commit()
     conn.close()
     res = check(SqliteReplayCache(db), DAY, T0 + 3 * DAY)

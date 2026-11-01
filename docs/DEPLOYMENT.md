@@ -513,3 +513,26 @@ limits egress to the destinations the deployment actually requires
 
 Each of those gaps is operator-side: TLS, KMS, and runbooks live with
 the deployment, not with this binary.
+
+## Upgrading with an existing replay file
+
+A replay file written by a published version does not record what policy wrote it, and rows it has purged are gone. It is refused
+until migrated: `SqliteReplayCache` raises `LegacyReplayFile`, `regaudit-fhe verify` exits 3, and `serve` refuses to start. Back the file
+up, stop the verifiers using it, and run one of:
+
+```bash
+regaudit-fhe replay status --db replay.db
+regaudit-fhe replay migrate --db replay.db --previous-max-age-seconds 86400   # the largest max_age this file ever served
+regaudit-fhe replay migrate --db replay.db --previous-policy-unknown          # you do not know
+```
+
+* **A stated `max_age`** becomes the store's floor. This is your statement: the file can only refuse a value its rows contradict. Verdicts are as
+  before under that setting, and a larger setting is not honoured.
+* **Unknown:** every report issued up to the migration, plus the clock skew, is refused from then on (`REPLAY_HISTORY_UNKNOWN`), since it may have been
+  recorded and purged. Later reports behave as before.
+
+Migration is one transaction and changes no recorded row. A file it cannot read with certainty is refused and left as it was. A new, empty replay file
+needs no migration, and it also remembers nothing, so pointing a verifier at one is an explicit decision to forget.
+
+On a current file, floors for `max_age` and `trust_history_max_age` only go down. Going back to a larger value needs a new file. Two policies sharing one
+file are held to the smaller value.

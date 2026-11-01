@@ -8,13 +8,17 @@ canonicalisation and schemas are unchanged. Default verification verdicts are un
 
 ### Changed
 
-- Replay: raising `max_age` against an existing replay store no longer takes effect. A report that had gone stale, or
-  whose identifier had expired under the earlier setting, used to become acceptable again, so the same report could be
-  accepted twice. The store now keeps a floor, the smallest effective `max_age` served under `record`. It only goes down
-  and the sqlite floor survives restarts. Exact difference: only when the setting exceeds the floor, the floor is enforced
-  and the result carries the informational `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are
-  unchanged. Files from published versions adopt a floor at their first `record` under this code, so a raise before that
-  moment cannot be seen. See `docs/TRUST_SPEC.md` 6.1.
+- **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
+  so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
+  start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued
+  before the migration are refused (`REPLAY_HISTORY_UNKNOWN`). See `docs/DEPLOYMENT.md`.
+- Replay: raising `max_age` against a replay store no longer takes effect. A report that had gone stale, or whose
+  identifier had expired under the earlier setting, used to become acceptable again, so the same report could be accepted
+  twice. The store keeps a floor, the smallest effective `max_age` served. It only goes down and survives restarts. Only when
+  the setting exceeds the floor, the floor is enforced and the result carries the informational
+  `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are unchanged. See `docs/TRUST_SPEC.md` 6.1.
+- The same for `trust_history_max_age` (`TRUST_HISTORY_FLOOR_APPLIED`). With no durable store nothing can remember the
+  setting, so a value above 24 hours is not honoured.
 
 ### Added
 
@@ -27,9 +31,9 @@ canonicalisation and schemas are unchanged. Default verification verdicts are un
   `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`. Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
   (not issuer-authorised revocation) and states that rollback of the local file is undetectable.
 - EXPERIMENTAL, off by default, nothing exported, no schema registered: signed revocation data under private modules, with
-  `revocation` CLI commands, `trust migrate`, `verify --revocation-mode` and `verify --policy-evidence`. The default output of
-  `verify` and `POST /v1/verify` is unchanged, so `high-assurance` still does not evaluate revocation: a `policy_id` without
-  `+revocation-` means that. The revocation-aware `high-assurance` profile is unavailable and refuses, because no independently
+  `revocation` CLI commands, `trust migrate` and `verify --revocation-mode`. `high-assurance` with revocation off does not
+  evaluate revocation. The default output of `verify` and `POST /v1/verify` is unchanged and does not say so; opt in with
+  `verify --response-format v2` or `POST /v1/verify?response_format=v2` for an explicit `revocation_evaluation`. The revocation-aware `high-assurance` profile is unavailable and refuses, because no independently
   protected state store is qualified. `required` is available under the lower profiles on a local file store, which is not
   independent. The pin and recovery anchor are the root and the signer a delegate, with no independent approver and no quorum.
   See `docs/proposals/revocation-list.v1/IMPLEMENTATION_NOTES.md`.

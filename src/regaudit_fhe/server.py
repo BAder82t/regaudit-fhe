@@ -120,6 +120,7 @@ from ._limits import (
     check_input_bounds,
     use_limits,
 )
+from ._verification_response import response_v2
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -1487,6 +1488,12 @@ def build_app(
                     status.HTTP_403_FORBIDDEN,
                     f"development self-signed verification refused: {refusal}",
                 )
+        # Read from the request, not declared as a parameter, so the published OpenAPI document is unchanged.
+        response_format = request.query_params.get("response_format", "v1")
+        if response_format not in ("v1", "v2"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "response_format must be v1 or v2"
+            )
         # Read the body ourselves so the size limit also covers chunked uploads
         # that carry no Content-Length, then parse it strictly.
         raw = await _read_body(
@@ -1537,6 +1544,9 @@ def build_app(
             },
         )
         response: dict[str, Any] = result.to_dict()
+        if response_format == "v2":
+            # Opt-in. This server has no revocation gate, so it says revocation was not evaluated.
+            return response_v2(response, None)
         return response
 
     return app

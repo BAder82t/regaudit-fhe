@@ -15,47 +15,62 @@ AI-assisted engineering work; not an audit and no production assurance. The API 
 | Evidence age | `max_evidence_age` is capped at 24 hours. Zero, negative, non-finite, unbounded and wrong types are refused. Applied in `advisory` as well as `required`. Read as being about held epochs, not the report's `max_age`, which is not capped |
 | Withheld lists, later authority compromise | A held mark serves until its freshness deadline. A mark taken before a known later compromise boundary stays usable until that deadline: **a bounded availability policy, not proof the authority was uncompromised**. An unknown boundary condemns the mark, since nothing shows it came first |
 
-## Default output: what changed, and how a consumer learns revocation was not evaluated
+## Response format
 
-**Tested first.** Adding one field to `VerificationResult.to_dict` was tried in a scratch copy. It fails the pinned inventory in
-`tests/test_cli_verify_output_no_secrets.py`, and that function feeds `POST /v1/verify` too, so any strict consumer of either
-would break.
+**Default output is unchanged.** `to_dict`, CLI stdout and stderr, the HTTP response body and `/openapi.json` keep their exact bytes. Adding a field to `to_dict` was tried in a scratch copy and fails the pinned inventory in `tests/test_cli_verify_output_no_secrets.py`, and `POST /v1/verify` returns the same dict.
 
-**Chosen: nothing changes in the default output.** `to_dict`, CLI stdout and stderr, and the HTTP response keep their exact fields.
-A separate optional section, `policy_evidence` with `policy_evidence_version: 1`, appears only with `verify --policy-evidence` or
-a revocation mode, or from `_revocation_gate.policy_evidence()`.
+**Opt-in, versioned, on both surfaces:** `verify --response-format v2` and `POST /v1/verify?response_format=v2`. It adds `response_format: regaudit-fhe.verification-response.v2`, an explicit `revocation_evaluation`, and a `policy_evidence` section, and every existing field is kept as it was. The query parameter is read from the request rather than declared, which is what keeps `/openapi.json` unchanged; it is documented in `docs/API.md`.
 
-**How a consumer on the default output learns it:** `policy_id`, a field already present. `regaudit-fhe/high-assurance/v1` means
-revocation was not evaluated. Any result that consulted revocation data has `+revocation-<mode>` in its `policy_id`. This is a
-documented reading of an existing field, not a new signal: a consumer that does not know this rule learns nothing from the default
-output. That is the cost of not changing it. HTTP has no way to request the section, since the server is not wired to this.
+| `revocation_evaluation` | Meaning |
+|---|---|
+| `not_evaluated` | No usable revocation data was consulted: mode `off`, `advisory` with no usable data, an unknown key, and every HTTP response, since the server has no gate |
+| `evaluated` | Fresh signed data was consulted. "Verified as of" is the most it says. The report may still be refused because of what it said |
+| `required_but_unavailable` | Mode `required` and the data was absent, stale, contradictory, rolled back or unusable. `trust_status` is `INVALID`, and the builder raises rather than represent it as trusted |
 
-## F-07
+`TRUSTED` keeps its meaning. The CLI prints the status on exit 3 as well, when opted in. HTTP keeps its 503 with no verdict body for an unusable replay store. A default consumer learns nothing from the default output, and the ruling is that it must opt in to learn.
 
-A persistent floor, not a change to retention arithmetic.
+## F-07: replay policy floor and published files
 
-* The sqlite cache adds one table, `replay_policy_floor`, holding the smallest effective `max_age` served, in `record` or `check`. It only
-  goes down. `InMemoryReplayCache` holds the same for its lifetime. A third-party cache without `bind_max_age` has no floor.
-* **What changes:** only when the setting is larger than the floor. The floor is enforced instead, for freshness and for retention, and
-  the result gains the informational `REPLAY_POLICY_FLOOR_APPLIED`. A report outside the floor is `REPORT_TOO_OLD`.
-* **What does not change:** with `max_age` unchanged or lowered, verdicts and reasons are as before. `check` mode still records no identifier; it
-  does write the floor, because a report refused as stale there must stay refused, and it keeps working on a read-only file. A broken floor
-  surfaces at the replay step with the existing `REPLAY_STATE_UNAVAILABLE`, so an already refused report keeps its exit path.
-  In `development`, a broken floor is a non-blocking note, as with any replay failure there, so a raised `max_age` is honoured in that case.
-* **Published files:** have no floor, keep working, and adopt the policy in force at their first `record` under this code. Their expired
-  rows carry no policy, so a raise made before that moment cannot be seen. Stated limit, with a test. A published version reading a file
-  with the extra table ignores it, and then ignores the floor.
-* **Hazard:** a floor set by a mistaken low value stays, and so does one set by a second policy sharing the store: it holds both to the smaller
-  `max_age`, even with no raise. Any verification under the policy sets it, including of a report that is then refused. The remedy is a new
-  replay file, which forgets old identifiers.
-* **Not covered:** `max_age` with replay off keeps no state anywhere, so it has no floor. That is `development` only; the other profiles
-  require a replay cache. Raising `clock_skew` is not floored: it does not extend the old side of the window, and entries recorded under a
-  smaller skew still outlive their report.
+* A sqlite file now has a schema version: a `replay_meta` row holding the origin, the two floors, and any cutover. Floors only go down, and a larger setting is not honoured (`REPLAY_POLICY_FLOOR_APPLIED`).
+* **A published file never recorded its policy, and its expired rows may be purged, so nothing can reconstruct either.** It is refused until an operator runs `regaudit-fhe replay migrate`, stating one of two things:
+  * `--previous-max-age-seconds N`: the largest `max_age` it ever served. An **operator statement**, recorded as `operator-attested`. It becomes the floor. A statement its rows contradict is refused. A false one the rows cannot show is undetected.
+  * `--previous-policy-unknown`: recorded as `history-unknown`. Every report issued up to the migration plus the clock skew is refused (`REPLAY_HISTORY_UNKNOWN`), because it may have been recorded and purged. Nothing is invented.
+* Migration is one exclusive sqlite transaction and touches no row. A malformed or ambiguous file (wrong columns, extra tables or views, wrong row types, failed integrity check) is refused and left as it was.
 
-The same principle in the gate: the state record keeps a monotonic `policy_floor` of mode and evidence age. A raised evidence age is not
-honoured (`REVOCATION_POLICY_FLOOR_APPLIED`), and a record that served `required` refuses `advisory` (`REVOCATION_POLICY_DOWNGRADE`,
-blocking in every mode). A ceremony keeps it unless reset explicitly. **`off` cannot be refused**, because it reads nothing, and the ruling
-on `off` requires that.
+**What changes for a deployment that upgrades with an existing replay file:**
+
+| Situation | Before | Now |
+|---|---|---|
+| Any use before migrating, `record` or `check`, any report | Worked | `SqliteReplayCache` raises `LegacyReplayFile`. CLI `verify` exits 3. `serve` refuses to start, exit 2. A file swapped in under a running process gives `REPLAY_STATE_UNAVAILABLE` (HTTP 503) |
+| Migrated with the true `max_age`, setting unchanged | | Verdicts as before, and recorded decisions honoured |
+| Migrated with the true `max_age`, setting raised | Same report accepted twice | The stated value is enforced: `REPORT_TOO_OLD`, with the note |
+| Migrated as unknown | | Reports issued before the migration plus skew: refused, `REPLAY_HISTORY_UNKNOWN`. Later ones: as before |
+| Read-only file in `check` mode, not migrated | Worked | Refused, since migration needs to write |
+| New file, or replay off | | Unchanged |
+
+**What does not change:** with `max_age` unchanged or lowered on a current file, verdicts and reasons are as before. `check` mode records no identifier; it writes the floor, and keeps working on a read-only current file. A broken floor surfaces at the replay step with the existing `REPLAY_STATE_UNAVAILABLE`, so an already refused report keeps its exit path. In `development` that is a non-blocking note, as for any replay failure there.
+
+**Limits:**
+* An operator's false statement cannot be detected, except where rows contradict it.
+* A published version can still open a migrated file and ignores the floors. After a downgrade and return, identifiers it recorded under another policy cannot be told apart.
+* A restored backup of a current file with a higher floor is refused by a running object that remembers, not by a new process. Replay state is a local file.
+* A floor set by a mistaken low value stays, and so does one set by a second policy sharing the store, and any verification under the policy sets it, including of a report then refused. The remedy is a new replay file, which forgets identifiers.
+* `max_age` with replay off keeps no state, so it has no floor (`development` only; other profiles require a replay cache). Raising `clock_skew` is not floored: it does not extend the old side of the window.
+* A third-party cache without the methods has no floor.
+* Pre-existing, not changed: at `clock_skew=0` the same report is accepted twice at exactly `T+max_age`.
+
+The same principle in the gate: the state record keeps a monotonic `policy_floor` of mode and evidence age. A raised evidence age is not honoured (`REVOCATION_POLICY_FLOOR_APPLIED`), and a record that served `required` refuses `advisory` (`REVOCATION_POLICY_DOWNGRADE`, blocking in every mode). A ceremony keeps it unless reset explicitly. **`off` cannot be refused**, because it reads nothing, and the ruling on `off` requires that.
+
+## F-12: `trust_history_max_age`
+
+It is the same route: raising the setting turned a stale `TrustHistory` into a fresh one, so a historical report by a retired or compromised key could become acceptable because a setting changed. It is reachable only where a caller supplies an authenticated history, since the library produces none, and never under `high-assurance`, whose `history_ok()` stays false.
+
+* **With a durable shipped store** (always, under `confidential`): closed the same way, by a second floor in `replay_meta`. A raised setting is not honoured (`TRUST_HISTORY_FLOOR_APPLIED`, stale stays stale). A migration sets it to the stated value, default 24 hours, the library default: if the earlier setting was lower, state it.
+* **Without one** (`development` with replay off, an in-memory or third-party cache): it **cannot** be closed the same way, because nothing persists to remember the earlier setting. The conservative alternative is a fixed ceiling at the default, 24 hours: a larger setting is not honoured at all. A raise below the ceiling, say from 1 hour to 3, cannot be seen. That residual is at most 24 hours, in `development` or with a store that keeps nothing, and a test states it. **Verdict change:** only for a caller with no durable store, a setting above 24 hours, and a history older than 24 hours.
+
+## Retired key later marked compromised
+
+`next_list` now **refuses** a compromise time after the retirement. The clamp is gone: there is no flag for it, because rewriting a stated time is a decision about what is true. The refusal says which forms verifiers accept, and the operator states the retirement time or earlier, or no time for an unknown boundary. A list signed some other way is still refused by a verifier and latches: the key stays refused, the whole issuer fails closed, replays and later lists clear nothing, and only an accepted recovery statement or a re-baseline ceremony clears it. A real test runs the whole sequence on the file store.
 
 ## Departures from the proposal's text
 
@@ -71,7 +86,7 @@ on `off` requires that.
 | 13.4 | `trust migrate` proposed | Implemented, except the dry run's report-corpus comparison: `--dry-run` checks and prints the keys only | Scope |
 | 16 | OD-8 open | Settled by ruling. OD-1 to OD-7 remain open, and release scope is undecided | Ruling |
 | Plan | `verification.py` not changed | Changed for F-07, narrowly | Authorized |
-| Plan | Server wiring in phase 5 | Not built. `POST /v1/verify` is untouched and has no revocation mode | Not in this milestone's build list |
+| Plan | Server wiring in phase 5 | Not built. `POST /v1/verify` has the opt-in response format only and no revocation mode, so it always says `not_evaluated` | Not in the build list |
 
 ## Things an operator can still do to themselves
 
@@ -82,12 +97,14 @@ on `off` requires that.
 ## Reason codes added since the frozen proposal
 
 `REVOCATION_HIGH_ASSURANCE_UNAVAILABLE` (configuration), `REVOCATION_POLICY_DOWNGRADE` (blocking in every mode), `REVOCATION_POLICY_FLOOR_APPLIED`
-(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED` (informational, added to TRUST_SPEC 8.3).
+(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED` and `TRUST_HISTORY_FLOOR_APPLIED` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
 
 ## Evidence kinds
 
 * **Real:** the file store, under real processes killed with SIGKILL, real concurrent processes, new processes after a restart, files
-  damaged and restored on disk.
+  damaged and restored on disk. Replay migration: a real process killed inside the transaction, new processes, the CLI and `serve` as processes,
+  backups restored on disk. Files from a real 0.2.1 wheel go through the same sequence in a harness outside the suite; in the suite a published
+  file is made with the same SQL the published versions run.
 * **Simulated:** the independent store is a test double (`tests/experimental_revocation/trust_gate.py`), reached only through the private
   `_run_gate`. Every row under `high-assurance` with `required` is algorithm evidence only, and shows nothing about a real store. A torn
   write is made by truncating a file. Power loss has not been tested at all.

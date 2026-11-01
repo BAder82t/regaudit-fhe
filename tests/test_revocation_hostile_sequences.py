@@ -582,13 +582,13 @@ def test_a_read_only_store_in_check_mode_keeps_working(tmp_path):
     assert res.accepted and res.consumption == "CHECKED_NOT_CONSUMED"
 
 
-def test_an_empty_floor_table_is_corrupt_not_absent(tmp_path):
+def test_a_deleted_policy_record_is_corrupt_not_absent(tmp_path):
     db = tmp_path / "f.db"
     env = report()
     pol = policy(tmp_path, replay_mode="record", replay_cache=SqliteReplayCache(db))
     assert verify(env, pol).accepted
     conn = sqlite3.connect(db)
-    conn.execute("DELETE FROM replay_policy_floor")
+    conn.execute("DELETE FROM replay_meta")
     conn.commit()
     conn.close()
     other = report(issued_at=NOW - timedelta(minutes=30))

@@ -330,16 +330,7 @@ def _cmd_sign_list(args: argparse.Namespace) -> int:
         # Persisted but not released. The next run moves on to a higher epoch: a gap, never a fork.
         sys.stderr.write(f"signed and recorded, but not written: {exc}\n")
         return 3
-    _emit(
-        {
-            "epoch": result.document["epoch"],
-            "digest": result.digest,
-            "clamped": list(result.clamped),
-            "output": args.output,
-        }
-    )
-    for line in result.clamped:
-        sys.stderr.write(f"clamped: {line}\n")
+    _emit({"epoch": result.document["epoch"], "digest": result.digest, "output": args.output})
     return 0
 
 
@@ -533,10 +524,15 @@ def add_verify_options(parser: argparse.ArgumentParser) -> None:
         help="Oldest list to rely on. At most 86400, which is also the default.",
     )
     parser.add_argument(
-        "--policy-evidence",
-        action="store_true",
-        help="Add a versioned policy_evidence section to the output. Without a mode it says revocation "
-        "was NOT_EVALUATED. Not in the default output, which stays as it was.",
+        "--response-format",
+        choices=("v1", "v2"),
+        default="v1",
+        help="v1 (default) is the unchanged output. v2 adds response_format, revocation_evaluation "
+        "(not_evaluated, evaluated, required_but_unavailable) and a policy_evidence section, and also prints them "
+        "when a required resource is unusable (exit 3). A revocation mode always uses v2.",
+    )
+    parser.add_argument(
+        "--policy-evidence", action="store_true", help="The same as --response-format v2."
     )
 
 

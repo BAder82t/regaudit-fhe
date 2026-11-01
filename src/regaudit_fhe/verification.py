@@ -67,6 +67,7 @@ HISTORY_FRESH = "FRESH"
 HISTORY_STALE = "STALE"
 
 DEFAULT_RETENTION = timedelta(days=30)
+TRUST_HISTORY_CEILING_WITHOUT_STORE = timedelta(hours=24)
 
 
 class PolicyError(RuntimeError):
@@ -320,6 +321,48 @@ def _bound_max_age(policy: VerificationPolicy) -> tuple[timedelta | None, bool, 
     return effective, effective < requested, False
 
 
+def _bound_history_age(policy: VerificationPolicy) -> tuple[timedelta, bool, bool]:
+    """(trust_history_max_age to enforce, whether it was lowered, whether the store's floor was unusable).
+
+    The same rule as ``max_age``: raising the setting must not make a history that was already stale acceptable. A
+    durable store holds a floor. Without one nothing can remember the earlier setting, so the bound is a fixed
+    ceiling at the default: a raise above it is not honoured, and a raise below it cannot be seen.
+    """
+    requested = policy.trust_history_max_age
+    binder = getattr(policy.replay_cache, "bind_trust_history_age", None)
+    if (
+        policy.replay_mode == "off"
+        or binder is None
+        or not getattr(policy.replay_cache, "durable", False)
+    ):
+        ceiling = min(requested, TRUST_HISTORY_CEILING_WITHOUT_STORE)
+        return ceiling, ceiling < requested, False
+    try:
+        bound = binder(requested, persist=True)
+    except Exception:
+        if policy.replay_mode == "record":
+            return requested, False, True
+        try:
+            bound = binder(requested, persist=False)
+        except Exception:
+            return requested, False, True
+    if not isinstance(bound, timedelta) or bound <= timedelta(0):
+        return requested, False, True
+    effective = min(bound, requested)
+    return effective, effective < requested, False
+
+
+def _replay_cutover(policy: VerificationPolicy) -> tuple[datetime | None, bool]:
+    """(the time up to which a migrated replay file cannot speak, whether that could not be read)."""
+    reader = getattr(policy.replay_cache, "history_cutover", None)
+    if policy.replay_mode == "off" or reader is None:
+        return None, False
+    try:
+        return reader(), False
+    except Exception:
+        return None, True
+
+
 def _aware_now(policy: VerificationPolicy) -> datetime:
     moment = policy.now()
     if not isinstance(moment, datetime) or moment.tzinfo is None or moment.utcoffset() is None:
@@ -327,13 +370,15 @@ def _aware_now(policy: VerificationPolicy) -> datetime:
     return moment
 
 
-def _history_state(policy: VerificationPolicy, now: datetime) -> str:
+def _history_state(
+    policy: VerificationPolicy, now: datetime, limit: timedelta | None = None
+) -> str:
     history = policy.trust_history
     if history is None or not history.authenticated:
         return HISTORY_UNPROVEN
     if history.as_of.tzinfo is None or history.as_of > now + policy.clock_skew:
         return HISTORY_UNPROVEN
-    if now - history.as_of > policy.trust_history_max_age:
+    if now - history.as_of > (policy.trust_history_max_age if limit is None else limit):
         return HISTORY_STALE
     return HISTORY_FRESH
 
@@ -518,7 +563,9 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             replay_scope="NONE",
             replay_durable=None,
             consumption=CONSUMPTION_NOT_CHECKED,
-            trust_history=_history_state(policy, now),
+            trust_history=_history_state(
+                policy, now, min(policy.trust_history_max_age, TRUST_HISTORY_CEILING_WITHOUT_STORE)
+            ),
             **base,
         )
 
@@ -567,8 +614,13 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     issuer_trusted = entry is not None and identity_ok and sig_ok
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
+    history_limit, history_floor_applied, history_floor_failed = _bound_history_age(policy)
+    if history_floor_applied and policy.trust_history is not None:
+        note("TRUST_HISTORY_FLOOR_APPLIED")
     if entry is not None:
-        _apply_key_lifecycle(entry, v2, issued, evidence, policy, now, note=note, block=block)
+        _apply_key_lifecycle(
+            entry, v2, issued, evidence, policy, now, history_limit, note=note, block=block
+        )
 
     # ----- timestamp policy ---------------------------------------------------
     if ts_status == TS_FAILED:
@@ -596,6 +648,10 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("REPORT_FROM_FUTURE")
         elif now - issued > max_age:
             block("REPORT_TOO_OLD")
+    cutover, cutover_failed = _replay_cutover(policy)
+    if v2 and cutover is not None and issued is not None and issued <= cutover + policy.clock_skew:
+        # A migration said this file cannot tell whether a report that old was already recorded and purged.
+        block("REPLAY_HISTORY_UNKNOWN")
 
     # ----- local replay (last: only a report that would be accepted counts) ---
     consumption = CONSUMPTION_NOT_CHECKED
@@ -607,7 +663,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             policy,
             now,
             max_age=max_age,
-            floor_failed=floor_failed,
+            floor_failed=floor_failed or history_floor_failed or cutover_failed,
             key_id=key_id,
             note=note,
             block=block,
@@ -630,7 +686,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         replay_scope=replay_scope,
         replay_durable=replay_durable,
         consumption=consumption,
-        trust_history=_history_state(policy, now),
+        trust_history=_history_state(policy, now, history_limit),
         **base,
     )
 
@@ -642,6 +698,7 @@ def _apply_key_lifecycle(
     evidence: TimestampEvidence | None,
     policy: VerificationPolicy,
     now: datetime,
+    history_limit: timedelta,
     *,
     note: Callable[[str], None],
     block: Callable[[str], None],
@@ -665,7 +722,10 @@ def _apply_key_lifecycle(
         return
 
     def history_ok() -> bool:
-        return policy.profile != "high-assurance" and _history_state(policy, now) == HISTORY_FRESH
+        return (
+            policy.profile != "high-assurance"
+            and _history_state(policy, now, history_limit) == HISTORY_FRESH
+        )
 
     if status == "compromised":
         boundary = entry.compromised_from

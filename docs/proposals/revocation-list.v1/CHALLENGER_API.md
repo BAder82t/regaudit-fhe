@@ -14,7 +14,8 @@ Differences from it: [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 | `regaudit_fhe._revocation_gate` | `RevocationContext`, `gate`, `overlay`, `verify_with_revocation`, `policy_evidence` |
 | `regaudit_fhe._revocation_tooling` | Issuer side: refuses hazards before signing |
 | `regaudit_fhe._trust_lifecycle` | `migrate_store`, `migrate` |
-| `regaudit_fhe.replay` | `bind_max_age`, `max_age_floor` (F-07) |
+| `regaudit_fhe.replay` | `SqliteReplayCache`, `migrate_replay_file`, `replay_file_status`, `LegacyReplayFile`, `ReplayMigrationRefused` |
+| `regaudit_fhe._verification_response` | `response_v2`, `revocation_evaluation`, `policy_evidence` |
 
 ## Enrollment
 
@@ -53,7 +54,7 @@ To build documents: `build_body`/`sign_list`, `build_transition_body`/`sign_tran
 from regaudit_fhe import _revocation_gate as gate
 ctx = gate.RevocationContext(mode, store, {issuer: pin}, max_evidence_age=timedelta(hours=24))
 decision = gate.verify_with_revocation(env, policy, ctx, presented=None)  # .result (VerificationResult), .revocation (dict or None)
-gate.policy_evidence(decision)
+gate.policy_evidence(decision); gate.response_v2(decision)
 ```
 `mode` is `"off"`, `"advisory"` or `"required"`. `env` comes from `regaudit_fhe.report_v2.parse_envelope_strict`, `policy` is a
 `VerificationPolicy`. Keep one `ctx` across calls to model a long-running process: it remembers the position. Exit-code mapping: `gate.INFRASTRUCTURE_CODES`.
@@ -62,6 +63,32 @@ gate.policy_evidence(decision)
 
 **The algorithm without those restrictions:** `gate._run_gate(env, policy, ctx, presented=None, _unqualified_test_path=True)`, with any object having `scope`, `read(issuer)` and `cas(issuer, expected, new)`. `tests/experimental_revocation/trust_gate.py` has a test double, `MemoryCasStore`. Results from this path are simulated evidence, not product behaviour.
 
+## Response format
+
+```
+regaudit-fhe verify ... --response-format v2        # v1 is the default and unchanged. --policy-evidence is the same as v2. A mode always uses v2
+POST /v1/verify?response_format=v2                  # absent or v1: unchanged. Anything else: 422
+```
+Adds `response_format` (`regaudit-fhe.verification-response.v2`), `revocation_evaluation` (`not_evaluated`, `evaluated`, `required_but_unavailable`) and `policy_evidence` (`policy_evidence_version: 1`, `revocation`, `governance`). HTTP has no gate, so it always says `not_evaluated`. The CLI prints the status on exit 3 too, when opted in. Library: `_verification_response.response_v2(result.to_dict(), disclosure_or_None)`; it raises if `required_but_unavailable` would be shown as trusted.
+
+## Replay files and migration
+
+```python
+from regaudit_fhe.replay import SqliteReplayCache, migrate_replay_file, replay_file_status, LegacyReplayFile, ReplayMigrationRefused
+SqliteReplayCache(path)            # new file: schema 2. Published file: raises LegacyReplayFile
+replay_file_status(path)           # read-only: state (empty, legacy, current), rows, origin, floors, cutover
+migrate_replay_file(path, *, now, previous_max_age=None, previous_policy_unknown=False,
+                    previous_trust_history_max_age=timedelta(hours=24), assumed_clock_skew=timedelta(minutes=5), _fault=None)
+cache.bind_max_age(requested, persist=True); cache.bind_trust_history_age(requested, persist=True)
+cache.max_age_floor(); cache.trust_history_age_floor(); cache.history_cutover()
+```
+Exactly one of `previous_max_age` and `previous_policy_unknown`. `ReplayMigrationRefused` leaves the file as it was. `_fault(point)` is called at `before-commit`, for a kill inside the transaction. A published file: `CREATE TABLE replay (key_id TEXT NOT NULL, run_id TEXT NOT NULL, expires_at REAL NOT NULL, PRIMARY KEY (key_id, run_id))`, nothing else.
+```
+regaudit-fhe replay status --db F
+regaudit-fhe replay migrate --db F (--previous-max-age-seconds N | --previous-policy-unknown) [--previous-trust-history-max-age-seconds N]
+```
+Exit 0 done, 2 refused and the file is as it was, 3 unusable. New engine codes: `REPLAY_HISTORY_UNKNOWN` (blocking), `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` (informational).
+
 ## Fault injection
 
 * **Crash at a commit point:** subclass `FileStateStore` and override `_fault(self, point)`. Points: `mid-write`, `partial-temp`, `before-rename`, `after-rename`, `after-directory-sync`. `tests/test_revocation_file_store.py` kills a real process there with SIGKILL.
@@ -69,12 +96,12 @@ gate.policy_evidence(decision)
 * **Damage or restore:** act on `store.path(issuer)`, or on the double's `.data[issuer]`; the double has `.down = True` for an outage.
 * **Clock:** `now` is an argument everywhere, and `policy.now` for reports.
 * **Record size:** `_revocation_state.MAX_RECORD_BYTES`.
-* **Replay floor:** `SqliteReplayCache.max_age_floor()`, table `replay_policy_floor`.
+* **Replay floor:** table `replay_meta`, one row.
 
 ## Issuer tooling
 
-`_revocation_tooling.next_list(issuer=, authority=, generation=, previous=, actions=[KeyAction(...)], now=, valid_for=, trust_store=None, recovery_anchor_pem=None, allow_unknown_keys=False, after_recovery=None) -> NextList(document, digest, clamped)`,
-`sign_transition_statement`, `sign_recovery_statement`, `load_publisher_state`, `publisher_lock`, `persist_before_release`. `ActionRefused` means nothing was signed. The CLI's `sign-list` needs `--initial` for a first list and `--trusted-keys` (or `--allow-unknown-keys`) for any action.
+`_revocation_tooling.next_list(issuer=, authority=, generation=, previous=, actions=[KeyAction(...)], now=, valid_for=, trust_store=None, recovery_anchor_pem=None, allow_unknown_keys=False, after_recovery=None) -> NextList(document, digest)`,
+`sign_transition_statement`, `sign_recovery_statement`, `load_publisher_state`, `publisher_lock`, `persist_before_release`. `ActionRefused` means nothing was signed, including for a compromise time after a retirement: there is no clamp. The CLI's `sign-list` needs `--initial` for a first list and `--trusted-keys` (or `--allow-unknown-keys`) for any action.
 
 ## CLI
 
@@ -83,7 +110,7 @@ regaudit-fhe revocation enroll | rebaseline | status | ingest {list,transition,r
 regaudit-fhe trust migrate --source S --target T --issuer KEY_ID=ISSUER ... [--dry-run]
 regaudit-fhe trust add ... [--revocation-pins PINS]
 regaudit-fhe verify ... [--revocation-mode off|advisory|required --revocation-pins PINS --revocation-state DIR
-                         --revocation-evidence-age-seconds N] [--policy-evidence]
+                         --revocation-evidence-age-seconds N] [--response-format v1|v2]
 ```
 `verify` exits 0 accepted, 1 refused by policy, 2 configuration (including `high-assurance` with a mode), 3 a required resource unusable.
 

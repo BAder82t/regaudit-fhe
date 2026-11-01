@@ -1,8 +1,9 @@
 """Issuer-side tooling for signed revocation data. EXPERIMENTAL.
 
 It refuses inconsistent or hazardous actions **before signing**, because a verifier's protection against a bad list
-is a contradiction latch that stops the whole issuer. A retired key later found compromised after its retirement is
-clamped to the retirement time, the only form verifiers accept. The publisher persists a list before releasing it, so
+is a contradiction latch that stops the whole issuer. A retired key stated as compromised after its retirement is
+refused: the only form verifiers accept is a time at or before the retirement, and the operator has to state it. The
+publisher persists a list before releasing it, so
 that a crash cannot lead to a second, different list at the same epoch.
 
 The signer here is a delegate of the enrolled pin and recovery anchor. There is no approver and no quorum.
@@ -64,7 +65,6 @@ class KeyAction:
 class NextList:
     document: dict[str, Any]
     digest: str
-    clamped: tuple[str, ...]  # human-readable, one per action whose time was moved earlier
 
 
 def _time_of(text: str, what: str) -> datetime:
@@ -95,9 +95,7 @@ def _check_action(action: KeyAction, now: datetime) -> None:
             raise ActionRefused(f"{action.key_id}: a key cannot be its own successor")
 
 
-def _merge(
-    old: dict[str, Any] | None, action: KeyAction, clamped: list[str]
-) -> dict[str, Any]:
+def _merge(old: dict[str, Any] | None, action: KeyAction) -> dict[str, Any]:
     new = action.entry()
     if old is None:
         return new
@@ -123,15 +121,17 @@ def _merge(
         return new
     if action.status == "compromised":
         # Retired, then compromised after the retirement. Verifiers refuse the later boundary and latch the whole
-        # issuer on it. Nothing the key signed at or after R is acceptable anyway, so R loses nothing.
+        # issuer on it. Nothing the key signed at or after R is acceptable anyway, so the operator can state R, but
+        # the tool does not rewrite a stated time: that is a decision about what is true.
         if action.effective_from is not None and parse_rfc3339(
             action.effective_from
         ) > parse_rfc3339(eff):
-            clamped.append(
-                f"{kid}: compromise time {action.effective_from} is after the retirement; "
-                f"published as {eff}"
+            raise ActionRefused(
+                f"{kid}: compromise time {action.effective_from} is after the retirement at {eff}. Verifiers "
+                f"would refuse this list and stop trusting every key of this issuer until a recovery. Nothing "
+                f"signed at or after the retirement is acceptable anyway: state {eff} or earlier, or no time "
+                "for an unknown boundary"
             )
-            new["effective_from"] = eff
         return new
     if action.effective_from != eff:
         raise ActionRefused(f"{kid}: a retirement date is fixed once published")
@@ -190,7 +190,6 @@ def next_list(
         if parse_rfc3339(previous["issued_at"]) > now + rv.SKEW:
             raise ActionRefused("the previous list is in the future: check this machine's clock")
         current = {e["key_id"]: e for e in previous["entries"]}
-    clamped: list[str] = []
     seen: set[str] = set()
     for action in actions:
         _check_action(action, now)
@@ -199,7 +198,7 @@ def next_list(
         seen.add(action.key_id)
         if action.key_fingerprint == fingerprint:
             raise ActionRefused("a list cannot name its own signer")
-        current[action.key_id] = _merge(current.get(action.key_id), action, clamped)
+        current[action.key_id] = _merge(current.get(action.key_id), action)
     if len({e["key_fingerprint"] for e in current.values()}) != len(current):
         raise ActionRefused("one fingerprint would appear under two key_ids")
     if rv._successor_cycle(list(current.values())):
@@ -242,7 +241,7 @@ def next_list(
         )
         if problem:
             raise ActionRefused(f"the list would not be monotone: {problem}")
-    return NextList(document, rv.list_digest(document), tuple(clamped))
+    return NextList(document, rv.list_digest(document))
 
 
 def sign_transition_statement(

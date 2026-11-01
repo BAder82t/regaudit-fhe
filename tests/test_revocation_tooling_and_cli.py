@@ -59,12 +59,80 @@ def verifier_accepts(*docs) -> list[rv.ListResult]:
     return out
 
 
-def test_a_retired_key_compromised_later_is_clamped_and_the_verifier_does_not_latch():
+def test_a_retired_key_compromised_later_is_refused_before_signing():
     one = nxt(None, [action(W.old, "retired", R)])
-    two = nxt(one.document, [action(W.old, "compromised", LATER)])
-    assert two.clamped and R in two.clamped[0]
-    assert two.document["entries"][0]["effective_from"] == R
-    assert all(r.accepted for r in verifier_accepts(one.document, two.document))
+    with pytest.raises(tooling.ActionRefused, match="after the retirement"):
+        nxt(one.document, [action(W.old, "compromised", LATER)])
+    # the forms a verifier accepts: the retirement time or earlier, stated by the operator, or unknown
+    for when in (R, "2026-09-01T00:00:00Z", None):
+        two = nxt(one.document, [action(W.old, "compromised", when)])
+        assert all(r.accepted for r in verifier_accepts(one.document, two.document))
+
+
+def test_verifier_fails_safe_on_a_list_that_bypassed_the_tool_and_recovery_clears_it(tmp_path):
+    """A mistaken list signed some other way. The key stays refused, and only the defined recovery clears the latch."""
+    import numpy as np
+
+    import regaudit_fhe as rf
+    from regaudit_fhe import _revocation_gate as gate
+    from regaudit_fhe import _revocation_state as st
+    from regaudit_fhe.replay import SqliteReplayCache
+    from regaudit_fhe.report_v2 import envelope_v2
+    from regaudit_fhe.verification import VerificationPolicy
+
+    box = tmp_path / "state"
+    box.mkdir(mode=0o700)
+    fs = st.FileStateStore(box)
+    store = W.store(W.old, W.new, W.third)
+    pin = st.Pin(W.issuer, W.rev.public_key_pem(), "enr-1", recovery_pem=W.recovery.public_key_pem(), baseline_epoch=0)
+    st.enroll(fs, pin, store, now=NOW - timedelta(days=30))
+    one = nxt(None, [action(W.old, "retired", R)]).document
+    assert st.ingest_list(fs, pin, dump(one), store, NOW).accepted
+    body = rv.build_body(
+        issuer=W.issuer,
+        authority_key_id=W.rev.key_id,
+        authority_pem=W.rev.public_key_pem(),
+        epoch=2,
+        prev_list_digest=rv.list_digest(one),
+        issued_at="2026-11-01T12:00:00Z",
+        valid_until="2026-11-02T12:00:00Z",
+        entries=[W.entry(W.old, "compromised", LATER)],
+    )
+    assert st.ingest_list(fs, pin, dump(rv.sign_list(body, W.rev)), store, NOW).code == "REVOCATION_NOT_MONOTONE"
+
+    def decide(signer, db):
+        env = envelope_v2(
+            "drift",
+            rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6])),
+            signer=signer,
+            deployment_id="p",
+            audience=["reg"],
+            issued_at=NOW - timedelta(hours=1),
+        )
+        pol = VerificationPolicy(
+            profile="confidential", trust_store=store, now=lambda: NOW, max_age=timedelta(days=90),
+            replay_mode="check", verifier_id="reg", replay_cache=SqliteReplayCache(tmp_path / db),
+        )  # fmt: skip
+        return gate.verify_with_revocation(
+            env, pol, gate.RevocationContext(gate.MODE_REQUIRED, fs, {W.issuer: pin})
+        ).result
+
+    latched = decide(W.old, "a.db")
+    assert not latched.accepted and "REVOCATION_CONTRADICTORY" in latched.blocking_reasons
+    assert "REVOCATION_CONTRADICTORY" in decide(W.new, "b.db").blocking_reasons  # the whole issuer
+    assert st.ingest_list(fs, pin, dump(nxt(one, []).document), store, NOW).code == "REVOCATION_CONTRADICTORY"
+    assert st.ingest_list(fs, pin, dump(one), store, NOW).code == "REVOCATION_CONTRADICTORY"  # replay clears nothing
+    assert st.load(fs, pin)[0].contradiction is not None
+
+    recovery = W.recovery_stmt(W.auth2, new_gen=2)
+    assert st.ingest_recovery(fs, pin, dump(recovery), store, NOW).accepted
+    assert st.load(fs, pin)[0].contradiction is None
+    after = nxt(one, [action(W.old, "compromised", R)], authority=W.auth2, generation=2, after_recovery=recovery)
+    assert st.ingest_list(fs, pin, dump(after.document), store, NOW).accepted
+    cleared = decide(W.new, "c.db")
+    assert cleared.accepted, cleared.blocking_reasons
+    still = decide(W.old, "d.db")  # the latch cleared; the key stayed refused
+    assert not still.accepted and still.key_status == "compromised"
 
 
 def test_control_without_the_clamp_the_verifier_refuses_that_form():
@@ -308,7 +376,8 @@ def test_cli_end_to_end_required_with_exit_codes(op):
     assert ok.returncode == 0, ok.stdout
     payload = json.loads(ok.stdout)
     assert payload["policy_id"] == "regaudit-fhe/confidential+revocation-required/v1"
-    assert payload["policy_evidence"]["revocation"]["status"] == "VERIFIED_AS_OF"
+    assert payload["revocation_evaluation"] == "evaluated"
+    assert payload["policy_evidence"]["revocation"]["revocation_evaluation"] == "evaluated"
     assert payload["policy_evidence"]["revocation"]["state_store_scope"] == "LOCAL_FILE"
 
     assert ingest(cwd).returncode == 0  # a repeat
@@ -343,7 +412,7 @@ def test_cli_high_assurance_off_says_nothing_new_by_default(op):
     assert payload["policy_id"] == "regaudit-fhe/high-assurance/v1"
     assert "policy_evidence" not in payload
     asked = verify_cli(cwd, "--policy-evidence", profile="high-assurance", mode=None)
-    assert json.loads(asked.stdout)["policy_evidence"]["revocation"]["status"] == "NOT_EVALUATED"
+    assert json.loads(asked.stdout)["revocation_evaluation"] == "not_evaluated"
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "86401", "nan", "inf", "1e300"])
@@ -357,7 +426,8 @@ def test_cli_infrastructure_failures_exit_3(op):
     cwd, _ = op
     (cwd / "state").rename(cwd / "state-gone")
     gone = verify_cli(cwd)
-    assert gone.returncode == 3 and gone.stdout == ""
+    assert gone.returncode == 3
+    assert json.loads(gone.stdout)["revocation_evaluation"] == "required_but_unavailable"
     (cwd / "state-gone").rename(cwd / "state")
     (cwd / "pins.json").write_text("{")
     assert verify_cli(cwd).returncode == 3
@@ -399,12 +469,14 @@ def test_cli_trust_add_refuses_an_enrolled_authority_or_anchor(op):
         assert out.returncode == 2 and "enrolled" in out.stderr
 
 
-def test_cli_sign_list_clamps_and_says_so(op):
+def test_cli_sign_list_refuses_a_compromise_after_the_retirement(op):
     cwd, fps = op
     assert sign_list(cwd, "--retire", f"report,{fps['report']},{R}").returncode == 0
+    before = (cwd / "publisher.json").read_bytes()
     out = sign_list(cwd, "--compromise", f"report,{fps['report']},{LATER}")
-    assert out.returncode == 0 and "clamped" in out.stderr
-    assert json.loads((cwd / "list.json").read_text())["entries"][0]["effective_from"] == R
+    assert out.returncode == 2 and "after the retirement" in out.stderr
+    assert (cwd / "publisher.json").read_bytes() == before
+    assert sign_list(cwd, "--compromise", f"report,{fps['report']},{R}").returncode == 0
 
 
 def test_cli_sign_list_refuses_and_releases_nothing(op):

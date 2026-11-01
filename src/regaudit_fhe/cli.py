@@ -46,8 +46,16 @@ from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, 
 from ._trust_lifecycle import migrate as migrate_store_file
 from ._trust_lifecycle import retire as retire_key
 from ._trust_lifecycle import revoke as revoke_key
+from ._verification_response import response_v2
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
-from .replay import ReplayStateError, SqliteReplayCache
+from .replay import (
+    DEFAULT_TRUST_HISTORY_MAX_AGE,
+    ReplayMigrationRefused,
+    ReplayStateError,
+    SqliteReplayCache,
+    migrate_replay_file,
+    replay_file_status,
+)
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope_strict
 from .reports import AuditEnvelope, Signer, commitments_for, envelope
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
@@ -553,6 +561,49 @@ def _cmd_trust_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _seconds(value: float | None, flag: str) -> timedelta | None:
+    if value is None:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        raise ReplayMigrationRefused(f"{flag} must be positive and finite")
+    try:
+        return timedelta(seconds=value)
+    except OverflowError as exc:
+        raise ReplayMigrationRefused(f"{flag} is out of range") from exc
+
+
+def _cmd_replay_migrate(args: argparse.Namespace) -> int:
+    """Exit 0 migrated | 2 refused, the file is as it was | 3 the file could not be used."""
+    try:
+        history = _seconds(
+            args.previous_trust_history_max_age_seconds, "--previous-trust-history-max-age-seconds"
+        )
+        report = migrate_replay_file(
+            args.db,
+            now=datetime.now(timezone.utc),
+            previous_max_age=_seconds(args.previous_max_age_seconds, "--previous-max-age-seconds"),
+            previous_policy_unknown=args.previous_policy_unknown,
+            previous_trust_history_max_age=history or DEFAULT_TRUST_HISTORY_MAX_AGE,
+        )
+    except ReplayMigrationRefused as exc:
+        sys.stderr.write(f"refused, the file is as it was: {exc}\n")
+        return 2
+    except ReplayStateError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def _cmd_replay_status(args: argparse.Namespace) -> int:
+    try:
+        print(json.dumps(replay_file_status(args.db), indent=2))
+    except ReplayStateError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    return 0
+
+
 def _cmd_schema(args: argparse.Namespace) -> int:
     if args.list:
         for name in list_schemas():
@@ -657,6 +708,10 @@ def _refusal_hint(trust_status: str, reason: str | None) -> str:
     )
 
 
+def _versioned_payload(result: Any, decision: Any) -> dict[str, Any]:
+    return response_v2(result.to_dict(), None if decision is None else decision.revocation)
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Exit 0 only if the report is accepted under the selected policy.
 
@@ -741,24 +796,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
 
+    versioned = args.response_format == "v2" or args.policy_evidence or args.revocation_mode != "off"
+    down: list[str] = []
     if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
         # The replay store could not be used while verifying. That is an
         # infrastructure failure, not a verdict on the report (exit 3, not 1).
-        sys.stderr.write("verification not possible: the replay store was unavailable\n")
-        return 3
+        down.append("the replay store was unavailable")
     if args.revocation_mode != "off":
         from ._revocation_gate import INFRASTRUCTURE_CODES
 
-        down = INFRASTRUCTURE_CODES.intersection(result.blocking_reasons)
-        if down:
-            sys.stderr.write(f"verification not possible: {sorted(down)[0]}\n")
-            return 3
-    payload = result.to_dict()
+        down.extend(sorted(INFRASTRUCTURE_CODES.intersection(result.blocking_reasons)))
+    if down:
+        sys.stderr.write(f"verification not possible: {down[0]}\n")
+        if versioned:  # an opted-in client still sees the status; the exit code says no verdict was possible
+            print(json.dumps(_versioned_payload(result, decision), indent=2))
+        return 3
+    payload = _versioned_payload(result, decision) if versioned else result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
-    if args.policy_evidence or args.revocation_mode != "off":
-        from ._revocation_gate import policy_evidence
-
-        payload["policy_evidence"] = policy_evidence(decision)
     if not result.accepted:
         payload["reason"] = (
             result.blocking_reasons[0] if result.blocking_reasons else result.reasons[0]
@@ -931,6 +985,33 @@ def build_parser() -> argparse.ArgumentParser:
     add_revocation_verify_options(verify_p)
     verify_p.set_defaults(func=_cmd_verify)
     add_revocation_parsers(sub)
+    replay = sub.add_parser("replay", help="Inspect or migrate a replay store file.")
+    replay_sub = replay.add_subparsers(dest="replay_command", required=True)
+    r_status = replay_sub.add_parser("status", help="Read-only description of a replay file.")
+    r_status.add_argument("--db", required=True)
+    r_status.set_defaults(func=_cmd_replay_status)
+    r_migrate = replay_sub.add_parser(
+        "migrate",
+        help="Bring a file written by a published version to the current version, in one transaction. Back it up "
+        "first. Its policy was never recorded, so you state it.",
+    )
+    r_migrate.add_argument("--db", required=True)
+    r_migrate.add_argument(
+        "--previous-max-age-seconds",
+        type=float,
+        help="The largest max_age this file ever served: your statement, which becomes the floor.",
+    )
+    r_migrate.add_argument(
+        "--previous-policy-unknown",
+        action="store_true",
+        help="You do not know. Every report issued up to now is then refused (REPLAY_HISTORY_UNKNOWN).",
+    )
+    r_migrate.add_argument(
+        "--previous-trust-history-max-age-seconds",
+        type=float,
+        help="Default 86400, the library's default. State it if yours was lower.",
+    )
+    r_migrate.set_defaults(func=_cmd_replay_migrate)
 
     serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")
