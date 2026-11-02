@@ -6,7 +6,7 @@ Unreleased, on a local candidate branch. AI-assisted engineering notes.
 
 | What you have | What happens after upgrading | What to do |
 | --- | --- | --- |
-| A bare `{key_id: PEM}` or `{"keys": ...}` trust store, under `confidential` or `high-assurance` | The policy is refused: `regaudit-fhe verify` exits 2, `serve` does not start, the library raises `PolicyError` | [Migrate the trust store](#1-a-trust-store-without-issuers) |
+| A bare `{key_id: PEM}` or `{"keys": ...}` trust store, under `confidential`, `high-assurance` or `secure-v1` | The policy is refused: `regaudit-fhe verify` exits 2, `serve` does not start, the library raises `PolicyError` | [Build a new store with `trust add`](#1-a-trust-store-without-issuers). `trust migrate` does not satisfy these profiles |
 | A replay file written by a published version | It is refused: `verify` exits 3, `serve` does not start, the library raises `LegacyReplayFile` | [Migrate the replay file](#2-a-replay-file-from-a-published-version) |
 
 Under `development`, a trust store without issuers keeps working and each result says `ISSUER_UNBOUND`.
@@ -20,25 +20,37 @@ Before either migration: stop the verifiers using the file, and keep a copy of i
 
 ## 1. A trust store without issuers
 
+**On a strict profile, build a new store with `trust add`.** For each key, get the fingerprint from the issuer over a channel you trust, not from the old store:
+
+```bash
+# one public key file per key, in PEM, then:
+regaudit-fhe trust add --store new.json --key-id KEY_ID --issuer ISSUER \
+    --public-key KEY_ID.pub --fingerprint FINGERPRINT_THE_ISSUER_GAVE_YOU
+regaudit-fhe trust status --store new.json
+regaudit-fhe verify -i a_report_you_trust.json --trusted-keys new.json --profile confidential ...
+```
+
+Copy each name exactly from the `issuer` field of reports you already trust, since the comparison is byte for byte. Check a sample of reports before you switch, and keep the old store. One key
+has one issuer: reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution. A key flagged `revoked` in the old store must not be
+carried over as active: mark it with `trust revoke` after adding it.
+
+**`trust add` is normal enrollment, not an authenticated one.** No authenticated enrollment exists yet. It checks the key against the fingerprint you supply, and the result's `issuer_binding` is
+`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the project owner.
+
+**`trust migrate` is for `development` and the lenient paths.** Every strict profile refuses what it writes (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), because `--issuer` is your statement as a local
+operator and not proof that a key belongs to that issuer.
+
 ```bash
 regaudit-fhe trust migrate --source old.json --target new.json --issuer KEY_ID=ISSUER --dry-run
 regaudit-fhe trust migrate --source old.json --target new.json --issuer KEY_ID=ISSUER
-regaudit-fhe trust status --store new.json
-regaudit-fhe verify -i a_report_you_trust.json --trusted-keys new.json
 ```
 
-Repeat `--issuer` for every key: a key with no statement refuses the whole migration, and nothing is inferred. Copy each name exactly from
-the `issuer` field of reports you already trust, since the comparison is byte for byte. Check a sample of reports against `new.json` before you
-switch. The source is left unchanged, so you can go back.
+Repeat `--issuer` for every key: nothing is inferred. The source is left unchanged. The command writes `new.json.issuer-provenance.json` beside the store to record what happened, the output says
+`issuer_binding: operator-declared`, `authenticated_binding: false`, and `development` results carry `ISSUER_OPERATOR_DECLARED`. A flat `revoked` key becomes `compromised` with an unknown boundary, and it stays
+refused. Published versions read `new.json` as it is, and ignore the file beside it.
 
-**`--issuer` is your statement as a local operator, not proof that a key belongs to that issuer.** No authenticated enrollment exists. The
-command writes `new.json.issuer-provenance.json` beside the store to record this, and the output says `issuer_binding: operator-declared`,
-`authenticated_binding: false`. Results on that store carry `ISSUER_OPERATOR_DECLARED`. Keep the two files together. That file is a label:
-deleting it does not make the statement any stronger. Published versions read `new.json` as it is, and ignore the file beside it.
-
-* A flat `revoked` key becomes `compromised` with an unknown boundary. It stays refused, and its code changes to
-  `KEY_COMPROMISED_NO_CHRONOLOGY`.
-* One key has one issuer. Reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution.
+**That file is a label in a file you control, not authentication, and it can be removed.** Deleting it, or copying the store without it, gives a store nothing can tell from a hand-written one, and strict
+profiles then accept it. That does not make the names any better established. Do not do this: the refusal is there because nothing has established them.
 
 ### Names that are refused
 
@@ -65,15 +77,11 @@ Full details are in [DEPLOYMENT.md](DEPLOYMENT.md#upgrading-with-an-existing-rep
 
 ## 3. Optional: the `secure-v1` profile
 
-A new, versioned profile. It is `confidential` with two more rules, and it changes nothing about the existing profiles.
+A new, versioned profile: `confidential` with **a fixed 24 hour trust-history window**, the same on a new store, an existing store and with no store state. `trust_history_max_age` cannot be set, larger or
+smaller: anything but 24 hours is refused when the policy is built. A history older than 24 hours is never fresh. What a shorter setting already refused on a store stays refused after a move to this
+profile. It changes nothing about the existing profiles.
 
-* **A fixed 24 hour trust-history window**, the same on a new store, an existing store and with no store state. `trust_history_max_age` cannot be set, larger or
-  smaller: anything but 24 hours is refused when the policy is built. A history older than 24 hours is never fresh. What a shorter setting already refused on a store
-  stays refused after a move to this profile.
-* **A store recorded as operator-declared is refused.** Enroll each key with `regaudit-fhe trust add` in a new store, checking the fingerprint the issuer gave you.
-
-This is not an authenticated enrollment either, and `secure-v1` does not claim one. A subclass of `TrustStore` is refused under this profile and under
-`confidential` and `high-assurance`.
+A subclass of `TrustStore` is refused under `confidential`, `high-assurance` and `secure-v1`.
 
 ## `verify_receipt`
 

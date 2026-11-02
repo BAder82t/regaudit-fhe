@@ -89,27 +89,31 @@ Embedding a key in the envelope is a convenience for self-consistency checks
 and MUST NOT be an authority.
 
 **Issuer attribution.** `issuer_trusted: true` means the signed issuer name is exactly the name the
-operator enrolled for the key that verified the report, and that key is enrolled, in scope and not revoked.
+trust store states for the key that verified the report, and that key is registered, in scope and not revoked.
 The name comes from the trust store. It never comes from the report, the `key_id`, or the number of keys in the
-store: one key can sign under any name unless something the operator wrote says which name it has. It does not show
-that the operator's statement is true, or who held the key.
+store: one key can sign under any name unless something in the store says which name it has. It does not show
+that the store's statement is true, or who held the key. **No authenticated issuer enrollment exists in this version, and no
+output claims one.** A trust store is a local file.
 
-A bare or `keys` store states no issuer, so it cannot give this. `confidential` and `high-assurance` refuse it when the
-policy is built (`PolicyError`; CLI exit 2; the server does not start), before any report is read, and there is no way to
-turn that off. `regaudit-fhe trust migrate` makes an `entries` store from one, with each issuer stated by the
-operator and never inferred.
+Four cases, by the owner's ruling, under the strict profiles `confidential`, `high-assurance` and `secure-v1`:
 
-`trust migrate --issuer` is a local operator's statement and not an authenticated binding: no authenticated enrollment exists. It is recorded in a file beside the
-store, since every published version refuses an unknown member in the store itself. `confidential`, `high-assurance` and `development` accept such a store and
-add `ISSUER_OPERATOR_DECLARED` to `reasons` (`issuer_binding: "operator_declared"` in response format v2); `secure-v1` refuses it. That file is a label and
-authenticates nothing: a store loaded without it carries no label.
+| Store | Strict profiles | `development` and the lenient library paths |
+|---|---|---|
+| Bare or `keys`, with no issuers | Refused when the policy is built (`PolicyError`; CLI exit 2; the server does not start), before any report is read. No opt-out | Verdict as before, labelled `ISSUER_UNBOUND` |
+| `entries`, with issuers recorded as stated by `trust migrate --issuer` | Refused the same way, code `ISSUER_ENROLLMENT_UNAUTHENTICATED`. That is an operator's assertion, not an enrollment | Accepted, labelled `ISSUER_OPERATOR_DECLARED` |
+| `entries`, enrolled with `trust add`, or written by hand | Accepted when every other requirement passes, as normal enrollment. `issuer_binding` is `store_entry`, and it does not mean authenticated. Whether this should count is open | Accepted |
+| Authenticated enrollment | Permitted when it exists. None exists, and none is implemented | |
+
+The record of a migration is a file beside the store, since every published version refuses an unknown member in the store itself. It is a label in a
+file the operator controls, not authentication, and it can be removed: deleting it, copying the store without it, or loading the JSON with `from_dict` gives a store that nothing can tell
+from a hand-written one, and a strict profile accepts that.
 
 An issuer's name follows one rule at enrollment, trust-store parsing and migration, in every profile, and is never normalised: it may not be empty, have leading or
 trailing whitespace, contain whitespace other than U+0020, or contain a control, format (zero-width, bidi), unassigned, private-use or blank character. Look-alike letters,
 double spaces and Unicode normal forms stay different names. A signer is not held to this rule, but only a store with no issuers can then accept its report.
 
 In `development`, and on the lenient library paths `verify_envelope` and `verify_report(parse_envelope(...))`, such a store
-keeps the verdicts it has always had, for compatibility. There `issuer_trusted` shows only that the key is enrolled, in scope and
+keeps the verdicts it has always had, for compatibility. There `issuer_trusted` shows only that the key is registered, in scope and
 not revoked, and the result says so: `ISSUER_UNBOUND` in `reasons`, a warning on the CLI's stderr, `issuer_binding: "not_bound"`
 in response format v2, and `issuer_bound` false plus a `DeprecationWarning` from `verify_envelope`. `verify_receipt` returns a bare bool and by its
 contract does not warn when given trust material, so it carries no label. A relying
@@ -762,13 +766,13 @@ one function, called by every entry point.
 | `development` | allowed, loopback only | optional | signer-asserted allowed | allowed | off |
 | `confidential` | refused | required, authenticated | authenticated for retired keys | **refused** (cannot be replay-checked) | required |
 | `high-assurance` | refused | required, authenticated, fresh | authenticated always | refused unless waived in policy | required, shared |
-| `secure-v1` | refused | as `confidential`, and a store recorded as operator-declared is refused | as `confidential`, with a fixed 24 hour trust-history window | **refused** (cannot be replay-checked) | required |
+| `secure-v1` | refused | as `confidential` | as `confidential`, with a fixed 24 hour trust-history window | **refused** (cannot be replay-checked) | required |
 
 `secure-v1` is a distinct versioned profile, so that no existing parameter changes meaning. Its window is the same on a new replay store, an existing one
 and with no store state: `trust_history_max_age` other than 24 hours is refused when the policy is built, and a history older than 24 hours is never fresh. On a
 store where a shorter setting was served, the floor moves to 24 hours and the trust-history cutover to that moment, in one transaction, so what the shorter setting
 refused stays refused; if that cannot be written, no history counts. The other profiles keep their own rules, including the floor and the ceiling in 6.1, and make
-no such claim. Under `confidential`, `high-assurance` and `secure-v1` the store must be exactly a `TrustStore`, not a subclass.
+no such claim. Under `confidential`, `high-assurance` and `secure-v1` the store must be exactly a `TrustStore`, not a subclass, and §3.1 says which stores they refuse.
 
 A `high-assurance` deployment MUST refuse to start if any required element is
 missing, and MUST NOT fall back to a weaker profile.

@@ -107,9 +107,11 @@ Whether `development` and the lenient paths should refuse too is a later decisio
 "Legacy keys": it said such a store verifies in every profile.
 
 On candidate 2, by the owner's rulings: binding is worked out at construction from records of exactly the parsed types, and a strict policy refuses a `TrustStore` subclass. An issuer's name
-has one rule (`trust.issuer_name_problem`). A migration's issuer is an operator's statement, recorded beside the store because every published version refuses an unknown member in it. Two
-defaults here are the coordinator's and await the owner: the existing strict profiles accept a labelled store, and `secure-v1` refuses it whole. `development` and `verify_trusted` with its default
-policy still accept a subclass. Not covered: malicious code in the verifier's process, and a store whose label was deleted, copied away or skipped with `from_dict`.
+has one rule (`trust.issuer_name_problem`). A migration's issuer is an operator's statement and must not be treated as authenticated enrollment, so every strict profile refuses such a store
+(`ISSUER_ENROLLMENT_UNAUTHENTICATED`, a configuration refusal) and `development` labels it. The record is beside the store because every published version refuses an unknown member in it. No authenticated enrollment
+exists. `trust add` and a hand-written `entries` store keep working under strict profiles, and `issuer_binding` calls them `store_entry`: whether they should count is open with the owner, and a hand-written store cannot be told
+from one built with `trust add`. `development` and `verify_trusted` with its default policy still accept a subclass. Not covered: malicious code in the verifier's process, and a store whose label was deleted, copied away or skipped
+with `from_dict`, which is then accepted.
 
 ## F-12 in `secure-v1`
 
@@ -149,7 +151,7 @@ running process that remembered the lower floor then treats it as a replaced fil
 ## Reason codes added since the frozen proposal
 
 `REVOCATION_HIGH_ASSURANCE_UNAVAILABLE` (configuration), `REVOCATION_POLICY_DOWNGRADE` (blocking in every mode), `REVOCATION_POLICY_FLOOR_APPLIED`
-(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND` and `ISSUER_OPERATOR_DECLARED` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
+(informational), `ISSUER_ENROLLMENT_UNAUTHENTICATED` (configuration), and on the engine `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND` and `ISSUER_OPERATOR_DECLARED` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
 
 ## Evidence kinds
 

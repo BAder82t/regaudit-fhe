@@ -477,7 +477,7 @@ limits egress to the destinations the deployment actually requires
 
 ## Production checklist
 
-Under `confidential`, `high-assurance` or `secure-v1` the trust store must be in the `entries` form: see
+Under `confidential`, `high-assurance` or `secure-v1` the trust store must be an `entries` store built with `trust add`: see
 [Upgrading a trust store without issuers](#upgrading-a-trust-store-without-issuers), and [MIGRATION_0.3.md](MIGRATION_0.3.md) for both upgrade actions.
 
 - [ ] HTTPS termination at the ingress (TLS 1.2+, OCSP stapling).
@@ -554,29 +554,9 @@ to the verifier's account.
 ## Upgrading a trust store without issuers
 
 A bare store (`{"key_id": "PEM"}`) or a `keys` store (`{"keys": {...}}`) does not say which issuer each key belongs to, so any
-enrolled key can sign under any issuer name and be reported as trusted. That holds with one key as much as with many. `confidential` and
-`high-assurance` refuse such a store: `regaudit-fhe verify` exits 2 and `serve` does not start. `development` still accepts it and says
+enrolled key can sign under any issuer name and be reported as trusted. That holds with one key as much as with many. `confidential`, `high-assurance` and
+`secure-v1` refuse such a store: `regaudit-fhe verify` exits 2 and `serve` does not start. `development` still accepts it and says
 `ISSUER_UNBOUND` in `reasons`.
 
-```bash
-regaudit-fhe trust migrate --source old.json --target new.json \
-    --issuer KEY_ID=ISSUER --issuer KEY_ID2=ISSUER2 --dry-run    # shows what would change
-regaudit-fhe trust migrate --source old.json --target new.json \
-    --issuer KEY_ID=ISSUER --issuer KEY_ID2=ISSUER2
-regaudit-fhe verify -i a_report_you_trust.json --trusted-keys new.json
-```
-
-* **Your statement, not proof.** The output says `issuer_binding: operator-declared`, `authenticated_binding: false`, and a file beside the target records it. `confidential`
-  and `high-assurance` accept the store and label results `ISSUER_OPERATOR_DECLARED`; `secure-v1` refuses it. Keep the two files together. That file is a label: deleting it
-  strengthens nothing.
-* **You state every issuer.** Nothing is inferred, and a key with no statement refuses the whole migration. The name must be
-  exactly what the key's reports carry: the comparison is byte for byte. Read the `issuer` field of reports you already trust, then check a
-  sample against the new store before switching.
-* **The source is left unchanged** and an existing target is refused, so going back is pointing at the old file (on a policy that still accepts it).
-* **Published versions read the new store.** The `entries` form has been accepted since 0.1.0. An older reader takes the file as it is.
-* **A flat `revoked` key becomes `compromised` with an unknown boundary,** since the old form does not say why it was revoked. It stays refused, and
-  the code changes from `KEY_REVOKED` to `KEY_COMPROMISED_NO_CHRONOLOGY`. Parameter-set pins carry over.
-* **One key has one issuer.** Reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution. Keep the
-  name the reports you still need carry, or enroll a new key for the new name.
-* **A name must be unambiguous.** See "Names that are refused" in [MIGRATION_0.3.md](MIGRATION_0.3.md#names-that-are-refused). An existing `entries` store holding such a name no longer loads.
-* **Reports are untouched** and nothing needs re-signing. A report's verdict is the same as before if the stated issuer is its issuer.
+**`trust migrate` does not get you back onto a strict profile.** Its issuers are your statement, and those profiles refuse them too (`ISSUER_ENROLLMENT_UNAUTHENTICATED`). The way
+back is a new store built with `trust add`. The steps and what they do and do not establish are in [MIGRATION_0.3.md](MIGRATION_0.3.md#1-a-trust-store-without-issuers).

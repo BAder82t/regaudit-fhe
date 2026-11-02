@@ -343,7 +343,7 @@ and, without a trust store, only means "the file is intact".
 | --- | --- |
 | `accepted` | The final decision. True only when `trust_status` is `TRUSTED`. |
 | `integrity_valid` | The hash and signature are consistent (checked against *your* registered key). |
-| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name is the one enrolled for it. A trust store that states no issuer cannot show that last part: `confidential` and `high-assurance` refuse such a store, and in `development` the result says `ISSUER_UNBOUND`. See [the advisory](docs/advisories/issuer-attribution-0.2.1.md). |
+| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name is the one your trust store states for it. A store that states no issuer cannot show that last part: strict profiles refuse it, and in `development` the result says `ISSUER_UNBOUND`. See [the advisory](docs/advisories/issuer-attribution-0.2.1.md). |
 | `key_status` | `active`, `retired`, `compromised`, `revoked`, `unknown` or `none`. |
 | `chronology` / `timestamp_status` | How well the signing time is established (see the rules below). |
 | `blocking_reasons` | The codes that caused a refusal (for example `ISSUER_UNKNOWN`, `REPORT_TOO_OLD`). |
