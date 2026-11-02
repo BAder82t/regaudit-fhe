@@ -105,7 +105,7 @@ sortedcontainers==2.4.0
     # via hypothesis
 starlette==1.0.0
     # via fastapi
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   anyio
     #   fastapi
