@@ -313,7 +313,8 @@ whether it is still active, and optionally where it may be used:
 ```
 
 A key can be listed under one name only, and it must be an Ed25519 key. (The older
-flat format with `keys` / `revoked` / `parameter_set_pins` still works.)
+flat format with `keys` / `revoked` / `parameter_set_pins` still works, but it does not bind a
+key to an issuer: see [the advisory](docs/advisories/issuer-attribution-0.2.1.md).)
 
 **Step 2. Verify.**
 
@@ -342,7 +343,7 @@ and, without a trust store, only means "the file is intact".
 | --- | --- |
 | `accepted` | The final decision. True only when `trust_status` is `TRUSTED`. |
 | `integrity_valid` | The hash and signature are consistent (checked against *your* registered key). |
-| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name matches. |
+| `issuer_trusted` | The key is registered, in scope and not revoked. The signed issuer name is checked only with the `entries` trust-store form. A legacy `{"keys": ...}` or bare `{key_id: PEM}` store has no issuer binding, so this field does not establish the issuer there; see [the advisory](docs/advisories/issuer-attribution-0.2.1.md). |
 | `key_status` | `active`, `retired`, `compromised`, `revoked`, `unknown` or `none`. |
 | `chronology` / `timestamp_status` | How well the signing time is established (see the rules below). |
 | `blocking_reasons` | The codes that caused a refusal (for example `ISSUER_UNKNOWN`, `REPORT_TOO_OLD`). |
