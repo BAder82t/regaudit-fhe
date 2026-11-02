@@ -49,7 +49,6 @@ from ._trust_lifecycle import revoke as revoke_key
 from ._verification_response import response_v2
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
 from .replay import (
-    DEFAULT_TRUST_HISTORY_MAX_AGE,
     ReplayMigrationRefused,
     ReplayStateError,
     SqliteReplayCache,
@@ -583,7 +582,7 @@ def _cmd_replay_migrate(args: argparse.Namespace) -> int:
             now=datetime.now(timezone.utc),
             previous_max_age=_seconds(args.previous_max_age_seconds, "--previous-max-age-seconds"),
             previous_policy_unknown=args.previous_policy_unknown,
-            previous_trust_history_max_age=history or DEFAULT_TRUST_HISTORY_MAX_AGE,
+            previous_trust_history_max_age=history,
         )
     except ReplayMigrationRefused as exc:
         sys.stderr.write(f"refused, the file is as it was: {exc}\n")
@@ -992,8 +991,9 @@ def build_parser() -> argparse.ArgumentParser:
     r_status.set_defaults(func=_cmd_replay_status)
     r_migrate = replay_sub.add_parser(
         "migrate",
-        help="Bring a file written by a published version to the current version, in one transaction. Back it up "
-        "first. Its policy was never recorded, so you state it.",
+        help="Build a clean current file from a file written by a published version, and swap it in. Stop every "
+        "verifier first. The original is kept as FILE.pre-migration. Anything but the exact published shape is "
+        "refused. Its policy was never recorded, so you state it.",
     )
     r_migrate.add_argument("--db", required=True)
     r_migrate.add_argument(
@@ -1009,7 +1009,8 @@ def build_parser() -> argparse.ArgumentParser:
     r_migrate.add_argument(
         "--previous-trust-history-max-age-seconds",
         type=float,
-        help="Default 86400, the library's default. State it if yours was lower.",
+        help="The largest trust_history_max_age this file ever served, at most 86400: your statement. Without it, "
+        "a trust history as of the migration or earlier is not fresh.",
     )
     r_migrate.set_defaults(func=_cmd_replay_migrate)
 

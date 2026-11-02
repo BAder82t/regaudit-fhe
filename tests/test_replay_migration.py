@@ -1,12 +1,14 @@
 """Replay files written by published versions, and trust_history_max_age.
 
 REAL: new processes for restarts, a process killed with SIGKILL inside the migration transaction, the CLI and ``serve`` as
-processes. The published files here are created with the same SQL the published versions run; the same sequence against a
-file written by the real 0.2.1 wheel is run outside the suite. SIMULATED or absent: power loss.
+processes. ``published_file`` makes a file with the SQL the published versions run. The ``real_file`` fixture is a file
+really written by the published 0.2.1 wheel, from PyPI with its hash checked; a harness outside the suite also runs the
+real 0.2.1 CLI. SIMULATED or absent: power loss.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -23,7 +25,6 @@ import pytest
 
 import regaudit_fhe as rf
 from regaudit_fhe.replay import (
-    InMemoryReplayCache,
     LegacyReplayFile,
     ReplayMigrationRefused,
     ReplayStateError,
@@ -32,7 +33,7 @@ from regaudit_fhe.replay import (
     replay_file_status,
 )
 from regaudit_fhe.report_v2 import envelope_v2
-from regaudit_fhe.verification import TimestampEvidence, TrustHistory, VerificationPolicy, verify
+from regaudit_fhe.verification import VerificationPolicy, verify
 
 T0 = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 HOUR = timedelta(hours=1)
@@ -129,8 +130,8 @@ def cli(*args: str, cwd: Path, env=None) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _signed_cli_report(cwd: Path) -> None:
-    (cwd / "r.json").write_text(report().to_json())
+def _signed_cli_report(cwd: Path, issued_at=None) -> None:
+    (cwd / "r.json").write_text(report(issued_at or T0).to_json())
     (cwd / "t.json").write_text(json.dumps({"entries": {"k": ENTRY}}))
 
 
@@ -310,7 +311,7 @@ def test_other_table_shape_is_refused(db):
     conn.execute("CREATE TABLE replay (a, b, c)")
     conn.commit()
     conn.close()
-    with pytest.raises(ReplayMigrationRefused, match="published shape"):
+    with pytest.raises(ReplayMigrationRefused, match="expected schema"):
         migrate_replay_file(db, now=T0, previous_policy_unknown=True)
 
 
@@ -392,7 +393,8 @@ CHILD = textwrap.dedent(
     from regaudit_fhe.replay import migrate_replay_file
 
     def die(point):
-        os.kill(os.getpid(), signal.SIGKILL)
+        if point == sys.argv[4]:
+            os.kill(os.getpid(), signal.SIGKILL)
 
     migrate_replay_file(
         sys.argv[2], now=datetime.fromisoformat(sys.argv[3]), previous_max_age=timedelta(days=1), _fault=die
@@ -401,25 +403,60 @@ CHILD = textwrap.dedent(
 )
 
 
-def test_real_process_killed_during_migration_leaves_a_legacy_file(db):
+@pytest.mark.parametrize(
+    ("point", "swapped"),
+    [
+        ("after-validation", False),
+        ("after-destination-built", False),
+        ("before-keeping-original", False),
+        ("before-swap", False),
+        ("after-swap", True),
+        ("after-directory-sync", True),
+    ],
+)
+def test_real_process_killed_at_every_step_of_migration(db, point, swapped):
     row = ("k", "r", (T0 + HOUR).timestamp())
     published_file(db, row)
+    original = db.read_bytes()
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", CHILD, PACKAGE_PARENT, str(db), T0.isoformat()],
+        [sys.executable, "-c", CHILD, PACKAGE_PARENT, str(db), T0.isoformat(), point],
         capture_output=True,
         text=True,
         timeout=120,
         check=False,
     )
-    assert proc.returncode == -signal.SIGKILL, proc.stderr  # it really died inside the transaction
-    assert replay_file_status(db)["state"] == "legacy"
-    with pytest.raises(LegacyReplayFile):
-        SqliteReplayCache(db)
-    report_out = migrate_replay_file(db, now=T0, previous_max_age=DAY)
-    assert report_out["rows_preserved"] == 1
+    assert proc.returncode == -signal.SIGKILL, proc.stderr  # it really died there
+    assert not db.with_name(db.name + "-journal").exists()
+    if swapped:
+        assert replay_file_status(db)["state"] == "current"
+        assert db.with_name(db.name + ".pre-migration").read_bytes() == original
+        with pytest.raises(ReplayMigrationRefused, match="already"):
+            migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    else:
+        assert db.read_bytes() == original  # the whole original, not a byte changed
+        with pytest.raises(LegacyReplayFile):
+            SqliteReplayCache(db)
+        report_out = migrate_replay_file(db, now=T0, previous_max_age=DAY)  # a second run finishes it
+        assert report_out["rows_preserved"] == 1
     conn = sqlite3.connect(db)
     assert conn.execute("SELECT * FROM replay").fetchall() == [row]
     conn.close()
+    assert not [p for p in db.parent.iterdir() if p.name.startswith(".replay-migrate-")]
+
+
+def test_a_killed_migration_leaves_no_temp_behind_after_the_next_run(db):
+    published_file(db)
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", CHILD, PACKAGE_PARENT, str(db), T0.isoformat(), "after-destination-built"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == -signal.SIGKILL
+    assert [p for p in db.parent.iterdir() if p.name.startswith(".replay-migrate-")]
+    migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    assert not [p for p in db.parent.iterdir() if p.name.startswith(".replay-migrate-")]
 
 
 def test_a_restored_premigration_backup_is_refused_again(db, tmp_path):
@@ -452,85 +489,318 @@ def test_limit_a_restored_later_backup(db, tmp_path):
     assert SqliteReplayCache(db).max_age_floor() == DAY  # the stated limit: replay state is a local file
 
 
-# ------------------------------------------------------------------ trust_history_max_age (F-12)
+# ------------------------------------------------------------------ the clean destination
 
 
-def _retired_history_case(db, *, setting, as_of, cache=None):
-    """A retired key, a verified timestamp before retirement, a caller-supplied authenticated history."""
-    store = rf.TrustStore.from_dict(
-        {"entries": {"k": {**ENTRY, "status": "retired", "retired_at": "2026-10-20T00:00:00Z"}}}
+def test_the_original_is_kept_unchanged_and_the_new_file_has_only_what_was_validated(db):
+    published_file(db, ("k", "r", (T0 + HOUR).timestamp()))
+    original = db.read_bytes()
+    out = migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    keep = db.with_name(db.name + ".pre-migration")
+    assert out["original_kept_at"] == str(keep.resolve()) and keep.read_bytes() == original
+    conn = sqlite3.connect(db)
+    names = sorted(row[0] for row in conn.execute("SELECT name FROM sqlite_master"))
+    conn.close()
+    assert names == ["replay", "replay_meta", "sqlite_autoindex_replay_1"]
+    assert db.read_bytes() != original
+
+
+def test_permissions_are_kept(db):
+    published_file(db)
+    os.chmod(db, 0o640)
+    assert migrate_replay_file(db, now=T0, previous_max_age=DAY)["warnings"] == []
+    assert db.stat().st_mode & 0o777 == 0o640
+
+
+def test_a_group_writable_file_keeps_its_mode_and_says_so(db):
+    published_file(db)
+    os.chmod(db, 0o660)
+    out = migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    assert db.stat().st_mode & 0o777 == 0o660 and "lets others write" in out["warnings"][0]
+
+
+def test_a_symlinked_path_migrates_the_real_file_and_keeps_the_link(db, tmp_path):
+    published_file(db)
+    link = tmp_path / "link.db"
+    link.symlink_to(db)
+    migrate_replay_file(link, now=T0, previous_max_age=DAY)
+    assert link.is_symlink() and replay_file_status(db)["state"] == "current"
+    assert db.with_name(db.name + ".pre-migration").exists()
+
+
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+def test_journal_or_wal_siblings_are_refused(db, suffix):
+    published_file(db)
+    sibling = db.with_name(db.name + suffix)
+    sibling.write_bytes(b"x")
+    before = db.read_bytes()
+    with pytest.raises(ReplayMigrationRefused, match="interrupted or live"):
+        migrate_replay_file(db, now=T0, previous_policy_unknown=True)
+    assert db.read_bytes() == before and sibling.read_bytes() == b"x"
+
+
+def test_a_wal_mode_file_is_refused(db):
+    published_file(db)
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.close()
+    with pytest.raises(ReplayMigrationRefused, match="rollback-journal"):
+        migrate_replay_file(db, now=T0, previous_policy_unknown=True)
+
+
+def test_an_existing_other_backup_is_not_overwritten(db):
+    published_file(db)
+    keep = db.with_name(db.name + ".pre-migration")
+    keep.write_bytes(b"something else")
+    with pytest.raises(ReplayMigrationRefused, match="another file"):
+        migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    assert keep.read_bytes() == b"something else"
+    assert replay_file_status(db)["state"] == "legacy"
+
+
+def test_a_user_version_the_published_code_never_set_is_refused(db):
+    published_file(db)
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA user_version = 7")
+    conn.close()
+    with pytest.raises(ReplayMigrationRefused, match="user_version"):
+        migrate_replay_file(db, now=T0, previous_max_age=DAY)
+
+
+# ------------------------------------------------------------------ the planted objects, in a real published file
+
+
+def _plant(kind):
+    return {
+        "trigger": "CREATE TRIGGER forget AFTER INSERT ON replay BEGIN DELETE FROM replay; END",
+        "trigger-before": "CREATE TRIGGER forget BEFORE DELETE ON replay BEGIN SELECT 1; END",
+        "extra-table": "CREATE TABLE other (x)",
+        "view": "CREATE VIEW seen AS SELECT * FROM replay",
+        "index": "CREATE INDEX odd ON replay (expires_at)",
+    }[kind]
+
+
+PLANTED = ["trigger", "trigger-before", "extra-table", "view", "index"]
+
+
+@pytest.fixture
+def real_file(tmp_path: Path) -> tuple[Path, dict]:
+    """A file really written by the published 0.2.1 wheel. See tests/vectors/published_replay_files/generate.py."""
+    fixture = json.loads(
+        (Path(__file__).parent / "vectors/published_replay_files/by_0.2.1.json").read_text()
     )
-    signed = datetime(2026, 10, 1, tzinfo=timezone.utc)
-    env = envelope_v2(
-        "drift",
-        rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6])),
-        signer=SIGNER,
-        deployment_id="p",
-        issued_at=T0 - HOUR,
-        audit_run_id=RUN + "10",
-    )
-    env = env.with_timestamp(issuer="t", token=b"ok:" + env.sealed_digest(), issued_at=signed)
-
-    def verifier(digest, token):
-        return TimestampEvidence(signed, timedelta(0)) if token == b"ok:" + digest else None
-
-    pol = VerificationPolicy(
-        trust_store=store,
-        now=lambda: T0,
-        timestamp_verifier=verifier,
-        trust_history=TrustHistory(as_of=as_of, authenticated=True),
-        trust_history_max_age=setting,
-        replay_mode="check" if cache is not None else "off",
-        replay_cache=cache,
-    )
-    return verify(env, pol)
+    assert fixture["written_by"] == "0.2.1"
+    db = tmp_path / "published.db"
+    db.write_bytes(base64.b64decode(fixture["file_b64"]))
+    return db, fixture
 
 
-def test_raising_trust_history_max_age_does_not_revive_stale_history(db):
-    as_of = T0 - 2 * HOUR
-    assert _retired_history_case(db, setting=3 * HOUR, as_of=as_of, cache=SqliteReplayCache(db)).accepted
-    stale_as_of = T0 - 4 * HOUR
-    refused = _retired_history_case(db, setting=3 * HOUR, as_of=stale_as_of, cache=SqliteReplayCache(db))
-    assert refused.trust_history == "STALE"
-    assert "TRUST_STORE_FRESHNESS_UNPROVEN" in refused.blocking_reasons
-    raised = _retired_history_case(db, setting=7 * HOUR, as_of=stale_as_of, cache=SqliteReplayCache(db))
-    assert raised.trust_history == "STALE" and not raised.accepted
-    assert "TRUST_HISTORY_FLOOR_APPLIED" in raised.reasons
-    assert SqliteReplayCache(db).trust_history_age_floor() == 3 * HOUR
+def test_clean_control_a_file_really_written_by_0_2_1_migrates(real_file):
+    db, _ = real_file
+    assert replay_file_status(db) == {"path": str(db), "state": "legacy", "rows": 1}
+    out = migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    assert out["rows_preserved"] == 1 and replay_file_status(db)["state"] == "current"
 
 
-def test_control_unchanged_trust_history_setting_has_no_new_code(db):
-    res = _retired_history_case(db, setting=3 * HOUR, as_of=T0 - HOUR, cache=SqliteReplayCache(db))
-    assert res.accepted and "TRUST_HISTORY_FLOOR_APPLIED" not in res.reasons
+@pytest.mark.parametrize("kind", PLANTED)
+def test_planted_objects_in_a_real_published_file_are_refused_unchanged(real_file, kind):
+    db, _ = real_file
+    conn = sqlite3.connect(db)
+    conn.execute(_plant(kind))
+    conn.commit()
+    conn.close()
+    before = db.read_bytes()
+    with pytest.raises(ReplayMigrationRefused, match="expected schema"):
+        migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    assert db.read_bytes() == before
+    assert not db.with_name(db.name + ".pre-migration").exists()
+    with pytest.raises(ReplayStateError):
+        SqliteReplayCache(db)
 
 
-def test_without_a_durable_store_a_fixed_ceiling_applies(db):
-    """Nothing can remember the earlier setting, so a raise above 24 hours is not honoured at all."""
-    for cache in (None, InMemoryReplayCache()):
-        at_ceiling = _retired_history_case(db, setting=DAY, as_of=T0 - 23 * HOUR, cache=cache)
-        assert at_ceiling.accepted
-        raised = _retired_history_case(db, setting=2 * DAY, as_of=T0 - 25 * HOUR, cache=cache)
-        assert raised.trust_history == "STALE" and not raised.accepted
-        assert "TRUST_HISTORY_FLOOR_APPLIED" in raised.reasons
+def test_an_analyze_table_is_refused_too(real_file):
+    db, _ = real_file
+    conn = sqlite3.connect(db)
+    conn.execute("ANALYZE")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ReplayMigrationRefused, match="expected schema"):
+        migrate_replay_file(db, now=T0, previous_max_age=DAY)
 
 
-def test_limit_a_raise_below_the_ceiling_without_a_store_cannot_be_seen(db):
-    stale = _retired_history_case(db, setting=HOUR, as_of=T0 - 2 * HOUR)
-    assert stale.trust_history == "STALE"
-    assert _retired_history_case(db, setting=3 * HOUR, as_of=T0 - 2 * HOUR).accepted
+@pytest.mark.parametrize("kind", PLANTED)
+def test_an_object_planted_after_migration_is_refused_in_every_operation(real_file, kind):
+    db, _ = real_file
+    migrate_replay_file(db, now=T0, previous_max_age=DAY)
+    running = SqliteReplayCache(db)
+    conn = sqlite3.connect(db)
+    conn.execute(_plant(kind))
+    conn.commit()
+    conn.close()
+    for operation in (
+        lambda: running.seen("k", "r", now=T0),
+        lambda: running.record("k", "r", now=T0, retain=HOUR),
+        lambda: running.bind_max_age(HOUR, persist=True),
+        lambda: running.max_age_floor(),
+        lambda: SqliteReplayCache(db),
+        lambda: replay_file_status(db),
+    ):
+        with pytest.raises(ReplayStateError, match="expected schema"):
+            operation()
 
 
-def test_a_durable_store_may_serve_more_than_the_ceiling_from_the_start(db):
-    res = _retired_history_case(db, setting=2 * DAY, as_of=T0 - 25 * HOUR, cache=SqliteReplayCache(db))
-    assert res.accepted
-    assert SqliteReplayCache(db).trust_history_age_floor() == 2 * DAY
+CHECK_CHILD = textwrap.dedent(
+    """
+    import json, sys
+    from datetime import datetime, timedelta
+    sys.path.insert(0, sys.argv[1])
+    from regaudit_fhe.replay import SqliteReplayCache
+    from regaudit_fhe.report_v2 import parse_envelope_strict
+    from regaudit_fhe.trust import TrustStore
+    from regaudit_fhe.verification import VerificationPolicy, verify
+    fx = json.load(open(sys.argv[2]))
+    store = TrustStore.from_dict({"entries": {fx["key_id"]: {
+        "issuer": fx["issuer"], "public_key_pem": fx["public_key_pem"], "status": "active"}}})
+    now = datetime.fromisoformat(sys.argv[4])
+    res = verify(parse_envelope_strict(json.dumps(fx["report"])), VerificationPolicy(
+        profile="confidential", trust_store=store, max_age=timedelta(seconds=float(sys.argv[5])), replay_mode="record",
+        replay_cache=SqliteReplayCache(sys.argv[3]), verifier_id="reg", now=lambda: now))
+    print(json.dumps([res.trust_status, list(res.blocking_reasons), list(res.reasons)]))
+    """
+)
 
 
-def test_migration_records_a_history_floor_at_the_stated_or_default_value(db, tmp_path):
+def _new_process(fixture_path: Path, db: Path, now: datetime, max_age: timedelta) -> list:
+    out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [
+            sys.executable, "-c", CHECK_CHILD, PACKAGE_PARENT, str(fixture_path), str(db), now.isoformat(),
+            str(max_age.total_seconds()),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )  # fmt: skip
+    return json.loads(out.stdout)
+
+
+FIXTURE_PATH = Path(__file__).parent / "vectors/published_replay_files/by_0.2.1.json"
+FIXTURE_T = datetime(2026, 10, 25, 12, tzinfo=timezone.utc)
+
+
+def test_replay_stays_enforced_after_migration_across_real_new_processes(real_file):
+    db, _ = real_file
+    at = FIXTURE_T + 2 * HOUR
+    migrate_replay_file(db, now=at, previous_max_age=DAY)
+    for _ in range(3):
+        status, blocking, _ = _new_process(FIXTURE_PATH, db, at, DAY)
+        assert status == "INVALID" and blocking == ["REPLAY_DETECTED"]
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM replay").fetchone() == (1,)  # still there
+    conn.close()
+
+
+def test_first_contact_increase_on_a_real_file_across_new_processes(real_file):
+    db, _ = real_file
+    at = FIXTURE_T + 3 * DAY  # the row, written under one day, has expired
+    migrate_replay_file(db, now=at, previous_max_age=DAY)
+    for _ in range(2):
+        status, blocking, reasons = _new_process(FIXTURE_PATH, db, at, 10 * DAY)
+        assert status == "INVALID" and blocking == ["REPORT_TOO_OLD"]
+        assert "REPLAY_POLICY_FLOOR_APPLIED" in reasons
+
+
+def test_first_contact_increase_on_a_real_file_with_unknown_policy(real_file):
+    db, _ = real_file
+    at = FIXTURE_T + 3 * DAY
+    migrate_replay_file(db, now=at, previous_policy_unknown=True)
+    status, blocking, _ = _new_process(FIXTURE_PATH, db, at, 10 * DAY)
+    assert status == "INVALID" and blocking == ["REPLAY_HISTORY_UNKNOWN"]
+
+
+def test_the_planted_trigger_case_end_to_end_through_the_cli(real_file, tmp_path):
+    """The finding: trigger planted, migrate exit 0, then the same report TRUSTED twice. Now refused at migrate."""
+    db, _ = real_file
+    _signed_cli_report(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute(_plant("trigger"))
+    conn.commit()
+    conn.close()
+    before = db.read_bytes()
+    out = cli("replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path)
+    assert out.returncode == 2 and "forget" in out.stderr and db.read_bytes() == before
+    verify_args = (
+        "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "record", "--replay-db", str(db),
+    )  # fmt: skip
+    assert cli(*verify_args, cwd=tmp_path).returncode == 3
+
+
+def test_clean_control_end_to_end_through_the_cli_replay_is_detected_in_new_processes(real_file, tmp_path):
+    db, _ = real_file
+    _signed_cli_report(tmp_path, issued_at=datetime.now(timezone.utc))
+    out = cli("replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path)
+    assert out.returncode == 0, out.stderr
+    verify_args = (
+        "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "record", "--replay-db", str(db),
+        "--max-age-seconds", "86400",
+    )  # fmt: skip
+    first = cli(*verify_args, cwd=tmp_path)
+    assert first.returncode == 0, first.stdout + first.stderr
+    second = cli(*verify_args, cwd=tmp_path)
+    assert second.returncode == 1 and "REPLAY_DETECTED" in second.stdout
+
+
+def test_a_trigger_planted_after_migration_stops_the_cli(real_file, tmp_path):
+    db, _ = real_file
+    _signed_cli_report(tmp_path, issued_at=datetime.now(timezone.utc))
+    migrate_replay_file(db, now=datetime.now(timezone.utc), previous_max_age=DAY)
+    conn = sqlite3.connect(db)
+    conn.execute(_plant("trigger"))
+    conn.commit()
+    conn.close()
+    verify_args = (
+        "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "record", "--replay-db", str(db),
+    )  # fmt: skip
+    out = cli(*verify_args, cwd=tmp_path)
+    assert out.returncode == 3 and "expected schema" in out.stderr
+
+
+# ------------------------------------------------------------------ plausible edits
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "UPDATE replay_meta SET history_cutover = NULL WHERE origin = 'history-unknown'",
+        "UPDATE replay_meta SET origin = 'new'",
+        "UPDATE replay_meta SET origin = 'operator-attested'",
+        "UPDATE replay_meta SET migrated_at = NULL",
+        "UPDATE replay_meta SET trust_history_max_age_us = 999999999999",
+    ],
+)
+def test_incoherent_edits_to_the_policy_record_are_refused(db, tamper):
     published_file(db)
     migrate_replay_file(db, now=T0, previous_policy_unknown=True)
-    assert SqliteReplayCache(db).trust_history_age_floor() == DAY
-    other = tmp_path / "o.db"
-    published_file(other)
-    migrate_replay_file(other, now=T0, previous_max_age=DAY, previous_trust_history_max_age=HOUR)
-    assert SqliteReplayCache(other).trust_history_age_floor() == HOUR
+    conn = sqlite3.connect(db)
+    conn.execute(tamper)
+    conn.commit()
+    conn.close()
+    if tamper.endswith("'operator-attested'"):  # coherent only with the cutover gone
+        with pytest.raises(ReplayStateError):
+            SqliteReplayCache(db).history_cutover()
+        return
+    with pytest.raises(ReplayStateError):
+        SqliteReplayCache(db).max_age_floor()
+
+
+def test_limit_a_plausible_edit_by_someone_who_can_write_the_file_is_not_detected(db):
+    """Nothing here is authenticated. This is why replay state is local, and why a writer of it is out of scope."""
+    env = report(T0 + HOUR, RUN + "20")
+    SqliteReplayCache(db)
+    assert check(db, HOUR, T0 + HOUR, env).accepted
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE replay_meta SET max_age_us = ?", (DAY // timedelta(microseconds=1),))
+    conn.execute("DELETE FROM replay")
+    conn.commit()
+    conn.close()
+    assert check(db, DAY, T0 + 2 * HOUR, env).accepted  # accepted twice
