@@ -28,6 +28,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -43,7 +44,7 @@ from .replay import (
     ReplayStateError,
     SqliteReplayCache,
 )
-from .report_v2 import AuditEnvelopeV2
+from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, _assert_plain_json
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
 from .trust import KeyEntry, TrustStore
 
@@ -485,6 +486,26 @@ def _evaluate_timestamps(
 # ---------------------------------------------------------------------------
 
 
+def _is_untrusted_object(env: AuditEnvelope | AuditEnvelopeV2) -> bool:
+    """Whether this object could answer the verifier's questions in its own way.
+
+    Every field must be exactly what a JSON parser produces, so a ``str`` subclass cannot answer a comparison, and the object
+    exactly the envelope class with nothing added to it, so a subclass or an instance attribute cannot replace what is signed.
+    ``object.__setattr__`` and other malicious code in this process are outside what this library can guarantee.
+    """
+    if type(env) is not AuditEnvelope and type(env) is not AuditEnvelopeV2:
+        return True
+    fields = dataclass_fields(env)
+    if {f.name for f in fields} != set(vars(env)):
+        return True
+    try:
+        for f in fields:
+            _assert_plain_json(getattr(env, f.name))
+    except (EnvelopeFormatError, RecursionError):
+        return True
+    return False
+
+
 def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> VerificationResult:
     """Verify an envelope under ``policy``; fail closed on every doubt.
 
@@ -505,6 +526,33 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         raise TypeError("verify() expects an AuditEnvelope or AuditEnvelopeV2")
     fmt = "v2" if v2 else "v1"
     store = policy.trust_store
+    if policy.profile != "development" and _is_untrusted_object(env):
+        # Before any field is read: nothing about this object can be believed or repeated.
+        return VerificationResult(
+            trust_status=INVALID,
+            accepted=False,
+            integrity_valid=False,
+            issuer_trusted=False,
+            key_status="none",
+            chronology=CHRONOLOGY_NONE,
+            signed_not_after=None,
+            timestamp_status=TS_FAILED,
+            reasons=("MALFORMED_ENVELOPE",),
+            blocking_reasons=("MALFORMED_ENVELOPE",),
+            policy_id=policy.policy_id,
+            format=fmt,
+            replay_scope="NONE",
+            replay_durable=None,
+            consumption=CONSUMPTION_NOT_CHECKED,
+            trust_history=_history_state(policy, now),
+            trust_store_as_of=store.as_of.isoformat() if store and store.as_of else None,
+            issuer="",
+            key_id="",
+            primitive="",
+            issued_at="",
+            regulations=(),
+            parameter_set_hash="",
+        )
     if store is None and not policy.allow_self_signed:
         raise VerificationUnavailable(
             "no trust material configured: refusing to verify a report against its own embedded key"
