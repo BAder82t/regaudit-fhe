@@ -44,7 +44,7 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_TRUST_STORE           - path to a TrustStore JSON; REQUIRED for /v1/verify
     REGAUDIT_FHE_ALLOW_SELF_SIGNED     - "1" lets /v1/verify report SELF_SIGNED_ONLY
                                          (development profile, loopback only)
-    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance
+    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance | secure-v1
     REGAUDIT_FHE_VERIFIER_ID           - this verifier's audience identifier
     REGAUDIT_FHE_MAX_AGE_S             - reject reports older than this many seconds
     REGAUDIT_FHE_REPLAY_DB             - sqlite path for the local persistent replay cache

@@ -15,6 +15,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import os
+import stat
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -169,8 +170,9 @@ def _read_declared(path: str | Path) -> frozenset[str]:
     """
     side = Path(os.path.realpath(path) + ISSUER_PROVENANCE_SUFFIX)
     try:
-        if side.stat().st_size > MAX_TRUST_STORE_BYTES:
-            raise TrustStoreError(f"issuer provenance {str(side)!r} is too large")
+        info = side.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TRUST_STORE_BYTES:
+            raise TrustStoreError(f"issuer provenance {str(side)!r} is not a regular file of a usable size")
         payload = loads_strict(side.read_bytes(), max_bytes=MAX_TRUST_STORE_BYTES)
     except FileNotFoundError:
         return frozenset()

@@ -177,6 +177,41 @@ def test_the_cli_labels_it_and_v2_says_so(migrated):
     assert body["reasons"] == ["ISSUER_OPERATOR_DECLARED"] and "not an authenticated binding" in out.stderr
 
 
+def test_the_http_server_labels_it(migrated):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from regaudit_fhe.server import ServerConfig, build_app
+    from tests._asgi import client_for
+
+    cfg = ServerConfig(
+        api_keys={}, dev_mode=True, max_body_bytes=1 << 20, rate_limit_per_min=600, request_timeout_s=10.0, cors_origins=(),
+        profile="development", trust_store=rf.TrustStore.from_json(migrated / "new.json"),
+    )  # fmt: skip
+    client = client_for(build_app(config=cfg), base_url="http://127.0.0.1:8000")
+    body = {"envelope": report().to_dict()}
+    assert client.post("/v1/verify", json=body).json()["reasons"] == ["ISSUER_OPERATOR_DECLARED"]
+    assert client.post("/v1/verify?response_format=v2", json=body).json()["issuer_binding"] == "operator_declared"
+
+
+@pytest.mark.parametrize("form", ["migrated", "legacy"])
+def test_the_http_server_will_not_start_under_secure_v1(form, migrated):
+    pytest.importorskip("fastapi")
+    from regaudit_fhe.server import ServerConfig, build_app
+
+    store = (
+        rf.TrustStore.from_json(migrated / "new.json")
+        if form == "migrated"
+        else rf.TrustStore.from_dict({"keys": {"k": PEM}})
+    )
+    cfg = ServerConfig(
+        api_keys={}, dev_mode=True, max_body_bytes=1 << 20, rate_limit_per_min=600, request_timeout_s=10.0, cors_origins=(),
+        profile="secure-v1", trust_store=store, max_age_s=3600, replay_mode="record",
+        replay_cache=SqliteReplayCache(migrated / "http.db"),
+    )  # fmt: skip
+    with pytest.raises(PolicyError):
+        build_app(config=cfg)
+
+
 def test_a_revocation_view_keeps_the_label(migrated):
     from regaudit_fhe import _revocation as rv
 
@@ -263,6 +298,13 @@ def test_a_broken_label_file_is_refused_not_ignored(body, migrated):
     with pytest.raises(TrustStoreError, match="issuer provenance"):
         rf.TrustStore.from_json(migrated / "new.json")
     assert cli("verify", "-i", "r.json", "--trusted-keys", "new.json", cwd=migrated).returncode == 3
+
+
+def test_a_label_path_that_is_not_a_regular_file_is_refused_without_blocking(migrated):
+    side(migrated / "new.json").unlink()
+    os.mkfifo(side(migrated / "new.json"))
+    with pytest.raises(TrustStoreError, match="regular file"):
+        rf.TrustStore.from_json(migrated / "new.json")
 
 
 def test_a_symlinked_store_finds_its_label(migrated):
