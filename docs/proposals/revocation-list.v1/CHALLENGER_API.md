@@ -19,7 +19,8 @@ Differences from it: [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 
 ## Trust store form
 
-`confidential` and `high-assurance` raise `PolicyError` for a store with `binds_issuers` false, before any report is read.
+`confidential` and `high-assurance` raise `PolicyError` for a store with `binds_issuers` false, before any report is read. In `development` it gets
+`ISSUER_UNBOUND` in `reasons`. Response format v2 has `issuer_binding`: `enrolled`, `not_bound` or `not_established`.
 
 ## Enrollment
 

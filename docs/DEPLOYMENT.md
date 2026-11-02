@@ -553,7 +553,8 @@ to the verifier's account.
 
 A bare store (`{"key_id": "PEM"}`) or a `keys` store (`{"keys": {...}}`) does not say which issuer each key belongs to, so any
 enrolled key can sign under any issuer name and be reported as trusted. That holds with one key as much as with many. `confidential` and
-`high-assurance` refuse such a store: `regaudit-fhe verify` exits 2 and `serve` does not start. `development` still accepts it.
+`high-assurance` refuse such a store: `regaudit-fhe verify` exits 2 and `serve` does not start. `development` still accepts it and says
+`ISSUER_UNBOUND` in `reasons`.
 
 ```bash
 regaudit-fhe trust migrate --source old.json --target new.json \

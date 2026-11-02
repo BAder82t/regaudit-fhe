@@ -772,6 +772,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # configuration error (2), not a failure of verification infrastructure.
         sys.stderr.write(f"invalid configuration: {exc}\n")
         return 2
+    if trust_store is not None and not trust_store.binds_issuers:
+        # Only a development policy gets here: the others refuse this store above.
+        sys.stderr.write(
+            "warning: --trusted-keys states no issuer for its keys, so nothing compared the report's issuer name with "
+            "the one enrolled for its key. See 'regaudit-fhe trust migrate'.\n"
+        )
     decision = None
     try:
         if args.revocation_mode == "off":

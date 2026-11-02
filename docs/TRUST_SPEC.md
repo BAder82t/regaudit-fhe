@@ -101,7 +101,10 @@ operator and never inferred.
 
 In `development`, and on the lenient library paths `verify_envelope` and `verify_report(parse_envelope(...))`, such a store
 keeps the verdicts it has always had, for compatibility. There `issuer_trusted` shows only that the key is enrolled, in scope and
-not revoked. A relying application MUST NOT treat the `issuer` field as attributed there.
+not revoked, and the result says so: `ISSUER_UNBOUND` in `reasons`, a warning on the CLI's stderr, `issuer_binding: "not_bound"`
+in response format v2, and `issuer_bound` false plus a `DeprecationWarning` from `verify_envelope`. `verify_receipt` returns a bare bool and by its
+contract does not warn when given trust material, so it carries no label. A relying
+application MUST NOT treat the `issuer` field as attributed there.
 
 ### 3.2 `report.v2` signed identity fields
 
@@ -608,10 +611,10 @@ report is distinguishable from a forgery.
 `TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
 `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`, `PROVENANCE_CONTRADICTION`,
 `PROVENANCE_UNVERIFIABLE`, `REPLAY_POLICY_FLOOR_APPLIED`, `REPLAY_HISTORY_UNKNOWN`,
-`TRUST_HISTORY_FLOOR_APPLIED`.
+`TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND`.
 
 Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT`,
-`SELF_SIGNED_NO_TRUST_MATERIAL`, `REPLAY_POLICY_FLOOR_APPLIED` and `TRUST_HISTORY_FLOOR_APPLIED` are informational unless a policy also refuses on
+`SELF_SIGNED_NO_TRUST_MATERIAL`, `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` and `ISSUER_UNBOUND` are informational unless a policy also refuses on
 them; the result's `blocking_reasons` lists the codes that caused a refusal. The
 `TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
 the held O8 / reserve-commit work and are not emitted in Phase 3A.

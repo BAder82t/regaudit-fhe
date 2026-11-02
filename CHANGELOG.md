@@ -13,6 +13,8 @@ Changed, below. Release scope is undecided, and this section describes a local e
   `issuer_trusted` true, in every policy, and nothing in the output said so. The number of keys makes no difference. The policy now refuses
   such a store before reading a report: `PolicyError`, CLI exit 2, and `serve` does not start. Run `regaudit-fhe trust migrate`, stating each
   key's issuer. See `docs/DEPLOYMENT.md`. `development` and the lenient library paths keep their verdicts.
+- With such a store in `development`, `reasons` gains `ISSUER_UNBOUND` and the CLI warns on stderr. `verify_envelope`'s result gains `issuer_bound`,
+  which `to_dict` leaves out and `dataclasses.asdict` includes, and it raises a `DeprecationWarning`. `verify_receipt` does not warn, as its contract says. No verdict changes. Response format v2 gains `issuer_binding`.
 - **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
   so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
   start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued

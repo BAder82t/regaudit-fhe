@@ -103,7 +103,7 @@ Rejected, with reasons: binding legacy keys where the issuer can be established,
 being checked, and first-seen pinning lets the first attacker win; an `expected_issuer` per call, since it does not stop tenant B signing as A; a per-key
 statement beside a legacy store, which is the `entries` form in another syntax.
 
-Whether `development` and the lenient paths should refuse too is a later decision by the owner. Until then their verdicts are not changed. A departure from the proposal, section
+Whether `development` and the lenient paths should refuse too is a later decision by the owner. Until then they are labelled, not changed. A departure from the proposal, section
 "Legacy keys": it said such a store verifies in every profile.
 
 ## Retired key later marked compromised
@@ -137,7 +137,7 @@ Whether `development` and the lenient paths should refuse too is a later decisio
 ## Reason codes added since the frozen proposal
 
 `REVOCATION_HIGH_ASSURANCE_UNAVAILABLE` (configuration), `REVOCATION_POLICY_DOWNGRADE` (blocking in every mode), `REVOCATION_POLICY_FLOOR_APPLIED`
-(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED` and `TRUST_HISTORY_FLOOR_APPLIED` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
+(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` and `ISSUER_UNBOUND` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
 
 ## Evidence kinds
 

@@ -26,7 +26,7 @@ from .experimental_revocation.gen_fixtures import NOW, dump, make_world
 
 W = make_world()
 STORE = W.store(W.old, W.new)
-ADDED = {"response_format", "revocation_evaluation", "policy_evidence"}
+ADDED = {"response_format", "revocation_evaluation", "issuer_binding", "policy_evidence"}
 
 
 def env():

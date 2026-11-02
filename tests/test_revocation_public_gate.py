@@ -309,6 +309,7 @@ def test_the_evidence_section_appears_only_when_asked_for(signed):
         "policy_evidence",
         "response_format",
         "revocation_evaluation",
+        "issuer_binding",
     }
     assert payload["policy_evidence"]["revocation"]["revocation_evaluation"] == "not_evaluated"
 

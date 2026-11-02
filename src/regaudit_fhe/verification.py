@@ -629,6 +629,9 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("PIN_MISMATCH")
             identity_ok = False
     issuer_trusted = entry is not None and identity_ok and sig_ok
+    if entry is not None and entry.issuer is None:
+        # Only a development policy gets here. The verdict is what it always was, and it says less than it looks.
+        note("ISSUER_UNBOUND")
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
     history_bound = _bound_history_age(policy)

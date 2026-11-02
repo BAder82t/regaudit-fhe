@@ -68,6 +68,13 @@ def policy_evidence(disclosure: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def issuer_binding(result: dict[str, Any]) -> str:
+    """Whether the report's issuer name was compared with the one the operator enrolled for its key."""
+    if "ISSUER_UNBOUND" in result["reasons"]:
+        return "not_bound"  # the store states no issuer, so the name in the report is only a claim
+    return "enrolled" if result["issuer_trusted"] else "not_established"
+
+
 def response_v2(result: dict[str, Any], disclosure: dict[str, Any] | None) -> dict[str, Any]:
     """``result`` is ``VerificationResult.to_dict()``. Its fields are kept exactly and these are added."""
     value = revocation_evaluation(disclosure)
@@ -79,5 +86,6 @@ def response_v2(result: dict[str, Any], disclosure: dict[str, Any] | None) -> di
         **result,
         "response_format": RESPONSE_FORMAT_V2,
         "revocation_evaluation": value,
+        "issuer_binding": issuer_binding(result),
         "policy_evidence": policy_evidence(disclosure),
     }
