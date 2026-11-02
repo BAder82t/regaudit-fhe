@@ -17,7 +17,7 @@ attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
-certifi==2026.4.22
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
@@ -55,7 +55,7 @@ jsonschema-specifications==2025.9.1
     # via jsonschema
 librt==0.9.0
     # via mypy
-mypy==2.4.0
+mypy==2.4.1
     # via regaudit-fhe (pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
@@ -73,15 +73,15 @@ psutil==7.2.2
     # via regaudit-fhe (pyproject.toml)
 pycparser==3.0
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   fastapi
     #   regaudit-fhe (pyproject.toml)
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pygments==2.21.0
     # via pytest
-pytest==9.1.1
+pytest==9.2.0
     # via
     #   pytest-cov
     #   regaudit-fhe (pyproject.toml)
@@ -99,13 +99,13 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-ruff==0.17.2
+ruff==0.17.3
     # via regaudit-fhe (pyproject.toml)
 sortedcontainers==2.4.0
     # via hypothesis
 starlette==1.0.0
     # via fastapi
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   anyio
     #   fastapi
@@ -121,7 +121,7 @@ typing-inspection==0.4.2
     #   pydantic
 uvicorn[standard]==0.54.0
     # via regaudit-fhe (pyproject.toml)
-uvloop==0.22.1
+uvloop==0.23.0
     # via uvicorn
 watchfiles==1.1.1
     # via uvicorn
