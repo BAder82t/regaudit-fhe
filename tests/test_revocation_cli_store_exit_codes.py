@@ -327,5 +327,6 @@ def test_a_refusal_that_a_usable_store_causes_is_still_exit_2(world, command):
     if (
         command is enroll
     ):  # the state directory is made before the store check refuses; it stays empty
-        assert after.pop("new-state")[1] is None
+        made = after.pop("new-state")
+        assert made[1] is None
     assert after == before
