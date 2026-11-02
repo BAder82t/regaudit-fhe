@@ -121,7 +121,7 @@ typing-inspection==0.4.2
     #   pydantic
 uvicorn[standard]==0.54.0
     # via regaudit-fhe (pyproject.toml)
-uvloop==0.22.1
+uvloop==0.23.0
     # via uvicorn
 watchfiles==1.1.1
     # via uvicorn
