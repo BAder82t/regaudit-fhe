@@ -1048,8 +1048,12 @@ def verify_receipt(
     ``True`` then covers a self-signed report whose issuer nobody authenticated. Prefer
     :func:`regaudit_fhe.trusted.verify_trusted`. The return value is unchanged, and a call
     that supplies trust material does not warn.
-    So this bare bool cannot say that a store without issuers left the issuer name unchecked:
-    use :func:`verify_envelope` or :func:`regaudit_fhe.trusted.verify_trusted` to see that.
+
+    **This bool is not an issuer-attribution result and not a revocation result.** It cannot say
+    that a store without issuers left the issuer name unchecked, and it consults no revocation
+    data. When tenant identity matters, use the issuer-bound path:
+    :func:`regaudit_fhe.trusted.verify_trusted` with an ``entries`` trust store, under a policy
+    that refuses a store without issuers.
 
     By default this checks the SHA-256 receipt and the embedded
     Ed25519 signature against the embedded public key. **It does not

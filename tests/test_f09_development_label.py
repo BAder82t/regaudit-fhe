@@ -100,6 +100,12 @@ def test_verify_receipt_keeps_its_contract_and_carries_no_label():
         assert verify_receipt(report(FORGED, "v1"), trusted_keys=STORES["bare"]) is True
 
 
+def test_verify_receipt_says_near_the_api_what_its_bool_is_not():
+    doc = " ".join(verify_receipt.__doc__.split())
+    assert "not an issuer-attribution result and not a revocation result" in doc
+    assert "When tenant identity matters" in doc and "verify_trusted" in doc
+
+
 def test_control_no_warning_when_nothing_was_claimed_about_an_issuer():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
