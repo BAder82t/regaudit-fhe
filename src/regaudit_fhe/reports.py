@@ -823,8 +823,8 @@ def _warn_if_no_issuers(
         return
     warnings.warn(
         "this trust material states no issuer for its keys, so issuer_trusted does not show that the report's "
-        "issuer name is the one enrolled for its key. Use a trust store in the entries form "
-        "(regaudit-fhe trust migrate). The verdict is unchanged.",
+        "issuer name is the one enrolled for its key. Build a trust store with 'regaudit-fhe trust add': see "
+        "docs/MIGRATION_0.3.md. The verdict is unchanged.",
         DeprecationWarning,
         stacklevel=3,
     )

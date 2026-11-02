@@ -198,14 +198,15 @@ class VerificationPolicy:
             if not self.trust_store.binds_issuers:
                 raise PolicyError(
                     f"the {self.profile!r} profile requires a trust store that states the issuer of each key, and this "
-                    "one does not, so a report could claim any issuer name. Run: regaudit-fhe trust migrate "
-                    "(docs/DEPLOYMENT.md, 'Upgrading a trust store without issuers')"
+                    "one does not, so a report could claim any issuer name. Build a new store with "
+                    "'regaudit-fhe trust add': see docs/MIGRATION_0.3.md"
                 )
             if self.trust_store.issuer_declared:
                 raise PolicyError(
                     f"{ISSUER_ENROLLMENT_UNAUTHENTICATED}: the {self.profile!r} profile refuses a store whose issuers were "
                     f"recorded as a local operator's statement by 'trust migrate': {sorted(self.trust_store.issuer_declared)}. "
-                    "That is not an authenticated enrollment. See docs/MIGRATION_0.3.md"
+                    "That is not an authenticated enrollment. Build a new store with 'regaudit-fhe trust add': see "
+                    "docs/MIGRATION_0.3.md"
                 )
             if self.max_age is None:
                 raise PolicyError(f"the {self.profile!r} profile requires max_age")

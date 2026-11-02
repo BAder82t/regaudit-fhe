@@ -245,7 +245,7 @@ def test_the_real_cli(form, profile, tmp_path):
     if form == "entries":
         assert json.loads(out.stdout)["reason"] == "ISSUER_MISMATCH"
     elif profile != "development":
-        assert not out.stdout and "states the issuer of each key" in out.stderr and "trust migrate" in out.stderr
+        assert not out.stdout and "states the issuer of each key" in out.stderr and "trust add" in out.stderr
 
 
 def _server(form: str, profile: str, tmp_path: Path):

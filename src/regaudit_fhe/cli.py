@@ -779,7 +779,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # Only a development policy gets here: the others refuse this store above.
         sys.stderr.write(
             "warning: --trusted-keys states no issuer for its keys, so nothing compared the report's issuer name with "
-            "the one enrolled for its key. See 'regaudit-fhe trust migrate'.\n"
+            "the one enrolled for its key. To use a store under a strict profile, build one with 'regaudit-fhe trust add': "
+            "see docs/MIGRATION_0.3.md.\n"
         )
     if trust_store is not None and trust_store.issuer_declared:
         sys.stderr.write(
