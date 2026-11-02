@@ -60,6 +60,8 @@ only an intended design.
 - A signed report carries authenticated claims. The signature does not
   independently verify that an encrypted computation ran.
 
+**Replay protection limitation in v0.2.1:** Python library integrations that explicitly configure `clock_skew=0` may accept the same signed report twice at the exact freshness-expiry boundary. The CLI and HTTP server use the nonzero default and are not affected by this specific configuration issue. Until the correction is released, library integrators should retain a positive clock-skew allowance and avoid `clock_skew=0`. This limitation is scheduled for correction in the next release.
+
 **Experimental configurations**
 
 - The OpenFHE backend (`[openfhe]`) is experimental, covers five of the six

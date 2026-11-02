@@ -494,6 +494,8 @@ expired. This would allow the same report to be accepted a second time. Do not
 raise `max_age` on a store in use. Starting a new replay file will not help since
 it would remember nothing.
 
+**Replay protection limitation in v0.2.1:** Python library integrations that explicitly configure `clock_skew=0` may accept the same signed report twice at the exact freshness-expiry boundary. The CLI and HTTP server use the nonzero default and are not affected by this specific configuration issue. Until the correction is released, library integrators should retain a positive clock-skew allowance and avoid `clock_skew=0`. This limitation is scheduled for correction in the next release.
+
 ---
 
 ## 7. Change log
