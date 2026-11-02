@@ -12,6 +12,10 @@ place. If a policy change is necessary, suspend verification and perform a separ
 do not assume that starting with an empty store preserves replay history. Do not reset or discard replay history as a
 workaround.
 
+The same applies to two uses of one store with different settings, and to a later run that omits `max_age`, which means
+30 days once replay checking is on. Do not share a replay-state store between different `max_age` values, and always set
+`max_age` explicitly.
+
 **Zero clock skew:** Python library integrations explicitly using `clock_skew=0` can accept a report twice at an exact
 freshness boundary. The published CLI and server use a nonzero default and do not expose that specific setting. Until
 the correction is released, library integrators should retain a positive clock-skew allowance and avoid `clock_skew=0`.
