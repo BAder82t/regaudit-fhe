@@ -547,6 +547,8 @@ def _entry_dict(store: TrustStore, kid: str) -> dict[str, Any]:
         out["primitives"] = sorted(e.primitives)
     if e.parameter_set_pin is not None:
         out["parameter_set_pin"] = e.parameter_set_pin
+    if e.issuer_source is not None:
+        out["issuer_source"] = e.issuer_source
     return out
 
 
@@ -602,10 +604,7 @@ def apply_entries(store: TrustStore, listed: list[dict[str, Any]]) -> TrustStore
     payload: dict[str, Any] = {"entries": entries}
     if store.as_of is not None:
         payload["as_of"] = _z(store.as_of)
-    view = TrustStore.from_dict(payload)
-    if not store.issuer_declared:
-        return view
-    return replace(view, issuer_declared=store.issuer_declared & set(view.entries))
+    return TrustStore.from_dict(payload)
 
 
 # ----------------------------------------------------------------------------- authority: enrollment, routine transition, recovery

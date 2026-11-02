@@ -361,7 +361,11 @@ def test_T09_after_migration_opting_in_works_and_a_local_only_state_stays(tmp_pa
     store = TrustStore.from_dict(out)
     w = _world()
     ctx = _context(w, [], store)  # the issuer's list does not mention this key
+    # A migrated store's record now survives from_dict, so a strict profile refuses it (owner's ruling): the gate is
+    # reached under development.
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        policy(tmp_path, "high-assurance", store)
     d = tg.verify_with_revocation(
-        report("0.2.1", "v2-audience"), policy(tmp_path, "high-assurance", store), ctx
+        report("0.2.1", "v2-audience"), policy(tmp_path, "development", store), ctx
     )
     assert not d.result.accepted and "KEY_COMPROMISED_NO_CHRONOLOGY" in d.result.blocking_reasons

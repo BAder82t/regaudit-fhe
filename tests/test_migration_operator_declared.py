@@ -2,14 +2,15 @@
 
 By the owner's ruling, it must not be treated as authenticated issuer enrollment: every strict profile refuses such a store.
 
-The label sits beside the store because every published version refuses an unknown member in the store itself (published_wheel
-evidence is in the qualification harness). It is a label: the tests named limit say what it does not do.
+The record is in the store, as ``issuer_source`` on each entry, so it travels with the store and survives ``cp``, ``mv`` and
+``from_dict``. Every published version therefore refuses a migrated store, which fails closed: an older verifier is a downgrade
+limitation, by the owner's ruling, and the source store stays the way back (the qualification harness runs the wheels). Deleting the member
+is an edit of local state, outside the guarantee: the test named limit pins that.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import os
 import shutil
@@ -23,10 +24,10 @@ import pytest
 
 import regaudit_fhe as rf
 from regaudit_fhe._keys import spki_fingerprint
-from regaudit_fhe._trust_lifecycle import MigrationRefused, migrate
+from regaudit_fhe._trust_lifecycle import migrate_store
 from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.report_v2 import envelope_v2
-from regaudit_fhe.trust import ISSUER_PROVENANCE_SUFFIX, TrustStoreError
+from regaudit_fhe.trust import ISSUER_PROVENANCE_SUFFIX, KeyEntry, TrustStoreError
 from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 
 T = datetime.now(timezone.utc).replace(microsecond=0)
@@ -108,19 +109,113 @@ def test_control_a_store_never_migrated_has_no_new_field(command, tmp_path):
     assert "issuer_source" not in rows[0]
 
 
-def test_the_label_file_says_what_it_is(migrated):
-    doc = json.loads(side(migrated / "new.json").read_text())
-    assert doc["kind"] == "operator-declared" and doc["authenticated"] is False and doc["key_ids"] == ["k"]
-    assert doc["source_sha256"] == hashlib.sha256((migrated / "old.json").read_bytes()).hexdigest()
+# ------------------------------------------------------------------ the record is in the store
 
 
-# ------------------------------------------------------------------ the store stays readable
-
-
-def test_the_store_file_holds_only_what_published_versions_read(migrated):
+def test_the_store_records_it_on_each_entry_and_there_is_one_record(migrated):
     doc = json.loads((migrated / "new.json").read_text())
+    assert doc["entries"]["k"]["issuer_source"] == "operator-declared"
     assert set(doc) == {"entries", "as_of"}
-    assert set(doc["entries"]["k"]) == {"issuer", "public_key_pem", "status"}
+    assert set(doc["entries"]["k"]) == {"issuer", "public_key_pem", "status", "issuer_source"}
+    assert not side(migrated / "new.json").exists()
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_a_copy_or_a_move_keeps_the_refusal(profile, migrated, tmp_path_factory):
+    other = tmp_path_factory.mktemp("elsewhere")
+    shutil.copy(migrated / "new.json", other / "copied.json")
+    shutil.move(migrated / "new.json", other / "moved.json")
+    for name in ("copied.json", "moved.json"):
+        store = rf.TrustStore.from_json(other / name)
+        assert store.issuer_declared == {"k"}
+        with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+            strict(profile, store, other)
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_from_dict_keeps_the_refusal(profile, migrated):
+    store = rf.TrustStore.from_dict(json.loads((migrated / "new.json").read_text()))
+    assert store.issuer_declared == {"k"}
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, store, migrated)
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_migrate_store_in_the_library_keeps_the_refusal(profile, tmp_path):
+    out, rows = migrate_store({"keys": {"k": PEM}}, {"k": "acme"}, as_of="2026-11-02T00:00:00Z")
+    assert rows[0]["issuer_binding"] == "operator-declared"
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, rf.TrustStore.from_dict(out), tmp_path)
+
+
+@pytest.mark.parametrize("value", ["authenticated", "", "OPERATOR-DECLARED", None, 1, True])
+def test_another_value_is_refused_not_ignored(value):
+    doc = {"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active", "issuer_source": value}}}
+    with pytest.raises(TrustStoreError, match="issuer_source"):
+        rf.TrustStore.from_dict(doc)
+
+
+def test_direct_construction_is_held_to_the_same_record():
+    declared = KeyEntry(key_id="k", public_key_pem=PEM, status="active", issuer="acme", issuer_source="operator-declared")
+    assert rf.TrustStore(keys={"k": PEM}, entries={"k": declared}).issuer_declared == {"k"}
+    other = dataclasses.replace(declared, issuer_source="authenticated")
+    with pytest.raises(TrustStoreError, match="issuer_source"):
+        rf.TrustStore(keys={"k": PEM}, entries={"k": other})
+    with pytest.raises(TypeError):
+        rf.TrustStore(keys={"k": PEM}, entries={"k": declared}, issuer_declared=frozenset())  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_replace_on_a_store_cannot_drop_it(profile, migrated):
+    store = rf.TrustStore.from_json(migrated / "new.json")
+    copy = dataclasses.replace(store)
+    assert copy.issuer_declared == {"k"}
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, copy, migrated)
+
+
+# ------------------------------------------------------------------ a file from the pre-release candidate
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_an_old_record_file_beside_a_store_cannot_weaken_anything(profile, migrated, tmp_path):
+    """A candidate kept the record in that file, so the store beside it has no member saying so. It must not load as clean."""
+    bare = {"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}}
+    (tmp_path / "s.json").write_text(json.dumps(bare))
+    side(tmp_path / "s.json").write_text('{"kind":"operator-declared","key_ids":["k"]}')
+    with pytest.raises(TrustStoreError, match="pre-release"):
+        rf.TrustStore.from_json(tmp_path / "s.json")
+    out = cli("verify", "-i", "r.json", "--trusted-keys", str(tmp_path / "s.json"), "--profile", profile, *STRICT_KW, cwd=migrated)
+    assert out.returncode == 3 and "pre-release" in out.stderr
+
+
+@pytest.mark.parametrize("body", ["{", "", "[]", "anything"])
+def test_any_such_file_is_refused_whatever_it_holds(body, migrated):
+    side(migrated / "new.json").write_text(body)
+    with pytest.raises(TrustStoreError, match="pre-release"):
+        rf.TrustStore.from_json(migrated / "new.json")
+
+
+def test_a_path_that_is_not_a_file_is_refused_too_without_blocking(migrated):
+    os.mkfifo(side(migrated / "new.json"))
+    with pytest.raises(TrustStoreError, match="pre-release"):
+        rf.TrustStore.from_json(migrated / "new.json")
+
+
+def test_a_symlinked_store_is_checked_at_the_real_path(migrated, tmp_path):
+    os.symlink(migrated / "new.json", tmp_path / "link.json")
+    assert rf.TrustStore.from_json(tmp_path / "link.json").issuer_declared == {"k"}
+    side(migrated / "new.json").write_text("x")
+    with pytest.raises(TrustStoreError, match="pre-release"):
+        rf.TrustStore.from_json(tmp_path / "link.json")
+
+
+def test_migration_will_not_run_beside_such_a_file(tmp_path):
+    (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
+    side(tmp_path / "new.json").write_text("mine")
+    out = cli("trust", "migrate", "--source", "old.json", "--target", "new.json", "--issuer", "k=acme", cwd=tmp_path)
+    assert out.returncode == 2 and side(tmp_path / "new.json").read_text() == "mine"
+    assert not (tmp_path / "new.json").exists()
 
 
 # ------------------------------------------------------------------ the profiles
@@ -236,6 +331,15 @@ def test_the_http_server_will_not_start_under_secure_v1(form, migrated):
         build_app(config=cfg)
 
 
+def test_a_revocation_view_with_a_change_keeps_the_record(migrated):
+    from regaudit_fhe import _revocation as rv
+
+    store = rf.TrustStore.from_json(migrated / "new.json")
+    listed = [{"key_fingerprint": spki_fingerprint(PEM), "status": "retired", "effective_from": "2026-01-01T00:00:00Z"}]
+    view = rv.apply_entries(store, listed)
+    assert view.entry("k").status == "retired" and view.issuer_declared == {"k"}
+
+
 def test_a_revocation_view_keeps_the_label(migrated):
     from regaudit_fhe import _revocation as rv
 
@@ -278,109 +382,20 @@ def test_control_trust_add_keeps_working_and_nothing_calls_it_authenticated(prof
     assert json.loads(v2.stdout)["issuer_binding"] == "store_entry"
 
 
-# ------------------------------------------------------------------ the writing order, and a broken label
-
-
-def test_an_existing_label_file_is_not_overwritten(tmp_path):
-    (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
-    side(tmp_path / "new.json").write_text("mine")
-    out = cli("trust", "migrate", "--source", "old.json", "--target", "new.json", "--issuer", "k=acme", cwd=tmp_path)
-    assert out.returncode == 2 and side(tmp_path / "new.json").read_text() == "mine"
-    assert not (tmp_path / "new.json").exists()
-
-
-def test_a_failure_writing_the_store_leaves_neither_file(tmp_path, monkeypatch):
-    from regaudit_fhe import _trust_lifecycle as lc
-
-    (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
-    real = lc._write_new
-
-    def failing(path, data, mode):
-        if not path.endswith(ISSUER_PROVENANCE_SUFFIX):
-            raise OSError("disk full")
-        real(path, data, mode)
-
-    monkeypatch.setattr(lc, "_write_new", failing)
-    with pytest.raises(OSError, match="disk full"):
-        migrate(str(tmp_path / "old.json"), str(tmp_path / "new.json"), {"k": "acme"}, now=T)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["old.json"]
-
-
-def test_a_kill_between_the_two_writes_leaves_no_store_without_its_label(tmp_path):
-    """A real process, killed in the window: the label is written first."""
-    (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
-    code = (
-        "import os,signal,sys;from datetime import datetime,timezone\n"
-        "from regaudit_fhe import _trust_lifecycle as lc\n"
-        "real=lc._write_new\n"
-        "def w(p,d,m):\n"
-        "    if not p.endswith(lc.ISSUER_PROVENANCE_SUFFIX): os.kill(os.getpid(),signal.SIGKILL)\n"
-        "    real(p,d,m)\n"
-        "lc._write_new=w\n"
-        "lc.migrate(sys.argv[1],sys.argv[2],{'k':'acme'},now=datetime.now(timezone.utc))\n"
-    )
-    out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", code, str(tmp_path / "old.json"), str(tmp_path / "new.json")],
-        capture_output=True, timeout=120, check=False,
-    )  # fmt: skip
-    assert out.returncode == -9
-    assert not (tmp_path / "new.json").exists() and side(tmp_path / "new.json").exists()
-    with pytest.raises(MigrationRefused, match="never overwrites"):
-        migrate(str(tmp_path / "old.json"), str(tmp_path / "new.json"), {"k": "acme"}, now=T)
-
-
-@pytest.mark.parametrize("body", ["{", "[]", '{"kind":"other","key_ids":["k"]}', '{"kind":"operator-declared"}', '{"kind":"operator-declared","key_ids":[1]}'])
-def test_a_broken_label_file_is_refused_not_ignored(body, migrated):
-    side(migrated / "new.json").write_text(body)
-    with pytest.raises(TrustStoreError, match="issuer provenance"):
-        rf.TrustStore.from_json(migrated / "new.json")
-    assert cli("verify", "-i", "r.json", "--trusted-keys", "new.json", cwd=migrated).returncode == 3
-
-
-def test_a_label_path_that_is_not_a_regular_file_is_refused_without_blocking(migrated):
-    side(migrated / "new.json").unlink()
-    os.mkfifo(side(migrated / "new.json"))
-    with pytest.raises(TrustStoreError, match="regular file"):
-        rf.TrustStore.from_json(migrated / "new.json")
-
-
-def test_a_symlinked_store_finds_its_label(migrated):
-    os.symlink(migrated / "new.json", migrated / "link.json")
-    assert rf.TrustStore.from_json(migrated / "link.json").issuer_declared == {"k"}
-
-
-def test_a_key_listed_but_gone_from_the_store_is_ignored(migrated):
-    doc = json.loads(side(migrated / "new.json").read_text())
-    doc["key_ids"].append("removed")
-    side(migrated / "new.json").write_text(json.dumps(doc))
-    assert rf.TrustStore.from_json(migrated / "new.json").issuer_declared == {"k"}
-
-
-def test_direct_construction_cannot_name_a_key_it_does_not_hold():
-    with pytest.raises(TrustStoreError, match="issuer_declared"):
-        rf.TrustStore(keys={"k": PEM}, issuer_declared=frozenset({"k"}))
-
-
 # ------------------------------------------------------------------ limits, as stated
 
 
 @pytest.mark.parametrize("profile", STRICT)
-def test_limit_deleting_the_label_makes_it_look_like_any_entries_store(profile, migrated):
-    """A label in a file the operator controls is not authentication in either direction. The refusal can only act on what is
-    recorded, and nothing here detects the deletion. The same store is then accepted."""
-    side(migrated / "new.json").unlink()
+def test_limit_deliberately_deleting_the_member_is_an_edit_of_local_state(profile, migrated):
+    """By the owner's ruling this is outside the guarantee: nothing here can detect it, and the store is then accepted."""
+    doc = json.loads((migrated / "new.json").read_text())
+    del doc["entries"]["k"]["issuer_source"]
+    (migrated / "new.json").write_text(json.dumps(doc))
     store = rf.TrustStore.from_json(migrated / "new.json")
     assert not store.issuer_declared
     assert verify(report(), strict(profile, store, migrated)).accepted
 
 
-@pytest.mark.parametrize("profile", STRICT)
-def test_limit_a_copy_without_its_label_is_accepted(profile, migrated, tmp_path_factory):
-    other = tmp_path_factory.mktemp("copy")
-    shutil.copy(migrated / "new.json", other / "copied.json")
-    assert verify(report(), strict(profile, rf.TrustStore.from_json(other / "copied.json"), other)).accepted
-
-
-def test_limit_from_dict_has_no_file_to_look_beside(migrated):
-    store = rf.TrustStore.from_dict(json.loads((migrated / "new.json").read_text()))
-    assert not store.issuer_declared
+def test_limit_the_source_store_stays_the_way_back(migrated):
+    assert json.loads((migrated / "old.json").read_text()) == {"keys": {"k": PEM}}
+    assert rf.TrustStore.from_json(migrated / "old.json").keys["k"] == rf.TrustStore.from_dict({"keys": {"k": PEM}}).keys["k"]

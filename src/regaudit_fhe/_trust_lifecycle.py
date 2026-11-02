@@ -31,6 +31,7 @@ from .canonical import CanonicalError, loads_strict
 from .trust import (
     ISSUER_PROVENANCE_SUFFIX,
     MAX_TRUST_STORE_BYTES,
+    OPERATOR_DECLARED,
     TrustStore,
     TrustStoreError,
     issuer_name_problem,
@@ -371,6 +372,7 @@ def migrate_store(
             "issuer": issuers[kid],
             "public_key_pem": source.keys[kid],
             "status": "compromised" if was == "revoked" else "active",
+            "issuer_source": OPERATOR_DECLARED,
         }
         pin = source.parameter_set_pins.get(kid)
         if pin is not None:
@@ -387,7 +389,7 @@ def migrate_store(
                     "KEY_REVOKED -> KEY_COMPROMISED_NO_CHRONOLOGY" if was == "revoked" else None
                 ),
                 "new_refusal_possible": "ISSUER_MISMATCH",
-                "issuer_binding": "operator-declared",
+                "issuer_binding": OPERATOR_DECLARED,
                 "authenticated_binding": False,
             }
         )
@@ -439,38 +441,22 @@ def migrate(
         raise MigrationRefused(f"{target!r} exists; migration never overwrites")
     side = os.path.realpath(target) + ISSUER_PROVENANCE_SUFFIX
     if os.path.lexists(side):
-        raise MigrationRefused(f"{side!r} exists; migration never overwrites")
+        raise MigrationRefused(f"{side!r} exists, from a pre-release version: remove it first")
     if not dry_run:
-        provenance = {
-            "kind": "operator-declared",
-            "authenticated": False,
-            "declared_at": _utc(now),
-            "source_sha256": hashlib.sha256(Path(real).read_bytes()).hexdigest(),
-            "key_ids": sorted(out["entries"]),
-            "note": "Each issuer in the store beside this file is a local operator's statement, made with 'trust migrate'. "
-            "No authenticated enrollment took place. This file is a label: deleting it proves nothing.",
-        }
-        # The label first: a kill between the two leaves no store, rather than a store with no label.
-        _write_new(side, _dump(provenance).encode("utf-8"), mode)
-        try:
-            _write_new(target, _dump(out).encode("utf-8"), mode)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(side)
-            raise
+        _write_new(target, _dump(out).encode("utf-8"), mode)
     return {
         "scope": SCOPE,
         "source": source,
         "target": target,
         "dry_run": dry_run,
         "keys": rows,
-        "issuer_provenance": side,
-        "issuer_binding": "operator-declared",
+        "issuer_binding": OPERATOR_DECLARED,
         "authenticated_binding": False,
         "notice": "The source is unchanged. Under the new store a report whose signed issuer differs from the "
         "stated issuer is refused (ISSUER_MISMATCH): check the stated issuers against your reports first. "
         "Each --issuer is your statement as a local operator, not proof that the key belongs to that issuer: no "
         "authenticated enrollment took place. confidential, high-assurance and secure-v1 refuse this store "
         "(ISSUER_ENROLLMENT_UNAUTHENTICATED). development accepts it and labels the result ISSUER_OPERATOR_DECLARED. "
-        "See docs/MIGRATION_0.3.md.",
+        "Each entry records this as issuer_source, so published versions refuse the store: the source store stays the way "
+        "back. See docs/MIGRATION_0.3.md.",
     }
