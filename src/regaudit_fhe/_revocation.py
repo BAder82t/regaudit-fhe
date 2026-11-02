@@ -231,7 +231,9 @@ class Mark:
     issued_at: str
     valid_until: str
     entries: dict[str, dict[str, Any]] = field(default_factory=dict)  # key_id -> entry
-    accepted_at: str | None = None  # this verifier's clock; a signer can backdate issued_at, not this
+    accepted_at: str | None = (
+        None  # this verifier's clock; a signer can backdate issued_at, not this
+    )
 
 
 @dataclass(frozen=True)
@@ -1059,7 +1061,9 @@ def verify_recovery(
     if doc["recovery_anchor"]["key_fingerprint"] != spki_fingerprint(enr.recovery_pem):
         return _auth_refuse("REVOCATION_RECOVERY_ANCHOR_MISMATCH")
     if _role_conflict_report(spki_fingerprint(enr.recovery_pem), store):
-        return _auth_refuse("REVOCATION_KEY_IS_REPORT_KEY", "the recovery anchor is enrolled as a report key")
+        return _auth_refuse(
+            "REVOCATION_KEY_IS_REPORT_KEY", "the recovery anchor is enrolled as a report key"
+        )
     new = doc["new_authority"]
     if not _pem_matches(new):
         return _auth_refuse(
@@ -1115,6 +1119,7 @@ def verify_recovery(
             base_generation = t["from_generation"]
         voided_digests.append(t["digest"])
         merged[t["to"]] = None
+
     def refuse(code: str, *notes: str) -> AuthResult:
         """Everything past the anchor signature is the anchor speaking. Whatever stops the authority change
         (a lost baseline, expiry, a generation) must not leave the verifier trusting a key it was told is stolen."""
@@ -1132,16 +1137,14 @@ def verify_recovery(
         if boundary is not None and parse_rfc3339(boundary) > issued + SKEW:
             return refuse("REVOCATION_MALFORMED", "compromised_from after issued_at")
 
-    if (
-        new_fp in merged
-        or new_fp in enr.superseded
-        or new_fp == enr.authority_fingerprint
-    ):
+    if new_fp in merged or new_fp in enr.superseded or new_fp == enr.authority_fingerprint:
         return refuse("REVOCATION_TRANSITION_CYCLE", "the new authority must be a fresh key")
     if _role_conflict(new_fp, enr, store):
         return refuse("REVOCATION_KEY_IS_REPORT_KEY")
     if anchor_fp in declared:
-        return refuse("REVOCATION_MALFORMED", "the recovery anchor cannot declare itself compromised")
+        return refuse(
+            "REVOCATION_MALFORMED", "the recovery anchor cannot declare itself compromised"
+        )
     if new["generation"] <= base_generation:
         return refuse("REVOCATION_TRANSITION_GAP", "generation must increase")
     notes: tuple[str, ...] = ()
@@ -1181,5 +1184,3 @@ def verify_list_enrolled(
     if enr is None:
         return _refuse("REVOCATION_NOT_ENROLLED")
     return verify_list(raw, enr.anchor, store, state, now, enrollment=enr, **kw)
-
-

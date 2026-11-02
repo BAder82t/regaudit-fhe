@@ -69,7 +69,9 @@ def _baseline(args: argparse.Namespace) -> tuple[int | None, str | None]:
             raise ValueError("--first-use excludes a baseline")
         return None, None
     if args.baseline_epoch is None:
-        raise ValueError("state --baseline-epoch (0 if no list exists yet), or --first-use for advisory")
+        raise ValueError(
+            "state --baseline-epoch (0 if no list exists yet), or --first-use for advisory"
+        )
     if args.baseline_epoch < 0:
         raise ValueError("--baseline-epoch must not be negative")
     if args.baseline_epoch > 0 and not re.fullmatch(r"[0-9a-f]{64}", args.baseline_digest or ""):
@@ -395,7 +397,9 @@ def _pin_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--anchor-key", help="Recovery anchor public key (PEM file).")
     parser.add_argument("--anchor-fingerprint", help="Received out of band; the file must match.")
-    parser.add_argument("--baseline-epoch", type=int, help="Newest list known out of band; 0 if none.")
+    parser.add_argument(
+        "--baseline-epoch", type=int, help="Newest list known out of band; 0 if none."
+    )
     parser.add_argument("--baseline-digest", help="Digest of that list.")
     parser.add_argument("--first-use", action="store_true", help="No baseline. Advisory mode only.")
     parser.add_argument("--authority-generation", type=int, default=1)
@@ -459,23 +463,37 @@ def add_parsers(sub: Any) -> None:
     sign.add_argument("--key-id", required=True)
     sign.add_argument("--issuer", required=True)
     sign.add_argument("--generation", type=int, default=1)
-    sign.add_argument("--publisher-state", required=True, help="Written before the list is released.")
+    sign.add_argument(
+        "--publisher-state", required=True, help="Written before the list is released."
+    )
     sign.add_argument("--output", required=True)
     sign.add_argument("--valid-for-hours", type=float, default=48.0)
     sign.add_argument(
         "--trusted-keys",
         help="Your report keys: an action must name one, with its fingerprint, since an entry can never be withdrawn.",
     )
-    sign.add_argument("--allow-unknown-keys", action="store_true", help="An action names a key not in --trusted-keys.")
-    sign.add_argument("--initial", action="store_true", help="This is the first list; no publisher state exists yet.")
+    sign.add_argument(
+        "--allow-unknown-keys",
+        action="store_true",
+        help="An action names a key not in --trusted-keys.",
+    )
+    sign.add_argument(
+        "--initial",
+        action="store_true",
+        help="This is the first list; no publisher state exists yet.",
+    )
     sign.add_argument("--recovery-anchor-key", help="Anchor public key, for the purpose check.")
     sign.add_argument("--after-recovery", help="The statement that installed this signer.")
     sign.add_argument("--retire", action="append", help="KEY_ID,FINGERPRINT,TIME")
     sign.add_argument(
-        "--replace", action="append", help="KEY_ID,FINGERPRINT,TIME,SUCCESSOR_ID,SUCCESSOR_FINGERPRINT"
+        "--replace",
+        action="append",
+        help="KEY_ID,FINGERPRINT,TIME,SUCCESSOR_ID,SUCCESSOR_FINGERPRINT",
     )
     sign.add_argument(
-        "--compromise", action="append", help="KEY_ID,FINGERPRINT[,TIME]; no TIME = unknown boundary"
+        "--compromise",
+        action="append",
+        help="KEY_ID,FINGERPRINT[,TIME]; no TIME = unknown boundary",
     )
     sign.set_defaults(func=_cmd_sign_list)
 
@@ -500,7 +518,9 @@ def add_parsers(sub: Any) -> None:
     recover.add_argument("--new-generation", type=int, required=True)
     recover.add_argument("--recovery-epoch", type=int, required=True)
     recover.add_argument("--declare", action="append", required=True, help="FINGERPRINT[,TIME]")
-    recover.add_argument("--previous", help="The previous statement, to keep declarations cumulative.")
+    recover.add_argument(
+        "--previous", help="The previous statement, to keep declarations cumulative."
+    )
     recover.add_argument("--rebase-epoch", type=int)
     recover.add_argument("--rebase-digest")
     recover.add_argument("--output", required=True)
@@ -517,7 +537,9 @@ def add_verify_options(parser: argparse.ArgumentParser) -> None:
         "independently protected state store is qualified.",
     )
     parser.add_argument("--revocation-pins", help="Pinned-authority file.")
-    parser.add_argument("--revocation-state", help="State directory (single-host, local file store).")
+    parser.add_argument(
+        "--revocation-state", help="State directory (single-host, local file store)."
+    )
     parser.add_argument(
         "--revocation-evidence-age-seconds",
         type=float,

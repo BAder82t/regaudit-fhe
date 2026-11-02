@@ -397,7 +397,9 @@ def _verify_destination(path: str, count: int, row_digest: str, meta: tuple[Any,
             raise ReplayMigrationRefused("the new file's policy record is not what was written")
         digest = hashlib.sha256()
         seen = 0
-        for row in conn.execute("SELECT key_id, run_id, expires_at FROM replay ORDER BY key_id, run_id"):
+        for row in conn.execute(
+            "SELECT key_id, run_id, expires_at FROM replay ORDER BY key_id, run_id"
+        ):
             seen += 1
             _row_digest(digest, tuple(row))
         if seen != count or digest.hexdigest() != row_digest:
@@ -485,7 +487,9 @@ def migrate_replay_file(
             if state == _EMPTY:
                 raise ReplayMigrationRefused("no replay table: not a published replay file")
             if conn.execute("PRAGMA user_version").fetchone() != (0,):
-                raise ReplayMigrationRefused("the file has a user_version the published versions never set")
+                raise ReplayMigrationRefused(
+                    "the file has a user_version the published versions never set"
+                )
             if conn.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                 raise ReplayMigrationRefused("the file fails sqlite's integrity check")
             if os.path.lexists(keep) and not os.path.samefile(keep, real):
@@ -495,7 +499,9 @@ def migrate_replay_file(
             fault("after-validation")
             prefix = f"{_MIGRATING_PREFIX}{hashlib.sha256(real.encode()).hexdigest()[:16]}-"
             for leftover in Path(real).parent.glob(prefix + "*"):
-                with contextlib.suppress(OSError):  # a killed migration's; the lock above says no other is live
+                with contextlib.suppress(
+                    OSError
+                ):  # a killed migration's; the lock above says no other is live
                     leftover.unlink()
             floor: int | None = None
             origin = "history-unknown"
@@ -581,7 +587,10 @@ class SqliteReplayCache:
                         if _classify(conn) == _EMPTY:  # another process may have got here first
                             conn.execute(_CREATE_REPLAY)
                             conn.execute(_CREATE_META)
-                            conn.execute(_INSERT_META, (REPLAY_SCHEMA_VERSION, "new", None, None, None, None, None))
+                            conn.execute(
+                                _INSERT_META,
+                                (REPLAY_SCHEMA_VERSION, "new", None, None, None, None, None),
+                            )
                         conn.execute("COMMIT")
                     except sqlite3.Error:
                         conn.execute("ROLLBACK")
@@ -615,7 +624,9 @@ class SqliteReplayCache:
         try:
             conn = self._connect()
             try:
-                if _classify(conn) == _EMPTY:  # ":memory:", or a file deleted under us: the record step reports it
+                if (
+                    _classify(conn) == _EMPTY
+                ):  # ":memory:", or a file deleted under us: the record step reports it
                     return requested
                 floor = _read_meta(conn)[column]
                 self._floor_memory(column, floor)
@@ -666,7 +677,9 @@ class SqliteReplayCache:
         try:
             conn = self._connect()
             try:
-                if _classify(conn) == _EMPTY:  # ":memory:", or a file deleted under us: the record step reports it
+                if (
+                    _classify(conn) == _EMPTY
+                ):  # ":memory:", or a file deleted under us: the record step reports it
                     return None
                 meta = _read_meta(conn)
                 if meta["trust_history_max_age_us"] != wanted:
@@ -680,7 +693,9 @@ class SqliteReplayCache:
                             conn.execute(_FLOOR_UPDATE["trust_history_max_age_us"], (wanted,))
                         elif floor != wanted:
                             earlier = meta["trust_history_cutover"]
-                            meta["trust_history_cutover"] = stamp if earlier is None else max(earlier, stamp)
+                            meta["trust_history_cutover"] = (
+                                stamp if earlier is None else max(earlier, stamp)
+                            )
                             conn.execute(
                                 "UPDATE replay_meta SET origin = 'fixed-window-adopted', "
                                 "trust_history_max_age_us = ?, trust_history_cutover = ? WHERE id = 1",

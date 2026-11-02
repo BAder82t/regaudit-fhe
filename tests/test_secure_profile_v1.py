@@ -127,7 +127,11 @@ def caches(tmp_path):
 def test_it_is_a_distinct_versioned_profile():
     assert SECURE_PROFILE_V1 == "secure-v1" and SECURE_PROFILE_V1 in PROFILES
     pol = VerificationPolicy(
-        profile="secure-v1", trust_store=ACTIVE, max_age=HOUR, replay_mode="record", replay_cache=ThirdParty()
+        profile="secure-v1",
+        trust_store=ACTIVE,
+        max_age=HOUR,
+        replay_mode="record",
+        replay_cache=ThirdParty(),
     )
     assert pol.policy_id == "regaudit-fhe/secure-v1/v1"
 
@@ -143,7 +147,11 @@ def test_a_caller_cannot_set_the_window_larger_or_smaller(setting):
 
 def test_replace_cannot_set_it_either():
     pol = VerificationPolicy(
-        profile="secure-v1", trust_store=ACTIVE, max_age=HOUR, replay_mode="record", replay_cache=ThirdParty()
+        profile="secure-v1",
+        trust_store=ACTIVE,
+        max_age=HOUR,
+        replay_mode="record",
+        replay_cache=ThirdParty(),
     )
     with pytest.raises(PolicyError, match="fixed trust-history window"):
         dataclasses.replace(pol, trust_history_max_age=30 * DAY)
@@ -225,7 +233,13 @@ def test_it_survives_a_restart(tmp_path):
         "import sys;from regaudit_fhe.replay import SqliteReplayCache as C;"
         "print(C(sys.argv[1]).trust_history_age_floor())"
     )
-    out = subprocess.run([sys.executable, "-c", code, str(db)], capture_output=True, text=True, check=True, timeout=60)  # noqa: S603
+    out = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code, str(db)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
     assert out.stdout.strip() == "1 day, 0:00:00"
 
 
@@ -241,7 +255,12 @@ def test_check_mode_gets_the_same_window(tmp_path):
 def test_an_increase_from_a_shorter_value_does_not_revive_anything(tmp_path):
     db = tmp_path / "up.db"
     two_hours_old = T0 - 2 * HOUR
-    first = case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=two_hours_old)
+    first = case(
+        SqliteReplayCache(db),
+        profile="confidential",
+        trust_history_max_age=HOUR,
+        as_of=two_hours_old,
+    )
     assert stale(first)
     assert replay_file_status(db)["trust_history_max_age_us"] == HOUR // US
     # moved to the profile, whose window would otherwise cover it
@@ -254,11 +273,22 @@ def test_an_increase_from_a_shorter_value_does_not_revive_anything(tmp_path):
 
 def test_after_the_increase_the_window_is_the_same_24_hours(tmp_path):
     db = tmp_path / "w.db"
-    assert stale(case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR))
+    assert stale(
+        case(
+            SqliteReplayCache(db),
+            profile="confidential",
+            trust_history_max_age=HOUR,
+            as_of=T0 - 2 * HOUR,
+        )
+    )
     assert stale(case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR))
     later = T0 + 3 * HOUR
-    assert fresh(case(SqliteReplayCache(db), as_of=T0 + HOUR, now=later))  # 2 hours old and after the takeover
-    assert stale(case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR, now=later))  # still refused, after a restart
+    assert fresh(
+        case(SqliteReplayCache(db), as_of=T0 + HOUR, now=later)
+    )  # 2 hours old and after the takeover
+    assert stale(
+        case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR, now=later)
+    )  # still refused, after a restart
     edge = T0 + HOUR
     assert fresh(case(SqliteReplayCache(db), as_of=edge, now=edge + DAY))
     assert stale(case(SqliteReplayCache(db), as_of=edge, now=edge + DAY + US))
@@ -270,7 +300,13 @@ def test_going_back_and_forth_does_not_revive_anything(tmp_path):
     later = T0 + 4 * HOUR
     as_of = T0 + HOUR  # three hours old at the time below
     assert stale(
-        case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=as_of, now=later)
+        case(
+            SqliteReplayCache(db),
+            profile="confidential",
+            trust_history_max_age=HOUR,
+            as_of=as_of,
+            now=later,
+        )
     )
     assert stale(case(SqliteReplayCache(db), as_of=as_of, now=later))
     assert stale(case(SqliteReplayCache(db), as_of=as_of, now=later + HOUR))
@@ -279,13 +315,17 @@ def test_going_back_and_forth_does_not_revive_anything(tmp_path):
 def test_the_longer_setting_gets_nothing_back_from_the_takeover(tmp_path):
     db = tmp_path / "back.db"
     as_of = T0 - 2 * HOUR
-    assert stale(case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=as_of))
+    assert stale(
+        case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=as_of)
+    )
     assert stale(case(SqliteReplayCache(db), as_of=as_of))
     assert stale(case(SqliteReplayCache(db), profile="confidential", as_of=as_of))
 
 
 @pytest.mark.parametrize("profile", ["confidential", "secure-v1"])
-def test_older_than_the_window_is_expired_on_a_new_file_after_any_reconfiguration(profile, tmp_path):
+def test_older_than_the_window_is_expired_on_a_new_file_after_any_reconfiguration(
+    profile, tmp_path
+):
     as_of = T0 - DAY - HOUR
     assert stale(case(SqliteReplayCache(tmp_path / "a.db"), as_of=as_of))
     assert stale(case(SqliteReplayCache(tmp_path / "b.db"), profile=profile, as_of=as_of))
@@ -315,7 +355,14 @@ def test_a_stated_shorter_history_on_a_migrated_file_is_taken_over(tmp_path):
 
 def test_a_floor_that_cannot_be_moved_counts_no_history(tmp_path):
     db = tmp_path / "ro.db"
-    assert stale(case(SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR))
+    assert stale(
+        case(
+            SqliteReplayCache(db),
+            profile="confidential",
+            trust_history_max_age=HOUR,
+            as_of=T0 - 2 * HOUR,
+        )
+    )
     os.chmod(db, stat.S_IRUSR)
     try:
         res = case(SqliteReplayCache(db), mode="check", as_of=T0 - HOUR)
@@ -342,13 +389,27 @@ def test_a_running_object_that_remembers_a_lower_floor_counts_no_history_until_r
     """A stated limit. It reads as a replaced file, and it fails closed for history only."""
     db = tmp_path / "run.db"
     running = SqliteReplayCache(db)
-    assert stale(case(running, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR))
-    assert stale(case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR))  # another process takes the file over
+    assert stale(
+        case(running, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR)
+    )
+    assert stale(
+        case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR)
+    )  # another process takes the file over
     later = T0 + 2 * HOUR
-    res = case(running, profile="confidential", trust_history_max_age=HOUR, as_of=later - timedelta(minutes=1), now=later)
+    res = case(
+        running,
+        profile="confidential",
+        trust_history_max_age=HOUR,
+        as_of=later - timedelta(minutes=1),
+        now=later,
+    )
     assert not res.accepted and res.trust_history == "UNPROVEN"
     fresh_object = case(
-        SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=later - timedelta(minutes=1), now=later
+        SqliteReplayCache(db),
+        profile="confidential",
+        trust_history_max_age=HOUR,
+        as_of=later - timedelta(minutes=1),
+        now=later,
     )
     assert fresh(fresh_object)
 
@@ -358,7 +419,9 @@ def test_a_running_object_that_remembers_a_lower_floor_counts_no_history_until_r
 
 def test_existing_profiles_keep_their_own_rules(tmp_path):
     cache = SqliteReplayCache(tmp_path / "x.db")
-    assert stale(case(cache, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR))
+    assert stale(
+        case(cache, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR)
+    )
     res = case(cache, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - HOUR)
     assert res.accepted and res.policy_id == "regaudit-fhe/confidential/v1"
     assert replay_file_status(tmp_path / "x.db")["origin"] == "new"

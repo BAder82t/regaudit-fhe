@@ -32,7 +32,9 @@ PINNED_DOCUMENTS = {
 @pytest.mark.parametrize("name", sorted(PINNED_DOCUMENTS))
 def test_frozen_documents_match_their_pinned_digest(name):
     data = (DIR.parents[2] / name).read_bytes()
-    assert hashlib.sha256(data).hexdigest() == PINNED_DOCUMENTS[name], f"{name} changed: re-pin deliberately"
+    assert hashlib.sha256(data).hexdigest() == PINNED_DOCUMENTS[name], (
+        f"{name} changed: re-pin deliberately"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(PINNED))

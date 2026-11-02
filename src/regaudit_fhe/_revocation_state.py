@@ -194,7 +194,9 @@ def _sync(fd: int, fcntl: Any) -> None:
     """fsync, and on macOS F_FULLFSYNC, since plain fsync there does not flush the drive cache."""
     full = getattr(fcntl, "F_FULLFSYNC", None)
     if full is not None:
-        with contextlib.suppress(OSError):  # not every filesystem supports it; fsync below still runs
+        with contextlib.suppress(
+            OSError
+        ):  # not every filesystem supports it; fsync below still runs
             fcntl.fcntl(fd, full)
     os.fsync(fd)
 
@@ -213,7 +215,9 @@ class Pin:
     authority_pem: str
     enrollment_id: str
     recovery_pem: str | None = None
-    baseline_epoch: int | None = None  # None = first use; 0 = the ceremony asserted no list exists yet
+    baseline_epoch: int | None = (
+        None  # None = first use; 0 = the ceremony asserted no list exists yet
+    )
     baseline_digest: str | None = None
     # Stated by a re-baseline ceremony, so that an old statement cannot move the authority backwards.
     authority_generation: int = 1
@@ -307,7 +311,9 @@ def save_pin(path: str | Path, pin: Pin) -> None:
             pins = load_pins(target) if target.exists() else {}
             pins[pin.issuer] = pin
             data = json.dumps(
-                {"pins": {k: v.to_dict() for k, v in sorted(pins.items())}}, indent=2, sort_keys=True
+                {"pins": {k: v.to_dict() for k, v in sorted(pins.items())}},
+                indent=2,
+                sort_keys=True,
             ).encode()
             fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".pins-", suffix=".tmp")
             try:
@@ -339,10 +345,14 @@ class Record:
     seq: int
     enrollment_id: str
     state: rv.RevocationState
-    effective: dict[str, dict[str, Any]] = field(default_factory=dict)  # fingerprint -> joined action
+    effective: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )  # fingerprint -> joined action
     contradiction: dict[str, str] | None = None
     clock_floor: str | None = None
-    adjudicated: tuple[str, ...] = ()  # list digests a ceremony has ruled on: replaying one cannot latch
+    adjudicated: tuple[
+        str, ...
+    ] = ()  # list digests a ceremony has ruled on: replaying one cannot latch
     # Strictest gate settings this record has served: {"mode": ..., "max_evidence_age_us": ...}. Monotonic.
     policy_floor: dict[str, Any] | None = None
 
@@ -574,7 +584,12 @@ def rebaseline(
             recovery_digest=pin.recovery_digest or was.recovery_digest,
         )
         state = state.with_enrollment(fresh)
-        seq, effective, adjudicated, floor = old.seq, old.effective, old.adjudicated, old.policy_floor
+        seq, effective, adjudicated, floor = (
+            old.seq,
+            old.effective,
+            old.adjudicated,
+            old.policy_floor,
+        )
         if old.contradiction is not None:
             adjudicated = (
                 *adjudicated,
@@ -705,7 +720,9 @@ def ingest_list(
             if code in SIGNED_CONTRADICTIONS:
                 digest = rv.list_digest(json.loads(raw_list))
                 if digest in rec.adjudicated:
-                    return None, Ingested(False, code)  # already ruled on by a ceremony: replay is free
+                    return None, Ingested(
+                        False, code
+                    )  # already ruled on by a ceremony: replay is free
                 mark = rec.state.get(pin.issuer)
                 latched = replace(
                     rec,
@@ -746,7 +763,9 @@ def ingest_transition(
         if not res.accepted:
             return None, Ingested(False, res.code)
         state = rv.apply_authority(rec.state, res)
-        return replace(rec, seq=rec.seq + 1, state=state, clock_floor=_floor(rec, now)), Ingested(True)
+        return replace(rec, seq=rec.seq + 1, state=state, clock_floor=_floor(rec, now)), Ingested(
+            True
+        )
 
     return _mutate(store, pin, now, step)
 

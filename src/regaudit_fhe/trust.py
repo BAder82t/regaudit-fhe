@@ -110,7 +110,22 @@ _ENTRY_KEYS = frozenset(
 # Blank or invisible, and not in a category that says so. The rest of what renders as nothing is category C or Z, or a
 # mark with nothing to sit on, which the base check below refuses.
 _BLANK_CODE_POINTS = frozenset(
-    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x303F, 0x3164, 0xFFA0, 0xFFFC, 0x13441, 0x13442, 0x16FE4, 0x1D159}
+    {
+        0x034F,
+        0x115F,
+        0x1160,
+        0x17B4,
+        0x17B5,
+        0x2800,
+        0x303F,
+        0x3164,
+        0xFFA0,
+        0xFFFC,
+        0x13441,
+        0x13442,
+        0x16FE4,
+        0x1D159,
+    }
     | set(range(0x180B, 0x1810))
     | set(range(0xFE00, 0xFE10))
     | set(range(0xE0100, 0xE01F0))
@@ -137,7 +152,9 @@ def issuer_name_problem(name: Any) -> str | None:
         if category[0] == "Z" and char != " ":
             return f"must not contain whitespace other than U+0020 (found U+{ord(char):04X})"
     if not any(unicodedata.category(char)[0] in "LNPS" for char in name):
-        return "must contain a letter, number, punctuation mark or symbol: it would render as nothing"
+        return (
+            "must contain a letter, number, punctuation mark or symbol: it would render as nothing"
+        )
     return None
 
 
@@ -186,11 +203,14 @@ def _is_validated_record(key_id: Any, entry: Any, pem: Any) -> bool:
     if not (type(key_id) is str and type(entry) is KeyEntry and type(pem) is str):
         return False
     return (
-        all(type(v) is str for v in (entry.key_id, entry.public_key_pem, entry.status, entry.issuer))
+        all(
+            type(v) is str for v in (entry.key_id, entry.public_key_pem, entry.status, entry.issuer)
+        )
         and (entry.parameter_set_pin is None or type(entry.parameter_set_pin) is str)
         and (entry.issuer_source is None or type(entry.issuer_source) is str)
         and all(
-            v is None or type(v) is datetime for v in (entry.not_before, entry.retired_at, entry.compromised_from)
+            v is None or type(v) is datetime
+            for v in (entry.not_before, entry.retired_at, entry.compromised_from)
         )
         and all(
             v is None or (type(v) is frozenset and all(type(item) is str for item in v))
@@ -286,7 +306,9 @@ def _parse_entry(key_id: str, entry: Any) -> KeyEntry:
         )
     source = entry.get("issuer_source")
     if "issuer_source" in entry and source != OPERATOR_DECLARED:
-        raise TrustStoreError(f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}")
+        raise TrustStoreError(
+            f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}"
+        )
     pin = entry.get("parameter_set_pin")
     if pin is not None and (
         not isinstance(pin, str) or len(pin) != 64 or any(c not in "0123456789abcdef" for c in pin)
@@ -341,7 +363,9 @@ class TrustStore:
             if entry.issuer_source is None:
                 continue
             if entry.issuer_source != OPERATOR_DECLARED:
-                raise TrustStoreError(f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}")
+                raise TrustStoreError(
+                    f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}"
+                )
             declared.add(key_id)
         object.__setattr__(self, "issuer_declared", frozenset(declared))
         # Direct construction is held to the same rules as the loaders: every key

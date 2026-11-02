@@ -76,7 +76,14 @@ def policy(tmp_path: Path, profile="confidential", now=NOW, **kw):
     return VerificationPolicy(**args)
 
 
-def decide(world, *, mode=gate.MODE_REQUIRED, now=NOW, age=gate.DEFAULT_MAX_EVIDENCE_AGE, profile="confidential"):
+def decide(
+    world,
+    *,
+    mode=gate.MODE_REQUIRED,
+    now=NOW,
+    age=gate.DEFAULT_MAX_EVIDENCE_AGE,
+    profile="confidential",
+):
     fs, pin, tmp = world
     ctx = gate.RevocationContext(mode, fs, {W.issuer: pin}, age)
     return gate.verify_with_revocation(report(), policy(tmp, profile=profile, now=now), ctx)
@@ -301,7 +308,9 @@ def test_default_cli_output_has_exactly_the_published_fields(signed):
 
 
 def test_the_evidence_section_appears_only_when_asked_for(signed):
-    proc = _cli("verify", "-i", "r.json", "--trusted-keys", "t.json", "--policy-evidence", cwd=signed)
+    proc = _cli(
+        "verify", "-i", "r.json", "--trusted-keys", "t.json", "--policy-evidence", cwd=signed
+    )
     payload = json.loads(proc.stdout)
     assert proc.returncode == 0
     assert set(payload) == RESULT_FIELDS | {

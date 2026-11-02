@@ -138,7 +138,9 @@ def test_V01_without_opt_in_every_published_report_keeps_its_verdict(
 
 
 @pytest.mark.parametrize("version", VERSIONS)
-def test_V05_a_parameter_set_pin_binds_the_signer_version_today_and_stays_that_way(tmp_path, version):
+def test_V05_a_parameter_set_pin_binds_the_signer_version_today_and_stays_that_way(
+    tmp_path, version
+):
     """The hash covers library_version. Existing behaviour, recorded because it is the one version effect."""
     pinned_to = vec("0.2.0")["reports"]["v2-audience"]["parameter_set_hash"]
     store = TrustStore.from_dict(_entry(parameter_set_pin=pinned_to))
@@ -316,7 +318,9 @@ def test_T05_migration_preserves_the_accept_or_refuse_outcome_for_the_right_issu
     after = verify(env, policy(after_dir, profile, new))
     expected_blocking = set(before.blocking_reasons)
     if "KEY_REVOKED" in expected_blocking:
-        expected_blocking = (expected_blocking - {"KEY_REVOKED"}) | {"KEY_COMPROMISED_NO_CHRONOLOGY"}
+        expected_blocking = (expected_blocking - {"KEY_REVOKED"}) | {
+            "KEY_COMPROMISED_NO_CHRONOLOGY"
+        }
         assert after.key_status == "compromised"
     assert after.accepted is (not expected_blocking)
     assert set(after.blocking_reasons) == expected_blocking
@@ -324,7 +328,9 @@ def test_T05_migration_preserves_the_accept_or_refuse_outcome_for_the_right_issu
 
 def test_T06_a_wrong_issuer_statement_changes_the_verdict_and_the_report_says_so():
     """This is why migration is opt-in: an issuer statement can newly refuse a report."""
-    out, rows = tg.migrate_store(STORES["bare"], {KEY: "someone-else"}, as_of="2026-11-02T00:00:00Z")
+    out, rows = tg.migrate_store(
+        STORES["bare"], {KEY: "someone-else"}, as_of="2026-11-02T00:00:00Z"
+    )
     assert rows[0]["new_refusal_possible"] == "ISSUER_MISMATCH"
     env = report("0.2.1", "v2-audience")
     now = lambda: NOW  # noqa: E731

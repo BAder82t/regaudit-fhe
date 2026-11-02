@@ -115,9 +115,7 @@ def _bind_floor(
     age = requested if floor_age is None else min(requested, floor_age)
     if floor is not None and age == floor_age and floor_mode == ctx.mode:
         return rec, age, requested > age
-    new = replace(
-        rec, seq=rec.seq + 1, policy_floor={"mode": ctx.mode, "max_evidence_age_us": age}
-    )
+    new = replace(rec, seq=rec.seq + 1, policy_floor={"mode": ctx.mode, "max_evidence_age_us": age})
     try:
         new, data = st.fit(new)
         if not ctx.store.cas(pin.issuer, raw, data):
@@ -234,7 +232,9 @@ def _check_config(policy: VerificationPolicy, ctx: RevocationContext) -> None:
     _checked_evidence_age(ctx.max_evidence_age)
     store = policy.trust_store
     if store is None or not store.entries:
-        raise PolicyError("REVOCATION_STORE_UNSUPPORTED: migrate the trust store to the entries form")
+        raise PolicyError(
+            "REVOCATION_STORE_UNSUPPORTED: migrate the trust store to the entries form"
+        )
     if any(entry.issuer is None for entry in store.entries.values()):
         raise PolicyError("every trust-store entry needs an issuer under a revocation mode")
     if policy.historical_acceptance == "signer-asserted":

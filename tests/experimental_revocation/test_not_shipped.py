@@ -58,7 +58,14 @@ def test_importing_the_package_loads_no_revocation_code():
 
 
 def test_the_engine_knows_nothing_of_revocation():
-    for name in ("verification.py", "trusted.py", "server.py", "trust.py", "reports.py", "report_v2.py"):
+    for name in (
+        "verification.py",
+        "trusted.py",
+        "server.py",
+        "trust.py",
+        "reports.py",
+        "report_v2.py",
+    ):
         assert "_revocation" not in (SRC / name).read_text(encoding="utf-8"), name
     fields = set(VerificationPolicy.__dataclass_fields__) | set(
         VerificationResult.__dataclass_fields__
@@ -148,7 +155,5 @@ def test_a_store_other_than_the_shipped_one_is_refused_on_the_public_path(tmp_pa
 
 
 def test_list_derived_history_is_not_in_the_product():
-    text = "".join(
-        p.read_text(encoding="utf-8") for p in SRC.glob("_revocation*.py")
-    )
+    text = "".join(p.read_text(encoding="utf-8") for p in SRC.glob("_revocation*.py"))
     assert "TrustHistory" not in text and "derive_trust_history" not in text

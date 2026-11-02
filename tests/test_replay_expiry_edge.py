@@ -66,14 +66,18 @@ def test_control_the_entry_goes_once_it_can_no_longer_matter(db, kind):
 
 
 @pytest.mark.parametrize("kind", ["sqlite", "memory"])
-@pytest.mark.parametrize("skew", [timedelta(microseconds=1), timedelta(seconds=1), timedelta(minutes=5)])
+@pytest.mark.parametrize(
+    "skew", [timedelta(microseconds=1), timedelta(seconds=1), timedelta(minutes=5)]
+)
 def test_positive_skew_controls_at_the_same_boundary(db, kind, skew):
     """The defect is at skew 0 only. With any positive skew the entry already outlived the freshness window."""
     cache = SqliteReplayCache(db) if kind == "sqlite" else InMemoryReplayCache()
     env = report(T0, RUN + "32")
     assert verify(env, _edge_policy(cache, T0, skew=skew)).accepted
     for at in (T0 + timedelta(microseconds=1), T0 + HOUR - timedelta(microseconds=1), T0 + HOUR):
-        assert verify(env, _edge_policy(cache, at, skew=skew)).blocking_reasons == ("REPLAY_DETECTED",)
+        assert verify(env, _edge_policy(cache, at, skew=skew)).blocking_reasons == (
+            "REPLAY_DETECTED",
+        )
     past = verify(env, _edge_policy(cache, T0 + HOUR + timedelta(microseconds=1), skew=skew))
     assert past.blocking_reasons == ("REPORT_TOO_OLD",)
 

@@ -32,7 +32,9 @@ from regaudit_fhe.verification import VerificationPolicy, verify
 STRICT = ("confidential", "high-assurance", "secure-v1")
 T = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 BOB = rf.Signer.generate(issuer="bob-lab", key_id="bob-1")
-FORGED = rf.Signer(issuer="alice-bank", key_id="bob-1", private_key=BOB.private_key, public_key=BOB.public_key)
+FORGED = rf.Signer(
+    issuer="alice-bank", key_id="bob-1", private_key=BOB.private_key, public_key=BOB.public_key
+)
 PEM = BOB.public_key_pem()
 RESULT = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
 RUN = "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6b1"
@@ -49,7 +51,11 @@ def v2(who=BOB, **kw) -> AuditEnvelopeV2:
 
 def store(**entry) -> rf.TrustStore:
     return rf.TrustStore.from_dict(
-        {"entries": {"bob-1": {"issuer": "bob-lab", "public_key_pem": PEM, "status": "active", **entry}}}
+        {
+            "entries": {
+                "bob-1": {"issuer": "bob-lab", "public_key_pem": PEM, "status": "active", **entry}
+            }
+        }
     )
 
 
@@ -98,10 +104,14 @@ class Float(float):
 FIELD_ATTACKS = {
     "issuer": lambda e: dataclasses.replace(e, issuer=Agreeable(e.issuer)),
     "key_id": lambda e: dataclasses.replace(e, key_id=Agreeable(e.key_id)),
-    "public_key_fingerprint": lambda e: dataclasses.replace(e, public_key_fingerprint=Agreeable(e.public_key_fingerprint)),
+    "public_key_fingerprint": lambda e: dataclasses.replace(
+        e, public_key_fingerprint=Agreeable(e.public_key_fingerprint)
+    ),
     "deployment_id": lambda e: dataclasses.replace(e, deployment_id=Agreeable(e.deployment_id)),
     "primitive": lambda e: dataclasses.replace(e, primitive=Agreeable(e.primitive)),
-    "parameter_set_hash": lambda e: dataclasses.replace(e, parameter_set_hash=Agreeable(e.parameter_set_hash)),
+    "parameter_set_hash": lambda e: dataclasses.replace(
+        e, parameter_set_hash=Agreeable(e.parameter_set_hash)
+    ),
     "audit_run_id": lambda e: dataclasses.replace(e, audit_run_id=Agreeable(e.audit_run_id)),
     "issued_at": lambda e: dataclasses.replace(e, issued_at=Agreeable(e.issued_at)),
     "schema": lambda e: dataclasses.replace(e, schema=Agreeable(e.schema)),
@@ -110,8 +120,12 @@ FIELD_ATTACKS = {
     "audience item": lambda e: dataclasses.replace(e, audience=[Agreeable("someone-else")]),
     "regulations": lambda e: dataclasses.replace(e, regulations=AlwaysIn(e.regulations)),
     "receipt": lambda e: dataclasses.replace(e, receipt=Quiet(e.receipt)),
-    "receipt digest": lambda e: dataclasses.replace(e, receipt={**e.receipt, "sha256": Agreeable("0" * 64)}),
-    "receipt key": lambda e: dataclasses.replace(e, receipt={**e.receipt, "public_key_pem": Agreeable(PEM)}),
+    "receipt digest": lambda e: dataclasses.replace(
+        e, receipt={**e.receipt, "sha256": Agreeable("0" * 64)}
+    ),
+    "receipt key": lambda e: dataclasses.replace(
+        e, receipt={**e.receipt, "public_key_pem": Agreeable(PEM)}
+    ),
     "parameter_set": lambda e: dataclasses.replace(e, parameter_set=Quiet(e.parameter_set)),
     "parameter_set value": lambda e: dataclasses.replace(
         e, parameter_set={**e.parameter_set, "backend": Agreeable(e.parameter_set["backend"])}
@@ -120,7 +134,9 @@ FIELD_ATTACKS = {
     "depth_budget value": lambda e: dataclasses.replace(
         e, depth_budget={k: Int(v) for k, v in e.depth_budget.items()}
     ),
-    "trust_policy_version": lambda e: dataclasses.replace(e, trust_policy_version=Int(e.trust_policy_version)),
+    "trust_policy_version": lambda e: dataclasses.replace(
+        e, trust_policy_version=Int(e.trust_policy_version)
+    ),
     "result float": lambda e: dataclasses.replace(e, result={**e.result, "planted": Float(1.5)}),
     "timestamps": lambda e: dataclasses.replace(e, timestamps=AlwaysIn(e.timestamps)),
 }
@@ -131,7 +147,9 @@ def test_the_finding_a_substituted_issuer_through_a_str_subclass_is_refused(tmp_
     for profile in STRICT:
         res = verify(hostile, strict(profile, tmp_path))
         assert not res.accepted and not res.issuer_trusted
-        assert res.blocking_reasons == ("MALFORMED_ENVELOPE",)  # the object check, not the issuer check
+        assert res.blocking_reasons == (
+            "MALFORMED_ENVELOPE",
+        )  # the object check, not the issuer check
         assert res.consumption == "NOT_CHECKED"
         assert res.issuer == ""  # nothing from the object is repeated
 
@@ -142,16 +160,23 @@ def test_no_field_may_be_a_substituted_type(name, profile, tmp_path):
     hostile = FIELD_ATTACKS[name](v2(BOB))
     res = verify(hostile, strict(profile, tmp_path))
     assert not res.accepted and res.blocking_reasons == ("MALFORMED_ENVELOPE",), name
-    assert replay_file_status(tmp_path / f"{profile}.db")["rows"] == 0  # refused before the replay store is touched
+    assert (
+        replay_file_status(tmp_path / f"{profile}.db")["rows"] == 0
+    )  # refused before the replay store is touched
 
 
 @pytest.mark.parametrize("profile", STRICT)
 def test_an_issuer_scope_cannot_be_answered_by_the_object(profile, tmp_path):
     trust = store(deployments=["other"], primitives=["fairness"], parameter_set_pin="0" * 64)
     hostile = dataclasses.replace(
-        v2(BOB), deployment_id=Agreeable("p"), primitive=Agreeable("drift"), parameter_set_hash=Agreeable(_pin_hash())
+        v2(BOB),
+        deployment_id=Agreeable("p"),
+        primitive=Agreeable("drift"),
+        parameter_set_hash=Agreeable(_pin_hash()),
     )
-    assert verify(hostile, strict(profile, tmp_path, trust)).blocking_reasons == ("MALFORMED_ENVELOPE",)
+    assert verify(hostile, strict(profile, tmp_path, trust)).blocking_reasons == (
+        "MALFORMED_ENVELOPE",
+    )
 
 
 class ReplacesWhatIsSigned(AuditEnvelopeV2):
@@ -188,12 +213,17 @@ def test_a_v1_object_is_held_to_the_same_rule(profile, tmp_path):
         dataclasses.replace(env, receipt={**env.receipt, "key_id": Agreeable("bob-1")}),
         dataclasses.replace(env, regulations=AlwaysIn(env.regulations)),
     ):
-        assert verify(hostile, strict(profile, tmp_path)).blocking_reasons == ("MALFORMED_ENVELOPE",)
+        assert verify(hostile, strict(profile, tmp_path)).blocking_reasons == (
+            "MALFORMED_ENVELOPE",
+        )
+
     class Sub(AuditEnvelope):
         pass
 
     fields = {f.name: getattr(env, f.name) for f in dataclasses.fields(AuditEnvelope)}
-    assert verify(Sub(**fields), strict(profile, tmp_path)).blocking_reasons == ("MALFORMED_ENVELOPE",)
+    assert verify(Sub(**fields), strict(profile, tmp_path)).blocking_reasons == (
+        "MALFORMED_ENVELOPE",
+    )
 
 
 @pytest.mark.parametrize("profile", ["confidential", "secure-v1"])
@@ -201,7 +231,9 @@ def test_a_revocation_mode_reaches_the_same_refusal(profile, tmp_path):
     hostile = dataclasses.replace(v2(FORGED), issuer=Agreeable("alice-bank"))
     ctx = gate.RevocationContext(gate.MODE_ADVISORY, st.FileStateStore(tmp_path / "state"), {})
     decision = gate.verify_with_revocation(hostile, strict(profile, tmp_path), ctx)
-    assert not decision.result.accepted and decision.result.blocking_reasons == ("MALFORMED_ENVELOPE",)
+    assert not decision.result.accepted and decision.result.blocking_reasons == (
+        "MALFORMED_ENVELOPE",
+    )
 
 
 def test_verify_trusted_was_already_safe_because_it_reparses():

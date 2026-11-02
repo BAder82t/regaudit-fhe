@@ -180,11 +180,15 @@ def next_list(
         if after_recovery is not None:
             installed = after_recovery["new_authority"]
             if installed["key_fingerprint"] != fingerprint or installed["generation"] != generation:
-                raise ActionRefused("this recovery statement does not install this signer at this generation")
+                raise ActionRefused(
+                    "this recovery statement does not install this signer at this generation"
+                )
         elif generation < was["generation"]:
             raise ActionRefused("the generation is below the previous list's")
         elif generation == was["generation"] and was["key_fingerprint"] != fingerprint:
-            raise ActionRefused("another key at the same generation: rotate with a transition first")
+            raise ActionRefused(
+                "another key at the same generation: rotate with a transition first"
+            )
         elif generation > was["generation"] and was["key_fingerprint"] == fingerprint:
             raise ActionRefused("the same key at a new generation: a rotation names a new key")
         if parse_rfc3339(previous["issued_at"]) > now + rv.SKEW:
@@ -264,7 +268,9 @@ def sign_transition_statement(
         raise ActionRefused("the new authority is the current authority")
     if recovery_anchor_pem is not None and spki_fingerprint(recovery_anchor_pem) == new_fp:
         raise ActionRefused("the new authority is the recovery anchor")
-    if trust_store is not None and new_fp in {spki_fingerprint(p) for p in trust_store.keys.values()}:
+    if trust_store is not None and new_fp in {
+        spki_fingerprint(p) for p in trust_store.keys.values()
+    }:
         raise ActionRefused("the new authority is a report key")
     body = rv.build_transition_body(
         issuer=issuer,
@@ -319,7 +325,9 @@ def sign_recovery_statement(
             raise ActionRefused("recovery_epoch must be newer than the previous statement's")
         if new_generation <= previous["new_authority"]["generation"]:
             raise ActionRefused("the new generation must exceed the previous statement's")
-        missing = {d["key_fingerprint"] for d in previous["declares_compromised"]} - set(fingerprints)
+        missing = {d["key_fingerprint"] for d in previous["declares_compromised"]} - set(
+            fingerprints
+        )
         if missing:
             raise ActionRefused(f"declarations must be cumulative; missing {sorted(missing)}")
         if new_fp == previous["new_authority"]["key_fingerprint"]:

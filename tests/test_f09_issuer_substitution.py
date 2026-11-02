@@ -51,8 +51,16 @@ FORGED = signer(b"tenant-b", "alice-bank", "bob-1")  # B's real key, A's name
 def _entries(**over) -> dict:
     return {
         "entries": {
-            "alice-1": {"issuer": "alice-bank", "public_key_pem": ALICE.public_key_pem(), "status": "active"},
-            "bob-1": {"issuer": "bob-lab", "public_key_pem": BOB.public_key_pem(), "status": "active"},
+            "alice-1": {
+                "issuer": "alice-bank",
+                "public_key_pem": ALICE.public_key_pem(),
+                "status": "active",
+            },
+            "bob-1": {
+                "issuer": "bob-lab",
+                "public_key_pem": BOB.public_key_pem(),
+                "status": "active",
+            },
             **over,
         }
     }
@@ -73,12 +81,23 @@ def report(who: rf.Signer, fmt: str = "v2"):
     if fmt == "v1":
         return rf.envelope("drift", result, signer=who)
     return envelope_v2(
-        "drift", result, signer=who, deployment_id="p", audience=("reg",), issued_at=T, audit_run_id=RUN
+        "drift",
+        result,
+        signer=who,
+        deployment_id="p",
+        audience=("reg",),
+        issued_at=T,
+        audit_run_id=RUN,
     )
 
 
 def policy(profile: str, store: dict, tmp_path: Path, **kw) -> VerificationPolicy:
-    args = {"profile": profile, "trust_store": rf.TrustStore.from_dict(store), "check_provenance": True, **kw}
+    args = {
+        "profile": profile,
+        "trust_store": rf.TrustStore.from_dict(store),
+        "check_provenance": True,
+        **kw,
+    }
     if profile != "development":
         args.update(
             max_age=timedelta(hours=1),
@@ -135,7 +154,8 @@ def test_a_v1_substitution_never_passes_an_entries_store(profile, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name", ["Alice-Bank", "alice-bank ", " alice-bank", "alice‐bank", "аlice-bank", "alice-bank\u0000"]
+    "name",
+    ["Alice-Bank", "alice-bank ", " alice-bank", "alice‐bank", "аlice-bank", "alice-bank\u0000"],
 )
 def test_a_lookalike_of_the_enrolled_name_is_a_different_name(name, tmp_path):
     env = report(signer(b"tenant-a", name, "alice-1"))
@@ -164,18 +184,28 @@ def test_control_the_honest_tenant_is_trusted_on_an_entries_store(profile, tmp_p
         assert res.accepted and res.issuer_trusted and res.issuer == who.issuer
 
 
-def test_control_every_entries_verdict_is_the_same_for_an_honest_report_as_a_legacy_one_today(tmp_path):
+def test_control_every_entries_verdict_is_the_same_for_an_honest_report_as_a_legacy_one_today(
+    tmp_path,
+):
     a = verify(report(BOB), policy("development", STORES["entries"], tmp_path))
     b = verify(report(BOB), policy("development", STORES["legacy"], tmp_path))
-    assert (a.trust_status, a.issuer_trusted) == (b.trust_status, b.issuer_trusted) == ("TRUSTED", True)
+    assert (
+        (a.trust_status, a.issuer_trusted)
+        == (b.trust_status, b.issuer_trusted)
+        == ("TRUSTED", True)
+    )
 
 
 # ------------------------------------------------------------------ the other acceptance paths
 
 
-@pytest.mark.parametrize(("form", "expected"), [("legacy", "TRUSTED"), ("bare", "TRUSTED"), ("entries", "INVALID")])
+@pytest.mark.parametrize(
+    ("form", "expected"), [("legacy", "TRUSTED"), ("bare", "TRUSTED"), ("entries", "INVALID")]
+)
 def test_verify_trusted_with_its_default_policy(form, expected):
-    res = rf.verify_trusted(json.dumps(report(FORGED).to_dict()), rf.TrustStore.from_dict(STORES[form]))
+    res = rf.verify_trusted(
+        json.dumps(report(FORGED).to_dict()), rf.TrustStore.from_dict(STORES[form])
+    )
     assert res.verdict.value == expected
     assert (res.reasons == ("ISSUER_MISMATCH",)) == (form == "entries")
 
@@ -187,7 +217,9 @@ def test_the_lenient_engine_path(form, expected):
     assert res.trust_status == expected
 
 
-@pytest.mark.parametrize(("form", "expected"), [("legacy", "TRUSTED"), ("bare", "TRUSTED"), ("entries", "INVALID")])
+@pytest.mark.parametrize(
+    ("form", "expected"), [("legacy", "TRUSTED"), ("bare", "TRUSTED"), ("entries", "INVALID")]
+)
 def test_the_legacy_verifier_with_a_store(form, expected):
     res = verify_envelope(report(FORGED, "v1"), trust_store=rf.TrustStore.from_dict(STORES[form]))
     assert res.trust_status == expected
@@ -199,7 +231,9 @@ def test_the_legacy_verifier_with_a_plain_mapping():
     assert res.trust_status == "TRUSTED" and res.issuer_trusted and res.issuer == "alice-bank"
 
 
-@pytest.mark.parametrize(("form", "expected"), [("legacy", True), ("bare", True), ("entries", False)])
+@pytest.mark.parametrize(
+    ("form", "expected"), [("legacy", True), ("bare", True), ("entries", False)]
+)
 def test_verify_receipt_and_verify_envelope_or_raise(form, expected):
     """The two other published entry points on the legacy verifier: same verdict as it, on every form."""
     env = report(FORGED, "v1")
@@ -217,7 +251,16 @@ def _cli(tmp_path: Path, form: str, profile: str) -> subprocess.CompletedProcess
     (tmp_path / "t.json").write_text(json.dumps(STORES[form]))
     args = ["-i", "r.json", "--trusted-keys", "t.json", "--profile", profile]
     if profile != "development":
-        args += ["--verifier-id", "reg", "--max-age-seconds", "3600", "--replay-mode", "record", "--replay-db", "x.db"]
+        args += [
+            "--verifier-id",
+            "reg",
+            "--max-age-seconds",
+            "3600",
+            "--replay-mode",
+            "record",
+            "--replay-db",
+            "x.db",
+        ]
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
         [sys.executable, "-m", "regaudit_fhe.cli", "verify", *args],
         capture_output=True,
@@ -245,7 +288,11 @@ def test_the_real_cli(form, profile, tmp_path):
     if form == "entries":
         assert json.loads(out.stdout)["reason"] == "ISSUER_MISMATCH"
     elif profile != "development":
-        assert not out.stdout and "states the issuer of each key" in out.stderr and "trust add" in out.stderr
+        assert (
+            not out.stdout
+            and "states the issuer of each key" in out.stderr
+            and "trust add" in out.stderr
+        )
 
 
 def _server(form: str, profile: str, tmp_path: Path):
@@ -316,7 +363,11 @@ def test_a_revocation_mode_already_refuses_a_store_without_issuers(tmp_path):
 def test_verify_trusted_refuses_the_policy_not_the_report(profile, tmp_path):
     strict = policy(profile, STORES["entries"], tmp_path)
     with pytest.raises(PolicyError, match="states the issuer of each key"):
-        rf.verify_trusted(json.dumps(report(ALICE).to_dict()), rf.TrustStore.from_dict(STORES["legacy"]), policy=strict)
+        rf.verify_trusted(
+            json.dumps(report(ALICE).to_dict()),
+            rf.TrustStore.from_dict(STORES["legacy"]),
+            policy=strict,
+        )
 
 
 @pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
@@ -327,7 +378,9 @@ def test_a_strict_policy_cannot_be_moved_onto_a_store_without_issuers(profile, t
 
 
 def test_an_entry_built_without_an_issuer_does_not_count_as_bound(tmp_path):
-    entry = KeyEntry(key_id="bob-1", public_key_pem=BOB.public_key_pem(), status="active", issuer=None)
+    entry = KeyEntry(
+        key_id="bob-1", public_key_pem=BOB.public_key_pem(), status="active", issuer=None
+    )
     store = rf.TrustStore(keys={"bob-1": BOB.public_key_pem()}, entries={"bob-1": entry})
     assert not store.binds_issuers
     with pytest.raises(PolicyError):

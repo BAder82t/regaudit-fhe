@@ -28,7 +28,11 @@ HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
 SIGNER = rf.Signer.generate(issuer="acme", key_id="k")
 STORE = rf.TrustStore.from_dict(
-    {"entries": {"k": {"issuer": "acme", "public_key_pem": SIGNER.public_key_pem(), "status": "active"}}}
+    {
+        "entries": {
+            "k": {"issuer": "acme", "public_key_pem": SIGNER.public_key_pem(), "status": "active"}
+        }
+    }
 )
 FLOOR_CODE = "REPLAY_POLICY_FLOOR_APPLIED"
 
@@ -117,7 +121,11 @@ def test_the_floor_survives_a_real_new_process(db):
         "print(C(sys.argv[1]).max_age_floor().total_seconds())"
     )
     out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", code, str(db)], capture_output=True, text=True, check=True, timeout=120
+        [sys.executable, "-c", code, str(db)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
     )
     assert float(out.stdout) == 3600.0
 

@@ -51,7 +51,9 @@ from .trust import KeyEntry, TrustStore
 # A versioned profile with its own rules, so that no existing parameter or profile changes meaning. Everything else in it is
 # as in ``confidential``. See TRUST_SPEC 8.3.
 SECURE_PROFILE_V1 = "secure-v1"
-ISSUER_ENROLLMENT_UNAUTHENTICATED = "ISSUER_ENROLLMENT_UNAUTHENTICATED"  # a configuration refusal, not a verdict on a report
+ISSUER_ENROLLMENT_UNAUTHENTICATED = (
+    "ISSUER_ENROLLMENT_UNAUTHENTICATED"  # a configuration refusal, not a verdict on a report
+)
 PROFILES = ("development", "confidential", "high-assurance", SECURE_PROFILE_V1)
 
 TRUSTED = "TRUSTED"
@@ -175,7 +177,10 @@ class VerificationPolicy:
             raise PolicyError("clock_skew must not be negative")
         if self.trust_history_max_age <= timedelta(0):
             raise PolicyError("trust_history_max_age must be positive")
-        if self.profile == SECURE_PROFILE_V1 and self.trust_history_max_age != TRUST_HISTORY_CEILING:
+        if (
+            self.profile == SECURE_PROFILE_V1
+            and self.trust_history_max_age != TRUST_HISTORY_CEILING
+        ):
             raise PolicyError(
                 f"the {SECURE_PROFILE_V1!r} profile has a fixed trust-history window of {TRUST_HISTORY_CEILING}: "
                 "trust_history_max_age cannot be set, larger or smaller"
@@ -362,7 +367,9 @@ class _HistoryBound:
     failed: bool = False  # the store's floor could not be used: no history counts
 
 
-def _fixed_history_window(policy: VerificationPolicy, now: datetime, *, use_store: bool) -> _HistoryBound:
+def _fixed_history_window(
+    policy: VerificationPolicy, now: datetime, *, use_store: bool
+) -> _HistoryBound:
     """The same 24 hours on a new store, an existing one and no store state at all. Only what a shorter setting already
     refused on this store is held back, by the cutover: it stays refused, and the window itself never moves."""
     cache = policy.replay_cache

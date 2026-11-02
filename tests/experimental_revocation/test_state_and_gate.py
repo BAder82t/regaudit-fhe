@@ -35,7 +35,9 @@ def w() -> World:
 
 def pin(w: World, **kw) -> tg.Pin:
     args = {"baseline_epoch": 0, "enrollment_id": "enr-1", **kw}
-    return tg.Pin(w.issuer, w.rev.public_key_pem(), recovery_pem=w.recovery.public_key_pem(), **args)
+    return tg.Pin(
+        w.issuer, w.rev.public_key_pem(), recovery_pem=w.recovery.public_key_pem(), **args
+    )
 
 
 def setup(w: World, store: tg.CasStore | None = None, **kw) -> tuple[tg.CasStore, tg.Pin]:
@@ -125,7 +127,9 @@ def test_G03_a_short_validity_ends_before_the_evidence_age_does(w, tmp_path):
     s, p = setup(w)
     add(w, s, p, w.signed(1, [], valid_until="2026-11-01T13:00:00Z"))
     assert tg.gate(ctx(w, s, p), w.issuer, NOW).ok
-    later = proto.parse_rfc3339("2026-11-01T13:00:00Z")  # 4 h after issued_at, exactly at valid_until
+    later = proto.parse_rfc3339(
+        "2026-11-01T13:00:00Z"
+    )  # 4 h after issued_at, exactly at valid_until
     assert tg.gate(ctx(w, s, p), w.issuer, later).code == "REVOCATION_DATA_STALE"
 
 
@@ -257,7 +261,9 @@ def test_G12_marks_from_a_compromised_authority_stop_counting_after_recovery(w, 
 
 def test_G13_a_mark_taken_before_a_known_compromise_boundary_stays_usable(w, tmp_path):
     s, p = setup(w)
-    add(w, s, p, l1(w), now=proto.parse_rfc3339("2026-11-01T09:10:00Z"))  # issued 09:00, taken 09:10
+    add(
+        w, s, p, l1(w), now=proto.parse_rfc3339("2026-11-01T09:10:00Z")
+    )  # issued 09:00, taken 09:10
     rec = dump(w.recovery_stmt(w.auth2, declares=[(w.fp(w.rev), "2026-11-01T09:30:00Z")]))
     assert tg.ingest_recovery(s, p, rec, w.store(), NOW).accepted
     assert decide(w, tmp_path, s, p).result.accepted
@@ -268,7 +274,9 @@ def test_A11_routine_rotation_keeps_the_mark_usable_until_it_lapses(w, tmp_path)
     add(w, s, p, l1(w))
     assert tg.ingest_transition(s, p, dump(w.transition(w.rev, w.auth2)), w.store(), NOW).accepted
     assert decide(w, tmp_path, s, p).result.accepted
-    assert "REVOCATION_DATA_STALE" in decide(w, tmp_path, s, p, now=STALE_NOW).result.blocking_reasons
+    assert (
+        "REVOCATION_DATA_STALE" in decide(w, tmp_path, s, p, now=STALE_NOW).result.blocking_reasons
+    )
 
 
 def test_A10_a_long_offline_verifier_fails_closed_until_a_ceremony(w, tmp_path):
@@ -277,7 +285,9 @@ def test_A10_a_long_offline_verifier_fails_closed_until_a_ceremony(w, tmp_path):
     add(w, s, p, first)
     much_later = NOW + timedelta(days=60)
     transition = dump(w.transition(w.rev, w.auth2))
-    assert tg.ingest_transition(s, p, transition, w.store(), much_later).code == "REVOCATION_EXPIRED"
+    assert (
+        tg.ingest_transition(s, p, transition, w.store(), much_later).code == "REVOCATION_EXPIRED"
+    )
     fresh_until = "2027-02-01T00:00:00Z"
     by_new = w.signed(
         2,
@@ -342,7 +352,9 @@ def test_G14_clock_behind_the_state_floor_fails_closed(w, tmp_path):
     assert "REVOCATION_CLOCK_REGRESSION" in d.result.blocking_reasons
 
 
-def test_G15_a_listed_key_is_refused_by_the_engine_on_the_overlay_and_the_file_is_untouched(w, tmp_path):
+def test_G15_a_listed_key_is_refused_by_the_engine_on_the_overlay_and_the_file_is_untouched(
+    w, tmp_path
+):
     s, p = setup(w)
     add(w, s, p, l1(w, [w.entry(w.old, "compromised", None)]))
     store = w.store(w.old, w.new, w.third)
@@ -364,7 +376,10 @@ def test_G17_hand_loosening_the_local_file_does_not_undo_listed_state(w, tmp_pat
     s, p = setup(w)
     add(w, s, p, l1(w, [w.entry(w.old, "retired", R)]))
     active = w.store(w.old)  # the operator edited the file back to active
-    assert "KEY_RETIRED_NO_CHRONOLOGY" in decide(w, tmp_path, s, p, store=active).result.blocking_reasons
+    assert (
+        "KEY_RETIRED_NO_CHRONOLOGY"
+        in decide(w, tmp_path, s, p, store=active).result.blocking_reasons
+    )
 
 
 def test_G18_advisory_mode_tightens_but_does_not_fail_closed(w, tmp_path):
@@ -505,7 +520,9 @@ def test_S02_an_edited_record_that_is_still_valid_json_is_refused(w, tmp_path):
     assert tg.gate(ctx(w, s, p), w.issuer, NOW).code == "REVOCATION_STATE_UNAVAILABLE"
 
 
-def test_S05_HONEST_LIMIT_restore_is_not_detected_by_a_fresh_process_and_is_bounded_by_validity(w, tmp_path):
+def test_S05_HONEST_LIMIT_restore_is_not_detected_by_a_fresh_process_and_is_bounded_by_validity(
+    w, tmp_path
+):
     """A restored local file plus a replayed list is accepted, for at most the replayed list's lifetime."""
     fs = tg.FileCasStore(tmp_path)
     s, p = setup(w, fs)
@@ -548,7 +565,9 @@ def test_S07_the_ceremony_keeps_key_actions_unless_the_operator_clears_them(w, t
     add(w, s, p, l1(w, [w.entry(w.old, "compromised", None)]))
     kept = tg.rebaseline(s, pin(w, enrollment_id="enr-2"), now=NOW, accept_loss=True)
     assert w.fp(w.old) in kept.effective
-    cleared = tg.rebaseline(s, pin(w, enrollment_id="enr-3"), now=NOW, clear_effective=True, accept_loss=True)
+    cleared = tg.rebaseline(
+        s, pin(w, enrollment_id="enr-3"), now=NOW, clear_effective=True, accept_loss=True
+    )
     assert cleared.effective == {}
     assert cleared.seq > kept.seq
 
@@ -638,7 +657,9 @@ def test_S11_real_threads_on_the_file_store_end_at_the_highest_epoch(w, tmp_path
     assert {o.code for o in outcomes} <= {None, "REVOCATION_ROLLBACK", "REVOCATION_STATE_CONFLICT"}
 
 
-def test_S12_two_verifiers_without_a_shared_store_can_disagree_and_nothing_claims_otherwise(w, tmp_path):
+def test_S12_two_verifiers_without_a_shared_store_can_disagree_and_nothing_claims_otherwise(
+    w, tmp_path
+):
     a, pa = setup(w)
     b, pb = setup(w)
     first = l1(w)
@@ -690,7 +711,9 @@ def test_R01_rebase_lowers_the_mark_but_keeps_every_tightening(w, tmp_path):
 def test_R02_replaying_recovery_through_the_store_writes_nothing(w, tmp_path):
     s, p = setup(w)
     add(w, s, p, l1(w))
-    rec = dump(w.recovery_stmt(w.auth2, rebase={"epoch": 1, "list_digest": proto.list_digest(l1(w))}))
+    rec = dump(
+        w.recovery_stmt(w.auth2, rebase={"epoch": 1, "list_digest": proto.list_digest(l1(w))})
+    )
     tg.ingest_recovery(s, p, rec, w.store(), NOW)
     before = s.data[w.issuer]
     out = tg.ingest_recovery(s, p, rec, w.store(), NOW)
@@ -747,7 +770,9 @@ def _stamped(w, at):
         ("compromised", None, "2026-09-01T00:00:00+00:00", "KEY_COMPROMISED_NO_CHRONOLOGY"),
     ],
 )
-def test_H01_required_mode_never_accepts_history_from_a_list(w, tmp_path, status, boundary, ts_at, expected):
+def test_H01_required_mode_never_accepts_history_from_a_list(
+    w, tmp_path, status, boundary, ts_at, expected
+):
     s, p = setup(w)
     add(w, s, p, l1(w, [w.entry(w.old, status, boundary)]))
     kw = {}
@@ -787,7 +812,9 @@ def test_H03_a_timestamp_without_a_pinned_verifier_is_not_chronology(w, tmp_path
     assert "KEY_RETIRED_NO_CHRONOLOGY" in d.result.blocking_reasons
 
 
-def test_H04_no_trust_history_is_derived_for_high_assurance_even_when_a_caller_supplies_one(w, tmp_path):
+def test_H04_no_trust_history_is_derived_for_high_assurance_even_when_a_caller_supplies_one(
+    w, tmp_path
+):
     from regaudit_fhe.verification import TrustHistory
 
     s, p = setup(w)
@@ -843,7 +870,9 @@ def test_H08_a_report_v1_timestamp_block_is_never_chronology(w):
     assert "KEY_RETIRED_NO_CHRONOLOGY" in res.blocking_reasons
 
 
-def test_G21_an_old_signature_by_a_listed_compromised_key_is_refused_when_newly_presented(w, tmp_path):
+def test_G21_an_old_signature_by_a_listed_compromised_key_is_refused_when_newly_presented(
+    w, tmp_path
+):
     """Report signature valid and issuer once trusted: origin holds, current authorization does not."""
     env = report(w)
     pol = policy(w, tmp_path, replay_mode="check")

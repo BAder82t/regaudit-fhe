@@ -103,9 +103,7 @@ def test_every_named_test_exists_where_its_label_says():
 
 def test_every_new_numbered_test_appears_in_the_matrix():
     text = MATRIX.read_text(encoding="utf-8")
-    missing = [
-        n for n in _names(NEW) if re.match(r"test_[A-Z]\d\d", n) and n not in text
-    ]
+    missing = [n for n in _names(NEW) if re.match(r"test_[A-Z]\d\d", n) and n not in text]
     assert not missing, missing
 
 

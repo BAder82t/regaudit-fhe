@@ -363,7 +363,9 @@ def migrate_store(
     for kid in sorted(source.keys):
         problem = issuer_name_problem(issuers[kid])
         if problem is not None:
-            raise MigrationRefused(f"the issuer stated for {kid!r} {problem}; it is never normalised")
+            raise MigrationRefused(
+                f"the issuer stated for {kid!r} {problem}; it is never normalised"
+            )
     entries: dict[str, dict[str, Any]] = {}
     report: list[dict[str, Any]] = []
     for kid in sorted(source.keys):

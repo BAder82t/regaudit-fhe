@@ -124,7 +124,9 @@ def test_C27_a_generation_that_does_not_clear_the_last_honest_one_is_still_refus
     assert tg.ingest_recovery(s, p, dump(rec), w.store(), NOW).code == "REVOCATION_TRANSITION_GAP"
 
 
-def test_C28_a_key_the_owner_never_saw_is_condemned_with_the_transition_that_installed_it(w, tmp_path):
+def test_C28_a_key_the_owner_never_saw_is_condemned_with_the_transition_that_installed_it(
+    w, tmp_path
+):
     s, p = setup(w)
     first = l1(w)
     add(w, s, p, first)
@@ -132,7 +134,9 @@ def test_C28_a_key_the_owner_never_saw_is_condemned_with_the_transition_that_ins
     by_evil = w.signed(2, [], signer=w.evil, generation=2, prev=proto.list_digest(first))
     assert add(w, s, p, by_evil).accepted
     # the statement can only name K1: nobody but the thief knows the key he installed
-    assert tg.ingest_recovery(s, p, dump(w.recovery_stmt(w.auth2, new_gen=3)), w.store(), NOW).accepted
+    assert tg.ingest_recovery(
+        s, p, dump(w.recovery_stmt(w.auth2, new_gen=3)), w.store(), NOW
+    ).accepted
     compromised = record(s, p).state.enrollments[w.issuer].compromised
     assert compromised[w.fp(w.evil)] is None
     d = decide(w, tmp_path, s, p)
@@ -267,7 +271,9 @@ def test_L28_a_key_id_collision_with_another_issuer_is_unrelated(w):
     out = tg.ingest_list(s, p, dump(l1(w, [w.entry(w.old, "retired", R)])), store, NOW)
     assert out.accepted
     # the other issuer's key, which merely shares the key_id, is not touched
-    assert tg.overlay(store, w.issuer, record(s, p).effective).entries[w.old.key_id].status == "active"
+    assert (
+        tg.overlay(store, w.issuer, record(s, p).effective).entries[w.old.key_id].status == "active"
+    )
 
 
 def test_L29_a_same_issuer_key_mismatch_refuses_but_does_not_latch(w):
@@ -303,7 +309,9 @@ def test_G30_presented_evidence_is_compared_and_never_written(w, tmp_path):
         assert code in d.result.blocking_reasons and not d.result.accepted
     newer = dump(w.signed(2, [w.entry(w.old, "compromised", None)], prev=proto.list_digest(first)))
     d = tg.verify_with_revocation(report(w), policy(w, tmp_path), ctx(w, s, p), presented=newer)
-    assert d.result.accepted  # supplied with the artifact, so it is never trust history: not applied
+    assert (
+        d.result.accepted
+    )  # supplied with the artifact, so it is never trust history: not applied
     assert s.data[w.issuer] == before
 
 
@@ -342,7 +350,9 @@ def test_S18_recovery_may_lower_the_position_for_a_process_that_remembers_it(w):
     assert tg.gate(context, w.issuer, NOW).code != "REVOCATION_STATE_ROLLBACK"
 
 
-def test_S19_HONEST_LIMIT_the_staleness_bound_does_not_hold_against_a_stolen_authority_key(w, tmp_path):
+def test_S19_HONEST_LIMIT_the_staleness_bound_does_not_hold_against_a_stolen_authority_key(
+    w, tmp_path
+):
     """Restored record, recovery withheld, K1 signs a fresh list days later. Stated in section 9.6."""
     fs = tg.FileCasStore(tmp_path)
     s, p = setup(w, fs)
@@ -427,7 +437,11 @@ def test_S24_a_record_that_cannot_fit_refuses_the_document_and_stays_usable(w, m
     monkeypatch.setattr(state_module, "MAX_RECORD_BYTES", len(before) + 10)
     big = w.signed(
         2,
-        [w.entry(w.old, "retired", R), w.entry(w.new, "retired", R), w.entry(w.third, "retired", R)],
+        [
+            w.entry(w.old, "retired", R),
+            w.entry(w.new, "retired", R),
+            w.entry(w.third, "retired", R),
+        ],
         prev=proto.list_digest(l1(w)),
     )
     assert add(w, s, p, big).code == "REVOCATION_STATE_FULL"
@@ -462,7 +476,12 @@ def test_E19_a_ceremony_refuses_a_key_declared_compromised(w):
     add(w, s, p, l1(w))
     assert tg.ingest_recovery(s, p, dump(w.recovery_stmt(w.auth2)), w.store(), NOW).accepted
     again = tg.Pin(
-        w.issuer, w.rev.public_key_pem(), "enr-2", baseline_epoch=0, authority_generation=2, recovery_epoch=1
+        w.issuer,
+        w.rev.public_key_pem(),
+        "enr-2",
+        baseline_epoch=0,
+        authority_generation=2,
+        recovery_epoch=1,
     )
     with pytest.raises(ValueError, match="compromised"):
         tg.rebaseline(s, again, now=NOW)
@@ -565,10 +584,20 @@ def test_D05_a_feed_can_be_polled_repeatedly_and_in_any_order(w):
     stated = [dump(w.transition(w.auth2, w.auth3, from_gen=2)), dump(w.transition(w.rev, w.auth2))]
     by3 = w.signed(1, [], signer=w.auth3, generation=3)
     for _ in range(3):  # the distribution point serves everything, every time
-        out = tg.ingest_feed(s, p, recoveries=[], transitions=stated, raw_list=dump(by3), trust_store=w.store(), now=NOW)
+        out = tg.ingest_feed(
+            s,
+            p,
+            recoveries=[],
+            transitions=stated,
+            raw_list=dump(by3),
+            trust_store=w.store(),
+            now=NOW,
+        )
         assert out.accepted, out
     # with no list to decide the result, a transition already passed is not a refusal
-    again = tg.ingest_feed(s, p, recoveries=[], transitions=stated, raw_list=None, trust_store=w.store(), now=NOW)
+    again = tg.ingest_feed(
+        s, p, recoveries=[], transitions=stated, raw_list=None, trust_store=w.store(), now=NOW
+    )
     assert again.accepted, again
     enrollment = record(s, p).state.enrollments[w.issuer]
     assert enrollment.generation == 3 and record(s, p).contradiction is None
@@ -577,7 +606,9 @@ def test_D05_a_feed_can_be_polled_repeatedly_and_in_any_order(w):
 def test_D07_a_list_from_a_generation_not_reached_yet_does_not_latch(w):
     s, p = setup(w)
     by2 = w.signed(1, [], signer=w.auth2, generation=2)
-    out = tg.ingest_feed(s, p, recoveries=[], transitions=[], raw_list=dump(by2), trust_store=w.store(), now=NOW)
+    out = tg.ingest_feed(
+        s, p, recoveries=[], transitions=[], raw_list=dump(by2), trust_store=w.store(), now=NOW
+    )
     assert out.code == "REVOCATION_AUTHORITY_MISMATCH" and record(s, p).contradiction is None
 
 

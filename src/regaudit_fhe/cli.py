@@ -408,7 +408,9 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
             sys.stderr.write(f"--revocation-pins: {exc}\n")
             return 3
         if why:
-            sys.stderr.write(f"refused, nothing enrolled: {why}; a report key must be another key\n")
+            sys.stderr.write(
+                f"refused, nothing enrolled: {why}; a report key must be another key\n"
+            )
             return 2
     try:
         payload = _load_store_payload(args.store)
@@ -484,7 +486,11 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
                 "issuer": entry.issuer if entry else None,
                 "status": entry.status if entry else None,
                 "fingerprint_sha256": spki_fingerprint(pem),
-                **({"issuer_source": "operator-declared"} if key_id in store.issuer_declared else {}),
+                **(
+                    {"issuer_source": "operator-declared"}
+                    if key_id in store.issuer_declared
+                    else {}
+                ),
             }
         )
     print(json.dumps(rows, indent=2))
@@ -811,7 +817,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
 
-    versioned = args.response_format == "v2" or args.policy_evidence or args.revocation_mode != "off"
+    versioned = (
+        args.response_format == "v2" or args.policy_evidence or args.revocation_mode != "off"
+    )
     down: list[str] = []
     if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
         # The replay store could not be used while verifying. That is an
@@ -823,7 +831,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         down.extend(sorted(INFRASTRUCTURE_CODES.intersection(result.blocking_reasons)))
     if down:
         sys.stderr.write(f"verification not possible: {down[0]}\n")
-        if versioned:  # an opted-in client still sees the status; the exit code says no verdict was possible
+        if (
+            versioned
+        ):  # an opted-in client still sees the status; the exit code says no verdict was possible
             print(json.dumps(_versioned_payload(result, decision), indent=2))
         return 3
     payload = _versioned_payload(result, decision) if versioned else result.to_dict()

@@ -22,7 +22,8 @@ from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 HERE = Path(__file__).parent
 VERSIONS = ("0.1.0", "0.1.1", "0.2.0", "0.2.1")
 VECTORS = {
-    v: json.loads((HERE / "experimental_revocation/published_vectors" / f"by_{v}.json").read_text()) for v in VERSIONS
+    v: json.loads((HERE / "experimental_revocation/published_vectors" / f"by_{v}.json").read_text())
+    for v in VERSIONS
 }
 CASES = [(v, kind) for v in VERSIONS for kind in sorted(VECTORS[v]["reports"])]
 NOW = datetime(2026, 11, 5, 12, tzinfo=timezone.utc)
@@ -42,7 +43,9 @@ def cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def migrate(tmp_path: Path, source: dict, *issuers: str, target: str = "new.json") -> subprocess.CompletedProcess[str]:
+def migrate(
+    tmp_path: Path, source: dict, *issuers: str, target: str = "new.json"
+) -> subprocess.CompletedProcess[str]:
     (tmp_path / "old.json").write_text(json.dumps(source))
     flags = [x for i in issuers for x in ("--issuer", i)]
     return cli("trust", "migrate", "--source", "old.json", "--target", target, *flags, cwd=tmp_path)
@@ -66,19 +69,25 @@ def strict(profile: str, store: rf.TrustStore, tmp_path: Path) -> VerificationPo
 
 @pytest.mark.parametrize(("version", "kind"), CASES)
 @pytest.mark.parametrize("form", ["bare", "legacy"])
-def test_an_honest_published_report_gets_the_same_verdict_after_migrating(version, kind, form, tmp_path):
+def test_an_honest_published_report_gets_the_same_verdict_after_migrating(
+    version, kind, form, tmp_path
+):
     source = {KEY_ID: PEM} if form == "bare" else {"keys": {KEY_ID: PEM}}
     out = migrate(tmp_path, source, f"{KEY_ID}={ISSUER}")
     assert out.returncode == 0, out.stderr
     env = parse_envelope(json.dumps(VECTORS[version]["reports"][kind]))
-    before = verify(env, VerificationPolicy(trust_store=rf.TrustStore.from_dict(source), now=lambda: NOW))
+    before = verify(
+        env, VerificationPolicy(trust_store=rf.TrustStore.from_dict(source), now=lambda: NOW)
+    )
     after = verify(env, VerificationPolicy(trust_store=store_from(tmp_path), now=lambda: NOW))
     assert before.trust_status == after.trust_status == "TRUSTED"
     assert after.issuer_trusted
     assert [r for r in before.reasons if r != "ISSUER_UNBOUND"] == [
         r for r in after.reasons if r != "ISSUER_OPERATOR_DECLARED"
     ]
-    assert "ISSUER_OPERATOR_DECLARED" in after.reasons  # owner's ruling: a migration's issuer is labelled as a statement
+    assert (
+        "ISSUER_OPERATOR_DECLARED" in after.reasons
+    )  # owner's ruling: a migration's issuer is labelled as a statement
 
 
 @pytest.mark.parametrize("profile", ["confidential", "high-assurance", "secure-v1"])
@@ -188,7 +197,12 @@ def test_a_known_limit_one_key_that_signed_under_two_names_keeps_only_the_stated
     for name in ("old-name", "new-name"):
         who = rf.Signer(issuer=name, key_id="k", private_key=key, public_key=key.public_key())
         signed[name] = envelope_v2(
-            "drift", result, signer=who, deployment_id="p", issued_at=NOW, audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6aa"
+            "drift",
+            result,
+            signer=who,
+            deployment_id="p",
+            issued_at=NOW,
+            audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6aa",
         )
     assert migrate(tmp_path, {"keys": {"k": who.public_key_pem()}}, "k=new-name").returncode == 0
     pol = VerificationPolicy(trust_store=store_from(tmp_path), now=lambda: NOW)

@@ -52,7 +52,9 @@ def verifier_accepts(*docs) -> list[rv.ListResult]:
     state = rv.enroll(state, W.issuer, W.rev.public_key_pem())
     out = []
     for doc in docs:
-        res = rv.verify_list_enrolled(dump(doc), W.issuer, W.store(W.old, W.new, W.third), state, NOW)
+        res = rv.verify_list_enrolled(
+            dump(doc), W.issuer, W.store(W.old, W.new, W.third), state, NOW
+        )
         out.append(res)
         if res.accepted:
             state = rv.commit(state, state.enrollments[W.issuer].anchor, res)
@@ -84,7 +86,13 @@ def test_verifier_fails_safe_on_a_list_that_bypassed_the_tool_and_recovery_clear
     box.mkdir(mode=0o700)
     fs = st.FileStateStore(box)
     store = W.store(W.old, W.new, W.third)
-    pin = st.Pin(W.issuer, W.rev.public_key_pem(), "enr-1", recovery_pem=W.recovery.public_key_pem(), baseline_epoch=0)
+    pin = st.Pin(
+        W.issuer,
+        W.rev.public_key_pem(),
+        "enr-1",
+        recovery_pem=W.recovery.public_key_pem(),
+        baseline_epoch=0,
+    )
     st.enroll(fs, pin, store, now=NOW - timedelta(days=30))
     one = nxt(None, [action(W.old, "retired", R)]).document
     assert st.ingest_list(fs, pin, dump(one), store, NOW).accepted
@@ -98,7 +106,10 @@ def test_verifier_fails_safe_on_a_list_that_bypassed_the_tool_and_recovery_clear
         valid_until="2026-11-02T12:00:00Z",
         entries=[W.entry(W.old, "compromised", LATER)],
     )
-    assert st.ingest_list(fs, pin, dump(rv.sign_list(body, W.rev)), store, NOW).code == "REVOCATION_NOT_MONOTONE"
+    assert (
+        st.ingest_list(fs, pin, dump(rv.sign_list(body, W.rev)), store, NOW).code
+        == "REVOCATION_NOT_MONOTONE"
+    )
 
     def decide(signer, db):
         env = envelope_v2(
@@ -120,14 +131,25 @@ def test_verifier_fails_safe_on_a_list_that_bypassed_the_tool_and_recovery_clear
     latched = decide(W.old, "a.db")
     assert not latched.accepted and "REVOCATION_CONTRADICTORY" in latched.blocking_reasons
     assert "REVOCATION_CONTRADICTORY" in decide(W.new, "b.db").blocking_reasons  # the whole issuer
-    assert st.ingest_list(fs, pin, dump(nxt(one, []).document), store, NOW).code == "REVOCATION_CONTRADICTORY"
-    assert st.ingest_list(fs, pin, dump(one), store, NOW).code == "REVOCATION_CONTRADICTORY"  # replay clears nothing
+    assert (
+        st.ingest_list(fs, pin, dump(nxt(one, []).document), store, NOW).code
+        == "REVOCATION_CONTRADICTORY"
+    )
+    assert (
+        st.ingest_list(fs, pin, dump(one), store, NOW).code == "REVOCATION_CONTRADICTORY"
+    )  # replay clears nothing
     assert st.load(fs, pin)[0].contradiction is not None
 
     recovery = W.recovery_stmt(W.auth2, new_gen=2)
     assert st.ingest_recovery(fs, pin, dump(recovery), store, NOW).accepted
     assert st.load(fs, pin)[0].contradiction is None
-    after = nxt(one, [action(W.old, "compromised", R)], authority=W.auth2, generation=2, after_recovery=recovery)
+    after = nxt(
+        one,
+        [action(W.old, "compromised", R)],
+        authority=W.auth2,
+        generation=2,
+        after_recovery=recovery,
+    )
     assert st.ingest_list(fs, pin, dump(after.document), store, NOW).accepted
     cleared = decide(W.new, "c.db")
     assert cleared.accepted, cleared.blocking_reasons
@@ -213,7 +235,13 @@ def test_a_crash_after_persist_leads_to_a_gap_and_never_a_fork(tmp_path):
 
 def test_transition_tooling_refuses_hazards():
     def sign(**kw):
-        args = {"issuer": W.issuer, "from_signer": W.rev, "from_generation": 1, "to_signer": W.auth2, "now": NOW}
+        args = {
+            "issuer": W.issuer,
+            "from_signer": W.rev,
+            "from_generation": 1,
+            "to_signer": W.auth2,
+            "now": NOW,
+        }
         args.update(kw)
         return tooling.sign_transition_statement(**args)
 
@@ -244,7 +272,10 @@ def test_recovery_tooling_refuses_hazards_and_keeps_declarations_cumulative():
 
     doc = sign()
     state = rv.enroll(
-        rv.RevocationState(), W.issuer, W.rev.public_key_pem(), recovery_pem=W.recovery.public_key_pem()
+        rv.RevocationState(),
+        W.issuer,
+        W.rev.public_key_pem(),
+        recovery_pem=W.recovery.public_key_pem(),
     )
     assert rv.verify_recovery(dump(doc), state, None, NOW).accepted
     for kw, text in (
@@ -256,7 +287,10 @@ def test_recovery_tooling_refuses_hazards_and_keeps_declarations_cumulative():
         ({"declares": [("zz", None)]}, "malformed"),
         ({"declares": [(W.fp(W.rev), None), (W.fp(W.rev), None)]}, "twice"),
         ({"previous": doc, "recovery_epoch": 1, "new_authority": W.auth3}, "newer"),
-        ({"previous": doc, "recovery_epoch": 2, "new_authority": W.auth3, "new_generation": 5}, "exceed"),
+        (
+            {"previous": doc, "recovery_epoch": 2, "new_authority": W.auth3, "new_generation": 5},
+            "exceed",
+        ),
         ({"previous": doc, "recovery_epoch": 2, "new_generation": 6}, "fresh"),
         (
             {
@@ -353,13 +387,22 @@ def ingest(cwd: Path, kind="list", doc="list.json") -> subprocess.CompletedProce
     )  # fmt: skip
 
 
-def verify_cli(cwd: Path, *extra: str, profile="confidential", mode="required") -> subprocess.CompletedProcess[str]:
+def verify_cli(
+    cwd: Path, *extra: str, profile="confidential", mode="required"
+) -> subprocess.CompletedProcess[str]:
     args = [
         "verify", "-i", "r.json", "--trusted-keys", "t.json", "--profile", profile, "--max-age-seconds", "3600",
         "--replay-mode", "check", "--replay-db", "replay.db", "--verifier-id", "reg",
     ]  # fmt: skip
     if mode is not None:
-        args += ["--revocation-mode", mode, "--revocation-pins", "pins.json", "--revocation-state", "state"]
+        args += [
+            "--revocation-mode",
+            mode,
+            "--revocation-pins",
+            "pins.json",
+            "--revocation-state",
+            "state",
+        ]
     return cli(*args, *extra, cwd=cwd)
 
 
@@ -435,7 +478,16 @@ def test_cli_infrastructure_failures_exit_3(op):
 
 def test_cli_missing_arguments_are_a_usage_error(op):
     cwd, _ = op
-    out = cli("verify", "-i", "r.json", "--trusted-keys", "t.json", "--revocation-mode", "required", cwd=cwd)
+    out = cli(
+        "verify",
+        "-i",
+        "r.json",
+        "--trusted-keys",
+        "t.json",
+        "--revocation-mode",
+        "required",
+        cwd=cwd,
+    )
     assert out.returncode == 2
 
 
@@ -496,7 +548,11 @@ def test_cli_concurrent_publishers_never_fork(op):
     ]  # fmt: skip
     procs = [
         subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            [*argv, "--output", f"list{i}.json"], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            [*argv, "--output", f"list{i}.json"],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         for i in range(5)
     ]
@@ -547,7 +603,17 @@ def test_cli_rotation_and_recovery_end_to_end(op):
     assert ingest(cwd, "recovery", "recovery.json").returncode == 0
     assert ingest(cwd, "recovery", "recovery.json").returncode == 0  # a repeat, a strict no-op
     status = json.loads(
-        cli("revocation", "status", "--pins", "pins.json", "--state", "state", "--issuer", "acme", cwd=cwd).stdout
+        cli(
+            "revocation",
+            "status",
+            "--pins",
+            "pins.json",
+            "--state",
+            "state",
+            "--issuer",
+            "acme",
+            cwd=cwd,
+        ).stdout
     )
     assert status["generation"] == 9 and fps["authority2"] in status["compromised_authorities"]
 

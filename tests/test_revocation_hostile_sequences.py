@@ -131,7 +131,9 @@ def test_an_older_statement_lands_its_declaration_and_voids_nothing(fs):
     """Statement 3 installs X, X rotates to K2, then statement 2 arrives late and declares X. K2 stays."""
     p = enrolled(fs)
     x = W.other_rev
-    assert st.ingest_recovery(fs, p, dump(W.recovery_stmt(x, new_gen=5, epoch=3)), STORE, NOW).accepted
+    assert st.ingest_recovery(
+        fs, p, dump(W.recovery_stmt(x, new_gen=5, epoch=3)), STORE, NOW
+    ).accepted
     assert st.ingest_transition(fs, p, tr(x, K2, 5), STORE, NOW).accepted
     late = dump(W.recovery_stmt(K3, new_gen=9, epoch=2, declares=[(W.fp(x), None)]))
     assert st.ingest_recovery(fs, p, late, STORE, NOW).code == "REVOCATION_RECOVERY_REPLAY"
@@ -152,8 +154,12 @@ def test_a_legitimate_recovery_does_not_condemn_a_key_nobody_declared(fs):
 
 def test_a_mark_from_a_rotated_key_survives_a_later_recovery_that_did_not_declare_it(fs, tmp_path):
     p, _ = _rotated_after_recovery(fs)
-    assert st.ingest_list(fs, p, dump(W.signed(1, [], signer=K4, generation=4)), STORE, NOW).accepted
-    assert st.ingest_recovery(fs, p, dump(W.recovery_stmt(W.other_rev, new_gen=9, epoch=2)), STORE, NOW).accepted
+    assert st.ingest_list(
+        fs, p, dump(W.signed(1, [], signer=K4, generation=4)), STORE, NOW
+    ).accepted
+    assert st.ingest_recovery(
+        fs, p, dump(W.recovery_stmt(W.other_rev, new_gen=9, epoch=2)), STORE, NOW
+    ).accepted
     assert decide(fs, p, tmp_path).result.accepted  # usable until its deadline
 
 
@@ -186,14 +192,18 @@ def test_non_text_documents_are_refused_not_raised(fs, bad):
     assert st.ingest_list(fs, p, bad, STORE, NOW).code == "REVOCATION_MALFORMED"
     assert st.ingest_transition(fs, p, bad, STORE, NOW).code == "REVOCATION_MALFORMED"
     assert st.ingest_recovery(fs, p, bad, STORE, NOW).code == "REVOCATION_MALFORMED"
-    out = st.ingest_feed(fs, p, recoveries=[bad], transitions=[], raw_list=None, trust_store=STORE, now=NOW)
+    out = st.ingest_feed(
+        fs, p, recoveries=[bad], transitions=[], raw_list=None, trust_store=STORE, now=NOW
+    )
     assert out.code == "REVOCATION_MALFORMED"
 
 
 def test_a_fingerprint_with_a_trailing_newline_is_malformed(fs):
     p = enrolled(fs)
     entry = {**W.entry(W.old, "compromised", None), "key_fingerprint": W.fp(W.old) + "\n"}
-    assert st.ingest_list(fs, p, dump(W.signed(1, [entry])), STORE, NOW).code == "REVOCATION_MALFORMED"
+    assert (
+        st.ingest_list(fs, p, dump(W.signed(1, [entry])), STORE, NOW).code == "REVOCATION_MALFORMED"
+    )
     with pytest.raises(tooling.ActionRefused):
         tooling.next_list(
             issuer=W.issuer, authority=K1, generation=1, previous=None,
@@ -205,7 +215,9 @@ def test_a_fingerprint_with_a_trailing_newline_is_malformed(fs):
 def test_an_explicit_null_successor_is_malformed(fs):
     p = enrolled(fs)
     entry = {**W.entry(W.old, "retired", R), "successor": None}
-    assert st.ingest_list(fs, p, dump(W.signed(1, [entry])), STORE, NOW).code == "REVOCATION_MALFORMED"
+    assert (
+        st.ingest_list(fs, p, dump(W.signed(1, [entry])), STORE, NOW).code == "REVOCATION_MALFORMED"
+    )
 
 
 def test_a_time_at_the_end_of_the_range_is_malformed_not_an_overflow(fs):
@@ -227,7 +239,9 @@ def test_a_time_at_the_end_of_the_range_is_malformed_not_an_overflow(fs):
 def test_an_entry_without_an_issuer_is_refused_not_waved_through(fs, tmp_path):
     p = enrolled(fs)
     pem = W.old.public_key_pem()
-    store = TrustStore(keys={W.old.key_id: pem}, entries={W.old.key_id: KeyEntry(W.old.key_id, pem, issuer=None)})
+    store = TrustStore(
+        keys={W.old.key_id: pem}, entries={W.old.key_id: KeyEntry(W.old.key_id, pem, issuer=None)}
+    )
     ctx = gate.RevocationContext(gate.MODE_REQUIRED, fs, {W.issuer: p})
     with pytest.raises(PolicyError, match="issuer"):
         gate.verify_with_revocation(report(), policy(tmp_path, store=store), ctx)
@@ -266,7 +280,9 @@ def test_a_str_subclass_cannot_slip_past_the_high_assurance_refusal(fs, tmp_path
         gate.verify_with_revocation(report(), pol, ctx)
 
 
-def test_the_private_algorithm_path_also_refuses_high_assurance_without_its_explicit_test_flag(fs, tmp_path):
+def test_the_private_algorithm_path_also_refuses_high_assurance_without_its_explicit_test_flag(
+    fs, tmp_path
+):
     p = enrolled(fs)
     pol = policy(tmp_path, profile="high-assurance")
     ctx = gate.RevocationContext(gate.MODE_REQUIRED, fs, {W.issuer: p})
@@ -281,7 +297,9 @@ def test_a_ceremony_below_the_mark_needs_the_loss_stated(fs):
     p = enrolled(fs)
     first = W.signed(1, [])
     assert st.ingest_list(fs, p, dump(first), STORE, NOW).accepted
-    assert st.ingest_list(fs, p, dump(W.signed(2, [], prev=rv.list_digest(first))), STORE, NOW).accepted
+    assert st.ingest_list(
+        fs, p, dump(W.signed(2, [], prev=rv.list_digest(first))), STORE, NOW
+    ).accepted
     low = pin(enrollment_id="enr-2")
     with pytest.raises(ValueError, match="below"):
         st.rebaseline(fs, low, now=NOW)
@@ -327,7 +345,9 @@ def _rewrite(fs, mutate):
         lambda r: r["enrollments"][W.issuer].update(authority_pem=5),
     ],
 )
-def test_a_well_digested_record_with_wrong_types_is_unavailable_not_a_traceback(fs, tmp_path, mutate):
+def test_a_well_digested_record_with_wrong_types_is_unavailable_not_a_traceback(
+    fs, tmp_path, mutate
+):
     p = enrolled(fs)
     assert st.ingest_list(fs, p, dump(W.signed(1, [])), STORE, NOW).accepted
     _rewrite(fs, mutate)
@@ -425,7 +445,15 @@ def test_a_key_outside_the_inventory_needs_saying_so():
 
 def test_another_issuers_key_is_refused():
     foreign = TrustStore.from_dict(
-        {"entries": {W.old.key_id: {"issuer": "globex", "public_key_pem": W.old.public_key_pem(), "status": "active"}}}
+        {
+            "entries": {
+                W.old.key_id: {
+                    "issuer": "globex",
+                    "public_key_pem": W.old.public_key_pem(),
+                    "status": "active",
+                }
+            }
+        }
     )
     action = tooling.KeyAction(W.old.key_id, W.fp(W.old), "compromised", None)
     with pytest.raises(tooling.ActionRefused, match="ISSUER_SCOPE"):
@@ -434,7 +462,8 @@ def test_another_issuers_key_is_refused():
 
 def test_an_oversized_list_is_refused_before_signing():
     actions = [
-        tooling.KeyAction(f"k{'x' * 250}{i:05d}", f"{i:064x}", "compromised", R) for i in range(9900)
+        tooling.KeyAction(f"k{'x' * 250}{i:05d}", f"{i:064x}", "compromised", R)
+        for i in range(9900)
     ]
     with pytest.raises(tooling.ActionRefused, match="size"):
         _next(None, actions)
@@ -546,14 +575,20 @@ def test_a_gate_refusal_under_record_still_sets_the_floor(fs, tmp_path):
     env = report(issued_at=stale_issue)
     ctx = gate.RevocationContext(gate.MODE_REQUIRED, fs, {W.issuer: p})
     pol = policy(
-        tmp_path, max_age=timedelta(hours=1), replay_mode="record", replay_cache=SqliteReplayCache(db)
+        tmp_path,
+        max_age=timedelta(hours=1),
+        replay_mode="record",
+        replay_cache=SqliteReplayCache(db),
     )
     first = gate.verify_with_revocation(env, pol, ctx)
     assert "REPORT_TOO_OLD" in first.result.blocking_reasons
     assert SqliteReplayCache(db).max_age_floor() == timedelta(hours=1)
     assert st.ingest_list(fs, p, dump(W.signed(1, [])), STORE, NOW).accepted
     raised = policy(
-        tmp_path, max_age=timedelta(days=1), replay_mode="record", replay_cache=SqliteReplayCache(db)
+        tmp_path,
+        max_age=timedelta(days=1),
+        replay_mode="record",
+        replay_cache=SqliteReplayCache(db),
     )
     assert not gate.verify_with_revocation(env, raised, ctx).result.accepted
 
@@ -563,7 +598,10 @@ def test_a_stale_refusal_in_check_mode_stays_refused_when_raised(tmp_path):
     env = report(issued_at=NOW - timedelta(hours=2))
 
     def run(age):
-        return verify(env, policy(tmp_path, max_age=age, replay_mode="check", replay_cache=SqliteReplayCache(db)))
+        return verify(
+            env,
+            policy(tmp_path, max_age=age, replay_mode="check", replay_cache=SqliteReplayCache(db)),
+        )
 
     assert run(timedelta(hours=1)).blocking_reasons == ("REPORT_TOO_OLD",)
     assert run(timedelta(days=1)).blocking_reasons == ("REPORT_TOO_OLD",)

@@ -75,7 +75,9 @@ def test_rebase_is_a_noop_for_a_verifier_that_never_passed_the_baseline(w):
     _, state = ingest(w, state, l1)
     l2 = w.signed(2, [], prev=proto.list_digest(l1))  # never seen by this verifier
     res, after = recover(
-        w, state, w.recovery_stmt(w.auth2, rebase={"epoch": 2, "list_digest": proto.list_digest(l2)})
+        w,
+        state,
+        w.recovery_stmt(w.auth2, rebase={"epoch": 2, "list_digest": proto.list_digest(l2)}),
     )
     assert res.accepted and "REVOCATION_REBASE_NOOP" in res.notes
     assert after.get(w.issuer).epoch == 1 and after.enrollments[w.issuer].generation == 2
@@ -87,7 +89,9 @@ def test_rebase_at_the_same_epoch_with_another_digest_stays_unknown(w):
     state = w.enrolled()
     l1 = w.signed(1, [])
     _, state = ingest(w, state, l1)
-    res, _ = recover(w, state, w.recovery_stmt(w.auth2, rebase={"epoch": 1, "list_digest": "e" * 64}))
+    res, _ = recover(
+        w, state, w.recovery_stmt(w.auth2, rebase={"epoch": 1, "list_digest": "e" * 64})
+    )
     assert res.code == "REVOCATION_RECOVERY_BASELINE_UNKNOWN"
 
 
@@ -107,7 +111,10 @@ def test_equal_issued_at_is_allowed_across_epochs(w):
 
 
 def test_one_fingerprint_may_appear_once_in_a_list(w):
-    entries = [w.entry(w.old, "retired", R), {**w.entry(w.old, "compromised", None), "key_id": "zzz"}]
+    entries = [
+        w.entry(w.old, "retired", R),
+        {**w.entry(w.old, "compromised", None), "key_id": "zzz"},
+    ]
     assert ingest(w, w.enrolled(), w.signed(1, entries))[0].code == "REVOCATION_MALFORMED"
 
 

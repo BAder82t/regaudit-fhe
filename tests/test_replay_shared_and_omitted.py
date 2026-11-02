@@ -25,14 +25,23 @@ T = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
 SIGNER = rf.Signer.generate(issuer="acme", key_id="k")
-ENTRIES = {"entries": {"k": {"issuer": "acme", "public_key_pem": SIGNER.public_key_pem(), "status": "active"}}}
+ENTRIES = {
+    "entries": {
+        "k": {"issuer": "acme", "public_key_pem": SIGNER.public_key_pem(), "status": "active"}
+    }
+}
 STORE = rf.TrustStore.from_dict(ENTRIES)
 RESULT = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
 
 
 def report(at: datetime = T):
     return envelope_v2(
-        "drift", RESULT, signer=SIGNER, deployment_id="p", issued_at=at, audit_run_id=str(uuid.uuid4())
+        "drift",
+        RESULT,
+        signer=SIGNER,
+        deployment_id="p",
+        issued_at=at,
+        audit_run_id=str(uuid.uuid4()),
     )
 
 
@@ -40,7 +49,11 @@ def run(env, path: Path, at: datetime, max_age: timedelta | None):
     return verify(
         env,
         VerificationPolicy(
-            trust_store=STORE, max_age=max_age, replay_mode="record", replay_cache=SqliteReplayCache(path), now=lambda: at
+            trust_store=STORE,
+            max_age=max_age,
+            replay_mode="record",
+            replay_cache=SqliteReplayCache(path),
+            now=lambda: at,
         ),
     )
 
@@ -51,7 +64,9 @@ def test_two_services_on_one_file_do_not_accept_a_report_twice(tmp_path):
     second = run(env, db, T + 2 * HOUR, DAY)
     assert not second.accepted
     assert second.blocking_reasons == ("REPORT_TOO_OLD",)
-    assert "REPLAY_POLICY_FLOOR_APPLIED" in second.reasons  # the floor decided it, not the 24 hour setting
+    assert (
+        "REPLAY_POLICY_FLOOR_APPLIED" in second.reasons
+    )  # the floor decided it, not the 24 hour setting
     assert SqliteReplayCache(db).max_age_floor() == HOUR
 
 
@@ -63,7 +78,10 @@ def test_the_order_of_the_two_services_does_not_matter(tmp_path):
     # env's row was written for 24 hours. A new report past the floor is held to it as well.
     stale = report()
     second = run(stale, db, T + 2 * HOUR, DAY)
-    assert second.blocking_reasons == ("REPORT_TOO_OLD",) and "REPLAY_POLICY_FLOOR_APPLIED" in second.reasons
+    assert (
+        second.blocking_reasons == ("REPORT_TOO_OLD",)
+        and "REPLAY_POLICY_FLOOR_APPLIED" in second.reasons
+    )
 
 
 def test_limit_the_longer_service_is_held_to_the_shorter_one(tmp_path):
@@ -115,7 +133,10 @@ def test_the_real_cli_with_the_flag_dropped(tmp_path):
     out = _cli(tmp_path, "old.json")  # the flag dropped: 30 days without the floor
     assert out.returncode == 1, out.stderr
     body = json.loads(out.stdout)
-    assert body["blocking_reasons"] == ["REPORT_TOO_OLD"] and "REPLAY_POLICY_FLOOR_APPLIED" in body["reasons"]
+    assert (
+        body["blocking_reasons"] == ["REPORT_TOO_OLD"]
+        and "REPLAY_POLICY_FLOOR_APPLIED" in body["reasons"]
+    )
 
 
 def _bind(path: str, seconds: int, q) -> None:

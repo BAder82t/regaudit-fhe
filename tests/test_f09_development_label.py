@@ -28,7 +28,9 @@ def test_the_real_cli_on_development_says_so(tmp_path):
 
 
 def test_an_entry_built_without_an_issuer_gets_the_note(tmp_path):
-    entry = KeyEntry(key_id="bob-1", public_key_pem=BOB.public_key_pem(), status="active", issuer=None)
+    entry = KeyEntry(
+        key_id="bob-1", public_key_pem=BOB.public_key_pem(), status="active", issuer=None
+    )
     store = rf.TrustStore(keys={"bob-1": BOB.public_key_pem()}, entries={"bob-1": entry})
     res = verify(report(FORGED), VerificationPolicy(trust_store=store))
     assert res.accepted and "ISSUER_UNBOUND" in res.reasons
@@ -42,7 +44,9 @@ def test_migrating_removes_the_note(tmp_path):
     source = {"keys": {KEY_ID: PEM}}
     assert migrate(tmp_path, source, f"{KEY_ID}={ISSUER}").returncode == 0
     env = parse_envelope(json.dumps(VECTORS["0.2.1"]["reports"]["v2-audience"]))
-    before = verify(env, VerificationPolicy(trust_store=rf.TrustStore.from_dict(source), now=lambda: NOW))
+    before = verify(
+        env, VerificationPolicy(trust_store=rf.TrustStore.from_dict(source), now=lambda: NOW)
+    )
     after = verify(env, VerificationPolicy(trust_store=store_from(tmp_path), now=lambda: NOW))
     assert "ISSUER_UNBOUND" in before.reasons and "ISSUER_UNBOUND" not in after.reasons
     assert before.accepted and after.accepted
@@ -62,7 +66,11 @@ def test_the_note_is_not_on_an_entries_store(tmp_path):
 
 @pytest.mark.parametrize(
     ("form", "who", "expected"),
-    [("legacy", FORGED, "not_bound"), ("entries", ALICE, "store_entry"), ("entries", FORGED, "not_established")],
+    [
+        ("legacy", FORGED, "not_bound"),
+        ("entries", ALICE, "store_entry"),
+        ("entries", FORGED, "not_established"),
+    ],
 )
 def test_the_versioned_response_states_the_binding(form, who, expected, tmp_path):
     (tmp_path / "r.json").write_text(json.dumps(report(who).to_dict()))
@@ -89,7 +97,9 @@ def test_the_legacy_verifier_says_whether_the_name_was_compared():
     assert plain.trust_status == legacy.trust_status == "TRUSTED"
     assert not plain.issuer_bound and not legacy.issuer_bound
     assert "issuer_bound" not in plain.to_dict() and "issuer_bound" not in repr(plain)
-    honest = verify_envelope(report(ALICE, "v1"), trust_store=rf.TrustStore.from_dict(STORES["entries"]))
+    honest = verify_envelope(
+        report(ALICE, "v1"), trust_store=rf.TrustStore.from_dict(STORES["entries"])
+    )
     assert honest.trust_status == "TRUSTED" and honest.issuer_bound
 
 

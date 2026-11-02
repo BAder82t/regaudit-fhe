@@ -22,7 +22,9 @@ from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 STRICT = ("confidential", "high-assurance", "secure-v1")
 T = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 BOB = rf.Signer.generate(issuer="bob-lab", key_id="bob-1")
-FORGED = rf.Signer(issuer="alice-bank", key_id="bob-1", private_key=BOB.private_key, public_key=BOB.public_key)
+FORGED = rf.Signer(
+    issuer="alice-bank", key_id="bob-1", private_key=BOB.private_key, public_key=BOB.public_key
+)
 PEM = BOB.public_key_pem()
 RESULT = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
 ENTRIES = {"entries": {"bob-1": {"issuer": "bob-lab", "public_key_pem": PEM, "status": "active"}}}
@@ -94,7 +96,9 @@ def test_replace_cannot_put_a_subclass_in(profile, tmp_path):
 def test_verify_trusted_with_a_strict_policy_refuses_it(tmp_path):
     pol = strict("confidential", rf.TrustStore.from_dict(ENTRIES), tmp_path)
     with pytest.raises(PolicyError, match="exactly a TrustStore"):
-        rf.verify_trusted(json.dumps(report().to_dict()), _build(LiesAboutEntry, ENTRIES), policy=pol)
+        rf.verify_trusted(
+            json.dumps(report().to_dict()), _build(LiesAboutEntry, ENTRIES), policy=pol
+        )
 
 
 class EvilEntry(KeyEntry):
@@ -124,7 +128,9 @@ def test_a_key_entry_subclass_in_an_exact_store_does_not_count_as_bound(tmp_path
 
 
 def test_an_issuer_that_compares_equal_to_anything_is_not_a_name():
-    entry = KeyEntry(key_id="bob-1", public_key_pem=PEM, status="active", issuer=EqualsAnything("bob-lab"))
+    entry = KeyEntry(
+        key_id="bob-1", public_key_pem=PEM, status="active", issuer=EqualsAnything("bob-lab")
+    )
     with pytest.raises(TrustStoreError, match="issuer"):
         rf.TrustStore(keys={"bob-1": PEM}, entries={"bob-1": entry})
 
@@ -135,7 +141,11 @@ def test_an_issuer_that_compares_equal_to_anything_is_not_a_name():
         {"status": type("S", (str,), {})("active")},
         {"public_key_pem": type("P", (str,), {})(PEM)},
         {"deployments": type("D", (frozenset,), {"__contains__": lambda self, item: True})({"x"})},
-        {"primitives": type("D", (frozenset,), {"__contains__": lambda self, item: True})({"drift"})},
+        {
+            "primitives": type("D", (frozenset,), {"__contains__": lambda self, item: True})(
+                {"drift"}
+            )
+        },
         {"parameter_set_pin": EqualsAnything("0" * 64)},
     ],
     ids=["status", "pem", "deployments", "primitives", "pin"],
@@ -165,10 +175,14 @@ def test_a_mapping_key_that_is_not_a_plain_string_does_not_count_as_bound():
 
 
 @pytest.mark.parametrize("profile", STRICT)
-def test_control_a_loaded_entries_store_is_accepted_and_the_guard_still_refuses_the_substitution(profile, tmp_path):
+def test_control_a_loaded_entries_store_is_accepted_and_the_guard_still_refuses_the_substitution(
+    profile, tmp_path
+):
     store = rf.TrustStore.from_dict(ENTRIES)
     assert type(store) is rf.TrustStore and store.binds_issuers
-    assert verify(report(FORGED), strict(profile, store, tmp_path)).blocking_reasons == ("ISSUER_MISMATCH",)
+    assert verify(report(FORGED), strict(profile, store, tmp_path)).blocking_reasons == (
+        "ISSUER_MISMATCH",
+    )
     res = verify(report(BOB), strict(profile, store, tmp_path))
     assert res.accepted and res.issuer_trusted
 

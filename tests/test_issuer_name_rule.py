@@ -115,7 +115,11 @@ def entries(issuer):
 
 def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-m", "regaudit_fhe.cli", *args], capture_output=True, timeout=120, cwd=cwd, check=False
+        [sys.executable, "-m", "regaudit_fhe.cli", *args],
+        capture_output=True,
+        timeout=120,
+        cwd=cwd,
+        check=False,
     )
 
 
@@ -246,7 +250,11 @@ def test_the_revocation_enrollment_ceremony_refuses(name, tmp_path):
     with pytest.raises(st.PinStoreError, match="issuer"):
         st.save_pin(tmp_path / "pins.json", pin)
     with pytest.raises(st.PinStoreError, match="issuer"):
-        st.enroll(st.FileStateStore(tmp_path / "state"), pin, now=datetime(2026, 11, 1, tzinfo=timezone.utc))
+        st.enroll(
+            st.FileStateStore(tmp_path / "state"),
+            pin,
+            now=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        )
 
 
 # ------------------------------------------------------------------ migration
@@ -258,11 +266,21 @@ def test_migration_refuses(name):
         migrate_store({"keys": {"k": PEM}}, {"k": BAD[name]}, as_of="2026-11-02T00:00:00Z")
 
 
-@pytest.mark.parametrize("name", ["trailing space", "NBSP inside", "zero-width space", "right-to-left override"])
+@pytest.mark.parametrize(
+    "name", ["trailing space", "NBSP inside", "zero-width space", "right-to-left override"]
+)
 def test_the_cli_migration_refuses_and_writes_nothing(name, tmp_path):
     (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
     out = _cli(
-        "trust", "migrate", "--source", "old.json", "--target", "new.json", "--issuer", f"k={BAD[name]}", cwd=tmp_path
+        "trust",
+        "migrate",
+        "--source",
+        "old.json",
+        "--target",
+        "new.json",
+        "--issuer",
+        f"k={BAD[name]}",
+        cwd=tmp_path,
     )
     assert out.returncode == 2 and b"never normalised" in out.stderr
     assert not (tmp_path / "new.json").exists()
@@ -279,28 +297,44 @@ def test_migration_takes_a_legitimate_name_unchanged(name):
 
 def test_a_lookalike_or_another_normal_form_is_a_different_name_not_an_ambiguous_one():
     """Not refused, and not treated as the same issuer: the comparison is byte for byte. A stated limit of the rule."""
-    for enrolled, claimed in [("Banque Générale", "Banque Générale"), ("acme", "аcme"), ("Acme Bank", "Acme  Bank")]:
+    for enrolled, claimed in [
+        ("Banque Générale", "Banque Générale"),
+        ("acme", "аcme"),
+        ("Acme Bank", "Acme  Bank"),
+    ]:
         assert issuer_name_problem(claimed) is None
-        store = rf.TrustStore.from_dict({"entries": {"k": {"issuer": enrolled, "public_key_pem": PEM, "status": "active"}}})
-        who = rf.Signer(issuer=claimed, key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key)
+        store = rf.TrustStore.from_dict(
+            {"entries": {"k": {"issuer": enrolled, "public_key_pem": PEM, "status": "active"}}}
+        )
+        who = rf.Signer(
+            issuer=claimed, key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key
+        )
         env = envelope_v2(
             "drift", rf.audit_drift([0.5, 0.5], [0.4, 0.6]), signer=who, deployment_id="p",
             audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6c1",
         )  # fmt: skip
-        assert verify(env, VerificationPolicy(trust_store=store)).blocking_reasons == ("ISSUER_MISMATCH",)
+        assert verify(env, VerificationPolicy(trust_store=store)).blocking_reasons == (
+            "ISSUER_MISMATCH",
+        )
 
 
-@pytest.mark.parametrize("name", ["trailing space", "right-to-left override", "NBSP only", "newline"])
+@pytest.mark.parametrize(
+    "name", ["trailing space", "right-to-left override", "NBSP only", "newline"]
+)
 def test_signing_is_not_covered_and_such_a_report_cannot_reach_a_store_that_binds_issuers(name):
     """The rule applies at enrollment, loading and migration. A signer can still write the name, as published versions can, and
     only a store with no issuers can then accept it, in development, labelled."""
-    who = rf.Signer(issuer=BAD[name], key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key)
+    who = rf.Signer(
+        issuer=BAD[name], key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key
+    )
     env = envelope_v2(
         "drift", rf.audit_drift([0.5, 0.5], [0.4, 0.6]), signer=who, deployment_id="p",
         audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6c2",
     )  # fmt: skip
     bound = rf.TrustStore.from_dict(entries("acme"))
-    assert verify(env, VerificationPolicy(trust_store=bound)).blocking_reasons == ("ISSUER_MISMATCH",)
+    assert verify(env, VerificationPolicy(trust_store=bound)).blocking_reasons == (
+        "ISSUER_MISMATCH",
+    )
     unbound = rf.TrustStore.from_dict({"keys": {"k": PEM}})
     res = verify(env, VerificationPolicy(trust_store=unbound))
     assert res.accepted and res.reasons == ("ISSUER_UNBOUND",)

@@ -120,7 +120,14 @@ def db(tmp_path):
         lambda db: _SqliteSubclass(db),
         lambda db: SqliteReplayCache(db),  # a brand-new file: no earlier setting known
     ],
-    ids=["no-cache", "in-memory", "self-declared-durable", "raising-binder", "subclass", "new-sqlite-file"],
+    ids=[
+        "no-cache",
+        "in-memory",
+        "self-declared-durable",
+        "raising-binder",
+        "subclass",
+        "new-sqlite-file",
+    ],
 )
 def test_no_cache_can_get_a_window_above_the_ceiling(db, make):
     res = _retired_history_case(setting=THIRTY_DAYS, as_of=THREE_DAYS, cache=make(db))
@@ -152,9 +159,13 @@ def test_a_broken_floor_does_not_widen_the_window_it_closes_it_real_sqlite(db, t
 
 def test_raising_trust_history_max_age_does_not_revive_stale_history(db):
     as_of = T0 - 2 * HOUR
-    assert _retired_history_case(setting=3 * HOUR, as_of=as_of, cache=SqliteReplayCache(db)).accepted
+    assert _retired_history_case(
+        setting=3 * HOUR, as_of=as_of, cache=SqliteReplayCache(db)
+    ).accepted
     stale_as_of = T0 - 4 * HOUR
-    refused = _retired_history_case(setting=3 * HOUR, as_of=stale_as_of, cache=SqliteReplayCache(db))
+    refused = _retired_history_case(
+        setting=3 * HOUR, as_of=stale_as_of, cache=SqliteReplayCache(db)
+    )
     assert refused.trust_history == "STALE"
     assert "TRUST_STORE_FRESHNESS_UNPROVEN" in refused.blocking_reasons
     raised = _retired_history_case(setting=7 * HOUR, as_of=stale_as_of, cache=SqliteReplayCache(db))
@@ -170,7 +181,11 @@ def test_the_history_floor_survives_a_real_new_process(db):
         "print(C(sys.argv[1]).trust_history_age_floor().total_seconds())"
     )
     out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", code, str(db)], capture_output=True, text=True, check=True, timeout=120
+        [sys.executable, "-c", code, str(db)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
     )
     assert float(out.stdout) == 3 * 3600
 
@@ -192,10 +207,12 @@ def test_limit_a_new_file_or_a_restored_backup_forgets_a_floor_below_the_ceiling
     shutil.copy(db, backup)
     SqliteReplayCache(db).bind_trust_history_age(HOUR, persist=True)
     shutil.copy(backup, db)
-    assert SqliteReplayCache(db).trust_history_age_floor() == DAY  # undetected by a new process, bounded by the ceiling
-    assert _retired_history_case(setting=2 * DAY, as_of=T0 - 25 * HOUR, cache=SqliteReplayCache(db)).trust_history == (
-        "STALE"
-    )
+    assert (
+        SqliteReplayCache(db).trust_history_age_floor() == DAY
+    )  # undetected by a new process, bounded by the ceiling
+    assert _retired_history_case(
+        setting=2 * DAY, as_of=T0 - 25 * HOUR, cache=SqliteReplayCache(db)
+    ).trust_history == ("STALE")
 
 
 def test_a_running_object_catches_a_restored_history_floor(db, tmp_path):
@@ -214,11 +231,15 @@ def test_a_legacy_file_with_no_history_statement_does_not_count_older_history(db
     at = T0 - HOUR
     migrate_replay_file(db, now=at, previous_max_age=30 * DAY)
     assert SqliteReplayCache(db).trust_history_cutover() == at
-    before = _retired_history_case(setting=DAY, as_of=at - timedelta(seconds=1), cache=SqliteReplayCache(db))
+    before = _retired_history_case(
+        setting=DAY, as_of=at - timedelta(seconds=1), cache=SqliteReplayCache(db)
+    )
     assert before.trust_history == "STALE" and not before.accepted
     equal = _retired_history_case(setting=DAY, as_of=at, cache=SqliteReplayCache(db))
     assert equal.trust_history == "STALE"
-    after = _retired_history_case(setting=DAY, as_of=at + timedelta(seconds=1), cache=SqliteReplayCache(db))
+    after = _retired_history_case(
+        setting=DAY, as_of=at + timedelta(seconds=1), cache=SqliteReplayCache(db)
+    )
     assert after.trust_history == "FRESH" and after.accepted
 
 
@@ -227,11 +248,16 @@ def test_a_stated_history_policy_is_the_floor_and_a_false_one_is_bounded(db, tmp
     migrate_replay_file(db, now=T0, previous_max_age=30 * DAY, previous_trust_history_max_age=HOUR)
     cache = SqliteReplayCache(db)
     assert cache.trust_history_cutover() is None and cache.trust_history_age_floor() == HOUR
-    assert _retired_history_case(setting=DAY, as_of=T0 - 2 * HOUR, cache=cache).trust_history == "STALE"
+    assert (
+        _retired_history_case(setting=DAY, as_of=T0 - 2 * HOUR, cache=cache).trust_history
+        == "STALE"
+    )
     other = tmp_path / "o.db"
     published_file(other)
     with pytest.raises(ReplayMigrationRefused, match="capped"):
-        migrate_replay_file(other, now=T0, previous_max_age=DAY, previous_trust_history_max_age=2 * DAY)
+        migrate_replay_file(
+            other, now=T0, previous_max_age=DAY, previous_trust_history_max_age=2 * DAY
+        )
     assert replay_file_status(other)["state"] == "legacy"
 
 

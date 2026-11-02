@@ -69,7 +69,9 @@ def published_file(db: Path, *rows: tuple[str, str, float]) -> None:
     conn.close()
 
 
-def published_record_of(env, recorded_at=T0 + timedelta(minutes=1), max_age=HOUR, skew=timedelta(minutes=5)):
+def published_record_of(
+    env, recorded_at=T0 + timedelta(minutes=1), max_age=HOUR, skew=timedelta(minutes=5)
+):
     """The row a published version wrote for this report, under this policy."""
     return ("k", env.audit_run_id, (recorded_at + max_age + 2 * skew).timestamp())
 
@@ -101,7 +103,9 @@ def test_a_published_file_is_refused_until_migrated(db):
         SqliteReplayCache(db)
     assert replay_file_status(db)["state"] == "legacy"  # reading the status writes nothing
     conn = sqlite3.connect(db)
-    assert conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [("replay",)]
+    assert conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [
+        ("replay",)
+    ]
     conn.close()
 
 
@@ -236,7 +240,11 @@ def test_unknown_migration_survives_a_restart(db):
         "print(C(sys.argv[1]).history_cutover().isoformat())"
     )
     out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", code, str(db)], capture_output=True, text=True, check=True, timeout=120
+        [sys.executable, "-c", code, str(db)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
     )
     assert out.stdout.strip() == T0.isoformat()
 
@@ -254,18 +262,34 @@ def test_cli_migrate_end_to_end(tmp_path):
     )  # fmt: skip
     assert both.returncode == 2
     for bad in ("0", "-1", "nan", "inf", "1e300"):
-        out = cli("replay", "migrate", "--db", "replay.db", f"--previous-max-age-seconds={bad}", cwd=tmp_path)
+        out = cli(
+            "replay",
+            "migrate",
+            "--db",
+            "replay.db",
+            f"--previous-max-age-seconds={bad}",
+            cwd=tmp_path,
+        )
         assert out.returncode == 2, bad
-    ok = cli("replay", "migrate", "--db", "replay.db", "--previous-max-age-seconds", "3600", cwd=tmp_path)
+    ok = cli(
+        "replay", "migrate", "--db", "replay.db", "--previous-max-age-seconds", "3600", cwd=tmp_path
+    )
     assert ok.returncode == 0, ok.stderr
     assert json.loads(ok.stdout)["max_age_floor_s"] == 3600
-    again = cli("replay", "migrate", "--db", "replay.db", "--previous-max-age-seconds", "3600", cwd=tmp_path)
+    again = cli(
+        "replay", "migrate", "--db", "replay.db", "--previous-max-age-seconds", "3600", cwd=tmp_path
+    )
     assert again.returncode == 2 and "already" in again.stderr
     assert cli(
         "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "check", "--replay-db", "replay.db",
         cwd=tmp_path,
     ).returncode in (0, 1)  # fmt: skip
-    assert cli("replay", "migrate", "--db", "missing.db", "--previous-policy-unknown", cwd=tmp_path).returncode == 2
+    assert (
+        cli(
+            "replay", "migrate", "--db", "missing.db", "--previous-policy-unknown", cwd=tmp_path
+        ).returncode
+        == 2
+    )
 
 
 # ------------------------------------------------------------------ refusing what cannot be read
@@ -436,7 +460,9 @@ def test_real_process_killed_at_every_step_of_migration(db, point, swapped):
         assert db.read_bytes() == original  # the whole original, not a byte changed
         with pytest.raises(LegacyReplayFile):
             SqliteReplayCache(db)
-        report_out = migrate_replay_file(db, now=T0, previous_max_age=DAY)  # a second run finishes it
+        report_out = migrate_replay_file(
+            db, now=T0, previous_max_age=DAY
+        )  # a second run finishes it
         assert report_out["rows_preserved"] == 1
     conn = sqlite3.connect(db)
     assert conn.execute("SELECT * FROM replay").fetchall() == [row]
@@ -447,7 +473,15 @@ def test_real_process_killed_at_every_step_of_migration(db, point, swapped):
 def test_a_killed_migration_leaves_no_temp_behind_after_the_next_run(db):
     published_file(db)
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", CHILD, PACKAGE_PARENT, str(db), T0.isoformat(), "after-destination-built"],
+        [
+            sys.executable,
+            "-c",
+            CHILD,
+            PACKAGE_PARENT,
+            str(db),
+            T0.isoformat(),
+            "after-destination-built",
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -471,7 +505,11 @@ def test_a_restored_premigration_backup_is_refused_again(db, tmp_path):
         running.bind_max_age(DAY, persist=True)
     code = "import sys; from regaudit_fhe.replay import SqliteReplayCache as C; C(sys.argv[1])"
     out = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-c", code, str(db)], capture_output=True, text=True, check=False, timeout=120
+        [sys.executable, "-c", code, str(db)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
     )
     assert out.returncode != 0 and "LegacyReplayFile" in out.stderr
 
@@ -486,7 +524,9 @@ def test_limit_a_restored_later_backup(db, tmp_path):
     shutil.copy(backup, db)
     with pytest.raises(ReplayStateError, match="went up"):
         running.bind_max_age(HOUR, persist=True)
-    assert SqliteReplayCache(db).max_age_floor() == DAY  # the stated limit: replay state is a local file
+    assert (
+        SqliteReplayCache(db).max_age_floor() == DAY
+    )  # the stated limit: replay state is a local file
 
 
 # ------------------------------------------------------------------ the clean destination
@@ -727,7 +767,9 @@ def test_the_planted_trigger_case_end_to_end_through_the_cli(real_file, tmp_path
     conn.commit()
     conn.close()
     before = db.read_bytes()
-    out = cli("replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path)
+    out = cli(
+        "replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path
+    )
     assert out.returncode == 2 and "forget" in out.stderr and db.read_bytes() == before
     verify_args = (
         "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "record", "--replay-db", str(db),
@@ -735,10 +777,14 @@ def test_the_planted_trigger_case_end_to_end_through_the_cli(real_file, tmp_path
     assert cli(*verify_args, cwd=tmp_path).returncode == 3
 
 
-def test_clean_control_end_to_end_through_the_cli_replay_is_detected_in_new_processes(real_file, tmp_path):
+def test_clean_control_end_to_end_through_the_cli_replay_is_detected_in_new_processes(
+    real_file, tmp_path
+):
     db, _ = real_file
     _signed_cli_report(tmp_path, issued_at=datetime.now(timezone.utc))
-    out = cli("replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path)
+    out = cli(
+        "replay", "migrate", "--db", str(db), "--previous-max-age-seconds", "86400", cwd=tmp_path
+    )
     assert out.returncode == 0, out.stderr
     verify_args = (
         "verify", "-i", "r.json", "--trusted-keys", "t.json", "--replay-mode", "record", "--replay-db", str(db),

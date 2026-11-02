@@ -35,25 +35,55 @@ SIGNER = rf.Signer.generate(issuer="acme", key_id="k")
 PEM = SIGNER.public_key_pem()
 RESULT = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
 STRICT = ("confidential", "high-assurance", "secure-v1")
-STRICT_KW = ["--max-age-seconds", "3600", "--replay-mode", "record", "--replay-db", "x.db", "--verifier-id", "reg"]
+STRICT_KW = [
+    "--max-age-seconds",
+    "3600",
+    "--replay-mode",
+    "record",
+    "--replay-db",
+    "x.db",
+    "--verifier-id",
+    "reg",
+]
 
 
 def report(run="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f1"):
     return envelope_v2(
-        "drift", RESULT, signer=SIGNER, deployment_id="p", audience=("reg",), issued_at=T, audit_run_id=run
+        "drift",
+        RESULT,
+        signer=SIGNER,
+        deployment_id="p",
+        audience=("reg",),
+        issued_at=T,
+        audit_run_id=run,
     )
 
 
 def cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [sys.executable, "-m", "regaudit_fhe.cli", *args], capture_output=True, text=True, timeout=120, cwd=cwd, check=False
+        [sys.executable, "-m", "regaudit_fhe.cli", *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=cwd,
+        check=False,
     )
 
 
 @pytest.fixture
 def migrated(tmp_path: Path) -> Path:
     (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
-    out = cli("trust", "migrate", "--source", "old.json", "--target", "new.json", "--issuer", "k=acme", cwd=tmp_path)
+    out = cli(
+        "trust",
+        "migrate",
+        "--source",
+        "old.json",
+        "--target",
+        "new.json",
+        "--issuer",
+        "k=acme",
+        cwd=tmp_path,
+    )
     assert out.returncode == 0, out.stderr
     (tmp_path / "out.json").write_text(out.stdout)
     (tmp_path / "r.json").write_text(json.dumps(report().to_dict()))
@@ -102,7 +132,9 @@ def test_list_and_status_show_it(command, migrated):
 @pytest.mark.parametrize("command", [("trust", "list"), ("trust", "status")])
 def test_control_a_store_never_migrated_has_no_new_field(command, tmp_path):
     (tmp_path / "t.json").write_text(
-        json.dumps({"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}})
+        json.dumps(
+            {"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}}
+        )
     )
     body = json.loads(cli(*command, "--store", "t.json", cwd=tmp_path).stdout)
     rows = body if isinstance(body, list) else body["keys"]
@@ -150,13 +182,28 @@ def test_migrate_store_in_the_library_keeps_the_refusal(profile, tmp_path):
 
 @pytest.mark.parametrize("value", ["authenticated", "", "OPERATOR-DECLARED", None, 1, True])
 def test_another_value_is_refused_not_ignored(value):
-    doc = {"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active", "issuer_source": value}}}
+    doc = {
+        "entries": {
+            "k": {
+                "issuer": "acme",
+                "public_key_pem": PEM,
+                "status": "active",
+                "issuer_source": value,
+            }
+        }
+    }
     with pytest.raises(TrustStoreError, match="issuer_source"):
         rf.TrustStore.from_dict(doc)
 
 
 def test_direct_construction_is_held_to_the_same_record():
-    declared = KeyEntry(key_id="k", public_key_pem=PEM, status="active", issuer="acme", issuer_source="operator-declared")
+    declared = KeyEntry(
+        key_id="k",
+        public_key_pem=PEM,
+        status="active",
+        issuer="acme",
+        issuer_source="operator-declared",
+    )
     assert rf.TrustStore(keys={"k": PEM}, entries={"k": declared}).issuer_declared == {"k"}
     other = dataclasses.replace(declared, issuer_source="authenticated")
     with pytest.raises(TrustStoreError, match="issuer_source"):
@@ -185,7 +232,17 @@ def test_an_old_record_file_beside_a_store_cannot_weaken_anything(profile, migra
     side(tmp_path / "s.json").write_text('{"kind":"operator-declared","key_ids":["k"]}')
     with pytest.raises(TrustStoreError, match="pre-release"):
         rf.TrustStore.from_json(tmp_path / "s.json")
-    out = cli("verify", "-i", "r.json", "--trusted-keys", str(tmp_path / "s.json"), "--profile", profile, *STRICT_KW, cwd=migrated)
+    out = cli(
+        "verify",
+        "-i",
+        "r.json",
+        "--trusted-keys",
+        str(tmp_path / "s.json"),
+        "--profile",
+        profile,
+        *STRICT_KW,
+        cwd=migrated,
+    )
     assert out.returncode == 3 and "pre-release" in out.stderr
 
 
@@ -213,7 +270,17 @@ def test_a_symlinked_store_is_checked_at_the_real_path(migrated, tmp_path):
 def test_migration_will_not_run_beside_such_a_file(tmp_path):
     (tmp_path / "old.json").write_text(json.dumps({"keys": {"k": PEM}}))
     side(tmp_path / "new.json").write_text("mine")
-    out = cli("trust", "migrate", "--source", "old.json", "--target", "new.json", "--issuer", "k=acme", cwd=tmp_path)
+    out = cli(
+        "trust",
+        "migrate",
+        "--source",
+        "old.json",
+        "--target",
+        "new.json",
+        "--issuer",
+        "k=acme",
+        cwd=tmp_path,
+    )
     assert out.returncode == 2 and side(tmp_path / "new.json").read_text() == "mine"
     assert not (tmp_path / "new.json").exists()
 
@@ -241,7 +308,17 @@ def test_every_strict_profile_refuses_it_and_says_why(profile, migrated):
 
 @pytest.mark.parametrize("profile", STRICT)
 def test_every_strict_profile_refuses_it_on_the_cli(profile, migrated):
-    out = cli("verify", "-i", "r.json", "--trusted-keys", "new.json", "--profile", profile, *STRICT_KW, cwd=migrated)
+    out = cli(
+        "verify",
+        "-i",
+        "r.json",
+        "--trusted-keys",
+        "new.json",
+        "--profile",
+        profile,
+        *STRICT_KW,
+        cwd=migrated,
+    )
     assert out.returncode == 2 and "ISSUER_ENROLLMENT_UNAUTHENTICATED" in out.stderr
     assert not out.stdout  # no issuer_trusted, no issuer_binding, nothing that reads as a binding
 
@@ -249,13 +326,19 @@ def test_every_strict_profile_refuses_it_on_the_cli(profile, migrated):
 @pytest.mark.parametrize("profile", STRICT)
 def test_a_strict_policy_cannot_be_moved_onto_it(profile, migrated, tmp_path):
     (tmp_path / "t.json").write_text(
-        json.dumps({"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}})
+        json.dumps(
+            {"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}}
+        )
     )
     pol = strict(profile, rf.TrustStore.from_json(tmp_path / "t.json"), tmp_path)
     with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
         dataclasses.replace(pol, trust_store=rf.TrustStore.from_json(migrated / "new.json"))
     with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
-        rf.verify_trusted(json.dumps(report().to_dict()), rf.TrustStore.from_json(migrated / "new.json"), policy=pol)
+        rf.verify_trusted(
+            json.dumps(report().to_dict()),
+            rf.TrustStore.from_json(migrated / "new.json"),
+            policy=pol,
+        )
 
 
 @pytest.mark.parametrize("profile", STRICT)
@@ -268,13 +351,23 @@ def test_a_store_with_one_migrated_key_is_refused_whole(profile, migrated):
 
 
 def test_development_accepts_it_and_says_what_it_is(migrated):
-    res = verify(report(), VerificationPolicy(trust_store=rf.TrustStore.from_json(migrated / "new.json"), now=lambda: T))
+    res = verify(
+        report(),
+        VerificationPolicy(
+            trust_store=rf.TrustStore.from_json(migrated / "new.json"), now=lambda: T
+        ),
+    )
     assert res.accepted and res.reasons == ("ISSUER_OPERATOR_DECLARED",)
 
 
 def test_the_issuer_comparison_still_decides_in_development(migrated):
     store = rf.TrustStore.from_json(migrated / "new.json")
-    who = rf.Signer(issuer="someone-else", key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key)
+    who = rf.Signer(
+        issuer="someone-else",
+        key_id="k",
+        private_key=SIGNER.private_key,
+        public_key=SIGNER.public_key,
+    )
     env = envelope_v2(
         "drift", RESULT, signer=who, deployment_id="p", audience=("reg",), issued_at=T,
         audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f2",
@@ -284,10 +377,22 @@ def test_the_issuer_comparison_still_decides_in_development(migrated):
 
 
 def test_the_cli_in_development_labels_it_and_v2_says_so(migrated):
-    out = cli("verify", "-i", "r.json", "--trusted-keys", "new.json", "--response-format", "v2", cwd=migrated)
+    out = cli(
+        "verify",
+        "-i",
+        "r.json",
+        "--trusted-keys",
+        "new.json",
+        "--response-format",
+        "v2",
+        cwd=migrated,
+    )
     body = json.loads(out.stdout)
     assert out.returncode == 0 and body["issuer_binding"] == "operator_declared"
-    assert body["reasons"] == ["ISSUER_OPERATOR_DECLARED"] and "not an authenticated binding" in out.stderr
+    assert (
+        body["reasons"] == ["ISSUER_OPERATOR_DECLARED"]
+        and "not an authenticated binding" in out.stderr
+    )
 
 
 def test_the_lenient_verifier_does_not_report_it_as_bound(migrated):
@@ -309,7 +414,10 @@ def test_the_http_server_labels_it(migrated):
     client = client_for(build_app(config=cfg), base_url="http://127.0.0.1:8000")
     body = {"envelope": report().to_dict()}
     assert client.post("/v1/verify", json=body).json()["reasons"] == ["ISSUER_OPERATOR_DECLARED"]
-    assert client.post("/v1/verify?response_format=v2", json=body).json()["issuer_binding"] == "operator_declared"
+    assert (
+        client.post("/v1/verify?response_format=v2", json=body).json()["issuer_binding"]
+        == "operator_declared"
+    )
 
 
 @pytest.mark.parametrize("form", ["migrated", "legacy"])
@@ -335,7 +443,13 @@ def test_a_revocation_view_with_a_change_keeps_the_record(migrated):
     from regaudit_fhe import _revocation as rv
 
     store = rf.TrustStore.from_json(migrated / "new.json")
-    listed = [{"key_fingerprint": spki_fingerprint(PEM), "status": "retired", "effective_from": "2026-01-01T00:00:00Z"}]
+    listed = [
+        {
+            "key_fingerprint": spki_fingerprint(PEM),
+            "status": "retired",
+            "effective_from": "2026-01-01T00:00:00Z",
+        }
+    ]
     view = rv.apply_entries(store, listed)
     assert view.entry("k").status == "retired" and view.issuer_declared == {"k"}
 
@@ -372,8 +486,12 @@ def test_control_trust_add_keeps_working_and_nothing_calls_it_authenticated(prof
     assert not store.issuer_declared
     res = verify(report(), strict(profile, store, tmp_path))
     assert res.accepted and res.reasons == ()
-    (tmp_path / "r.json").write_text(json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f3").to_dict()))
-    (tmp_path / "s.json").write_text(json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f4").to_dict()))
+    (tmp_path / "r.json").write_text(
+        json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f3").to_dict())
+    )
+    (tmp_path / "s.json").write_text(
+        json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f4").to_dict())
+    )
     v2 = cli(
         "verify", "-i", "s.json", "--trusted-keys", "t.json", "--profile", profile, *STRICT_KW, "--response-format", "v2",
         cwd=tmp_path,
@@ -398,4 +516,7 @@ def test_limit_deliberately_deleting_the_member_is_an_edit_of_local_state(profil
 
 def test_limit_the_source_store_stays_the_way_back(migrated):
     assert json.loads((migrated / "old.json").read_text()) == {"keys": {"k": PEM}}
-    assert rf.TrustStore.from_json(migrated / "old.json").keys["k"] == rf.TrustStore.from_dict({"keys": {"k": PEM}}).keys["k"]
+    assert (
+        rf.TrustStore.from_json(migrated / "old.json").keys["k"]
+        == rf.TrustStore.from_dict({"keys": {"k": PEM}}).keys["k"]
+    )

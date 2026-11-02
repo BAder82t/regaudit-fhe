@@ -172,7 +172,9 @@ def test_real_process_killed_at_each_commit_point(box, tmp_path, point, epoch_af
     assert decide(fs, tmp_path).result.accepted
     retry = st.ingest_list(fs, pin(), dump(docs[1]), STORE, NOW)  # re-delivery converges
     assert retry.accepted and st.load(fs, pin())[0].state.get(W.issuer).epoch == 2
-    assert not list(box.glob(".state-*.tmp"))  # a dead writer's temp file does not outlive the next commit
+    assert not list(
+        box.glob(".state-*.tmp")
+    )  # a dead writer's temp file does not outlive the next commit
 
 
 def test_a_temp_file_from_a_killed_writer_is_never_read(box):
@@ -197,7 +199,9 @@ def test_real_concurrent_processes_end_at_the_highest_epoch(box):
     assert rec.state.get(W.issuer).epoch == 8
     allowed = {None, "REVOCATION_ROLLBACK", "REVOCATION_STATE_CONFLICT"}
     assert {r["code"] for r in results} <= allowed, results
-    assert sum(1 for r in results if r["accepted"]) + 1 == rec.seq  # one write per acceptance, none lost
+    assert (
+        sum(1 for r in results if r["accepted"]) + 1 == rec.seq
+    )  # one write per acceptance, none lost
 
 
 def test_a_new_process_sees_the_state_after_a_restart(box):
@@ -225,7 +229,14 @@ def test_a_new_process_sees_the_state_after_a_restart(box):
 
 @pytest.mark.parametrize(
     "damage",
-    ["truncate", "empty", "flip-byte", "valid-json-wrong-digest", "replace-with-directory", "symlink"],
+    [
+        "truncate",
+        "empty",
+        "flip-byte",
+        "valid-json-wrong-digest",
+        "replace-with-directory",
+        "symlink",
+    ],
 )
 def test_a_damaged_record_fails_closed_never_as_empty(box, tmp_path, damage):
     fs = enrolled(box)
@@ -295,7 +306,9 @@ def test_a_restored_backup_is_caught_by_a_process_that_remembers(box, tmp_path):
     assert "REVOCATION_STATE_ROLLBACK" in d.result.blocking_reasons and not d.result.accepted
 
 
-def test_limit_a_restored_backup_is_not_caught_by_a_new_process_and_the_bound_is_the_deadline(box, tmp_path):
+def test_limit_a_restored_backup_is_not_caught_by_a_new_process_and_the_bound_is_the_deadline(
+    box, tmp_path
+):
     """No independent store exists. This is the reason high-assurance refuses this store."""
     fs = enrolled(box)
     first, second = chain(2)

@@ -20,7 +20,9 @@ import regaudit_fhe as rf
 
 ISSUED = datetime(2026, 10, 25, 12, 0, 0, tzinfo=timezone.utc)
 priv = Ed25519PrivateKey.from_private_bytes(hashlib.sha256(b"published-vector-key").digest())
-signer = rf.Signer(issuer="vector-issuer", key_id="vec-key", private_key=priv, public_key=priv.public_key())
+signer = rf.Signer(
+    issuer="vector-issuer", key_id="vec-key", private_key=priv, public_key=priv.public_key()
+)
 report = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
 run_id = "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6"
 vec = {

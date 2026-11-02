@@ -83,7 +83,9 @@ def test_cli_default_is_byte_identical_to_the_engine_dict_and_v2_only_adds(signe
     assert {k: body[k] for k in payload} == payload
     assert body["response_format"] == "regaudit-fhe.verification-response.v2"
     assert body["revocation_evaluation"] == "not_evaluated"
-    assert body["trust_status"] == "TRUSTED"  # TRUSTED keeps its meaning, and the status says what is not covered
+    assert (
+        body["trust_status"] == "TRUSTED"
+    )  # TRUSTED keeps its meaning, and the status says what is not covered
 
 
 def verify_keys():
@@ -94,7 +96,16 @@ def verify_keys():
 def test_cli_refused_report_in_v2_keeps_its_exit_code(signed):
     (signed / "empty.json").write_text(json.dumps({"entries": {"other": {
         "issuer": W.issuer, "public_key_pem": W.new.public_key_pem(), "status": "active"}}}))  # fmt: skip
-    out = cli("verify", "-i", "r.json", "--trusted-keys", "empty.json", "--response-format", "v2", cwd=signed)
+    out = cli(
+        "verify",
+        "-i",
+        "r.json",
+        "--trusted-keys",
+        "empty.json",
+        "--response-format",
+        "v2",
+        cwd=signed,
+    )
     body = json.loads(out.stdout)
     assert out.returncode == 1 and body["revocation_evaluation"] == "not_evaluated"
     assert body["trust_status"] == "INVALID"
@@ -178,12 +189,16 @@ def decide(world, mode):
 
 
 def test_off_is_not_evaluated(world):
-    assert gate.response_v2(decide(world, gate.MODE_OFF))["revocation_evaluation"] == "not_evaluated"
+    assert (
+        gate.response_v2(decide(world, gate.MODE_OFF))["revocation_evaluation"] == "not_evaluated"
+    )
 
 
 def test_fresh_data_is_evaluated_and_evaluated_is_not_a_promise(world):
     fs, pin, _ = world
-    assert st.ingest_list(fs, pin, dump(W.signed(1, [W.entry(W.old, "compromised", None)])), STORE, NOW).accepted
+    assert st.ingest_list(
+        fs, pin, dump(W.signed(1, [W.entry(W.old, "compromised", None)])), STORE, NOW
+    ).accepted
     body = gate.response_v2(decide(world, gate.MODE_REQUIRED))
     assert body["revocation_evaluation"] == "evaluated"
     assert body["trust_status"] == "INVALID"  # evaluated, and the answer was no
@@ -196,10 +211,18 @@ def test_required_but_unavailable_is_never_trusted(world, cause):
         fs.path(W.issuer).unlink()
     if cause == "contradictory":
         st.ingest_list(fs, pin, dump(W.signed(1, [])), STORE, NOW)
-        st.ingest_list(fs, pin, dump(W.signed(1, [W.entry(W.new, "retired", "2026-10-01T00:00:00Z")])), STORE, NOW)
+        st.ingest_list(
+            fs,
+            pin,
+            dump(W.signed(1, [W.entry(W.new, "retired", "2026-10-01T00:00:00Z")])),
+            STORE,
+            NOW,
+        )
     body = gate.response_v2(decide(world, gate.MODE_REQUIRED))
     assert body["revocation_evaluation"] == "required_but_unavailable"
-    assert body["trust_status"] == "INVALID" and body["accepted"] is False and body["valid"] is False
+    assert (
+        body["trust_status"] == "INVALID" and body["accepted"] is False and body["valid"] is False
+    )
     assert body["integrity_valid"] is True
 
 
