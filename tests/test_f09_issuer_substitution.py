@@ -1,8 +1,8 @@
 """F-09, cross-tenant issuer substitution, on every store form, policy, report format and verification path.
 
 Tenant B holds a key the verifier enrolled for B. B signs a report whose signed issuer name is tenant A's. What must hold
-is issuer attribution: a TRUSTED result with ``issuer_trusted`` true says the name in the report is the name the operator
-enrolled for the key that verified it. A store that states no issuer cannot show that, however few keys it holds.
+is issuer attribution: a TRUSTED result with ``issuer_trusted`` true says the name in the report is the name the trust store
+states for the key that verified it. A store that states no issuer cannot show that, however few keys it holds.
 
 A store without issuers is refused under ``confidential`` and ``high-assurance``, loudly and before any report is read. In
 ``development`` and on the lenient library paths the verdict is unchanged.

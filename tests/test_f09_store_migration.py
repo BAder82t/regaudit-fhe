@@ -14,6 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import regaudit_fhe as rf
+from regaudit_fhe._keys import spki_fingerprint
 from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.report_v2 import envelope_v2, parse_envelope
 from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
@@ -80,17 +81,33 @@ def test_an_honest_published_report_gets_the_same_verdict_after_migrating(versio
     assert "ISSUER_OPERATOR_DECLARED" in after.reasons  # owner's ruling: a migration's issuer is labelled as a statement
 
 
-@pytest.mark.parametrize(("version", "kind"), CASES)
-@pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
-def test_a_strict_policy_refuses_the_old_store_and_takes_the_new_one(version, kind, profile, tmp_path):
+@pytest.mark.parametrize("profile", ["confidential", "high-assurance", "secure-v1"])
+def test_a_strict_policy_refuses_the_old_store_and_the_migrated_one(profile, tmp_path):
+    """Owner's ruling: a migrated issuer is a local operator's statement, not an authenticated enrollment."""
     source = {"keys": {KEY_ID: PEM}}
     with pytest.raises(PolicyError, match="states the issuer of each key"):
         strict(profile, rf.TrustStore.from_dict(source), tmp_path)
     assert migrate(tmp_path, source, f"{KEY_ID}={ISSUER}").returncode == 0
-    res = verify(parse_envelope(json.dumps(VECTORS[version]["reports"][kind])), strict(profile, store_from(tmp_path), tmp_path))
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, store_from(tmp_path), tmp_path)
+
+
+@pytest.mark.parametrize(("version", "kind"), CASES)
+@pytest.mark.parametrize("profile", ["confidential", "high-assurance", "secure-v1"])
+def test_the_upgrade_path_left_is_trust_add_in_a_new_store(version, kind, profile, tmp_path):
+    (tmp_path / "k.pub").write_text(PEM)
+    out = cli(
+        "trust", "add", "--store", "t.json", "--key-id", KEY_ID, "--issuer", ISSUER, "--public-key", "k.pub",
+        "--fingerprint", spki_fingerprint(PEM), cwd=tmp_path,
+    )  # fmt: skip
+    assert out.returncode == 0, out.stderr
+    res = verify(
+        parse_envelope(json.dumps(VECTORS[version]["reports"][kind])),
+        strict(profile, store_from(tmp_path, "t.json"), tmp_path),
+    )
     # As the published 0.2.1 wheel decides with an entries store: report.v1 is refused in these policies whatever the
     # store, and high-assurance needs an audience.
-    expected = kind == "v2-audience" or (kind == "v2-no-audience" and profile == "confidential")
+    expected = kind == "v2-audience" or (kind == "v2-no-audience" and profile != "high-assurance")
     assert res.accepted is expected, res.blocking_reasons
     assert "ISSUER_MISMATCH" not in res.blocking_reasons
 

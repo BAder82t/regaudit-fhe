@@ -1,14 +1,18 @@
 """A well-formed ``trust migrate --issuer`` is a local operator's statement, not proof, and it stays identified as one.
 
+By the owner's ruling, it must not be treated as authenticated issuer enrollment: every strict profile refuses such a store.
+
 The label sits beside the store because every published version refuses an unknown member in the store itself (published_wheel
 evidence is in the qualification harness). It is a label: the tests named limit say what it does not do.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -29,6 +33,7 @@ T = datetime.now(timezone.utc).replace(microsecond=0)
 SIGNER = rf.Signer.generate(issuer="acme", key_id="k")
 PEM = SIGNER.public_key_pem()
 RESULT = rf.audit_drift(np.array([0.5, 0.5]), np.array([0.4, 0.6]))
+STRICT = ("confidential", "high-assurance", "secure-v1")
 STRICT_KW = ["--max-age-seconds", "3600", "--replay-mode", "record", "--replay-db", "x.db", "--verifier-id", "reg"]
 
 
@@ -73,7 +78,7 @@ def test_the_output_says_this_is_a_statement_and_not_a_binding(migrated):
     assert body["issuer_binding"] == "operator-declared" and body["authenticated_binding"] is False
     assert body["keys"][0]["issuer_binding"] == "operator-declared"
     assert body["keys"][0]["authenticated_binding"] is False
-    assert "not proof" in body["notice"] and "secure-v1 refuses" in body["notice"]
+    assert "not proof" in body["notice"] and "ISSUER_ENROLLMENT_UNAUTHENTICATED" in body["notice"]
 
 
 def test_a_dry_run_says_the_same_and_writes_nothing(tmp_path):
@@ -121,19 +126,7 @@ def test_the_store_file_holds_only_what_published_versions_read(migrated):
 # ------------------------------------------------------------------ the profiles
 
 
-def test_secure_v1_refuses_it_with_the_label_as_the_reason(migrated):
-    store = rf.TrustStore.from_json(migrated / "new.json")
-    assert store.binds_issuers and store.issuer_declared == {"k"}
-    with pytest.raises(PolicyError, match="recorded as a local operator's statement"):
-        strict("secure-v1", store, migrated)
-
-
-def test_secure_v1_refuses_it_on_the_cli(migrated):
-    out = cli("verify", "-i", "r.json", "--trusted-keys", "new.json", "--profile", "secure-v1", *STRICT_KW, cwd=migrated)
-    assert out.returncode == 2 and "local operator's statement" in out.stderr and not out.stdout
-
-
-def test_a_store_with_one_migrated_key_is_refused_whole(migrated):
+def _with_second_key(migrated):
     other = rf.Signer.generate(issuer="other", key_id="k2")
     (migrated / "k2.pub").write_text(other.public_key_pem())
     out = cli(
@@ -141,40 +134,71 @@ def test_a_store_with_one_migrated_key_is_refused_whole(migrated):
         "--fingerprint", spki_fingerprint(other.public_key_pem()), cwd=migrated,
     )  # fmt: skip
     assert out.returncode == 0, out.stderr
-    store = rf.TrustStore.from_json(migrated / "new.json")
-    assert store.issuer_declared == {"k"}
-    with pytest.raises(PolicyError, match="local operator's statement"):
-        strict("secure-v1", store, migrated)
 
 
-@pytest.mark.parametrize("profile", ["confidential", "high-assurance", "development"])
-def test_the_existing_profiles_accept_it_and_label_it(profile, migrated):
+@pytest.mark.parametrize("profile", STRICT)
+def test_every_strict_profile_refuses_it_and_says_why(profile, migrated):
     store = rf.TrustStore.from_json(migrated / "new.json")
-    pol = (
-        VerificationPolicy(trust_store=store, now=lambda: T)
-        if profile == "development"
-        else strict(profile, store, migrated)
+    assert store.binds_issuers and store.issuer_declared == {"k"}
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, store, migrated)
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_every_strict_profile_refuses_it_on_the_cli(profile, migrated):
+    out = cli("verify", "-i", "r.json", "--trusted-keys", "new.json", "--profile", profile, *STRICT_KW, cwd=migrated)
+    assert out.returncode == 2 and "ISSUER_ENROLLMENT_UNAUTHENTICATED" in out.stderr
+    assert not out.stdout  # no issuer_trusted, no issuer_binding, nothing that reads as a binding
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_a_strict_policy_cannot_be_moved_onto_it(profile, migrated, tmp_path):
+    (tmp_path / "t.json").write_text(
+        json.dumps({"entries": {"k": {"issuer": "acme", "public_key_pem": PEM, "status": "active"}}})
     )
-    res = verify(report(), pol)
-    assert res.accepted and res.issuer_trusted and res.reasons == ("ISSUER_OPERATOR_DECLARED",)
+    pol = strict(profile, rf.TrustStore.from_json(tmp_path / "t.json"), tmp_path)
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        dataclasses.replace(pol, trust_store=rf.TrustStore.from_json(migrated / "new.json"))
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        rf.verify_trusted(json.dumps(report().to_dict()), rf.TrustStore.from_json(migrated / "new.json"), policy=pol)
 
 
-@pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
-def test_the_issuer_comparison_still_decides_on_a_labelled_store(profile, migrated):
+@pytest.mark.parametrize("profile", STRICT)
+def test_a_store_with_one_migrated_key_is_refused_whole(profile, migrated):
+    _with_second_key(migrated)
+    store = rf.TrustStore.from_json(migrated / "new.json")
+    assert store.issuer_declared == {"k"} and set(store.keys) == {"k", "k2"}
+    with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+        strict(profile, store, migrated)
+
+
+def test_development_accepts_it_and_says_what_it_is(migrated):
+    res = verify(report(), VerificationPolicy(trust_store=rf.TrustStore.from_json(migrated / "new.json"), now=lambda: T))
+    assert res.accepted and res.reasons == ("ISSUER_OPERATOR_DECLARED",)
+
+
+def test_the_issuer_comparison_still_decides_in_development(migrated):
     store = rf.TrustStore.from_json(migrated / "new.json")
     who = rf.Signer(issuer="someone-else", key_id="k", private_key=SIGNER.private_key, public_key=SIGNER.public_key)
     env = envelope_v2(
         "drift", RESULT, signer=who, deployment_id="p", audience=("reg",), issued_at=T,
         audit_run_id="3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f2",
     )  # fmt: skip
-    assert verify(env, strict(profile, store, migrated)).blocking_reasons == ("ISSUER_MISMATCH",)
+    res = verify(env, VerificationPolicy(trust_store=store, now=lambda: T))
+    assert "ISSUER_MISMATCH" in res.blocking_reasons
 
 
-def test_the_cli_labels_it_and_v2_says_so(migrated):
+def test_the_cli_in_development_labels_it_and_v2_says_so(migrated):
     out = cli("verify", "-i", "r.json", "--trusted-keys", "new.json", "--response-format", "v2", cwd=migrated)
     body = json.loads(out.stdout)
     assert out.returncode == 0 and body["issuer_binding"] == "operator_declared"
     assert body["reasons"] == ["ISSUER_OPERATOR_DECLARED"] and "not an authenticated binding" in out.stderr
+
+
+def test_the_lenient_verifier_does_not_report_it_as_bound(migrated):
+    env = rf.envelope("drift", RESULT, signer=SIGNER)
+    out = rf.verify_envelope(env, trust_store=rf.TrustStore.from_json(migrated / "new.json"))
+    assert out.trust_status == "TRUSTED" and not out.issuer_bound
 
 
 def test_the_http_server_labels_it(migrated):
@@ -228,17 +252,30 @@ def test_a_lifecycle_edit_keeps_the_label(migrated):
 # ------------------------------------------------------------------ control: normal enrollment
 
 
-def test_control_trust_add_is_not_labelled_and_secure_v1_takes_it(tmp_path):
+@pytest.mark.parametrize("profile", STRICT)
+def test_control_trust_add_keeps_working_and_nothing_calls_it_authenticated(profile, tmp_path):
+    """Whether trust add counts as authenticated enrollment is the owner's open question. It keeps working, as normal
+    enrollment, and no output claims more. A hand-written entries store is the same file and cannot be told apart."""
     (tmp_path / "k.pub").write_text(PEM)
     out = cli(
         "trust", "add", "--store", "t.json", "--key-id", "k", "--issuer", "acme", "--public-key", "k.pub",
         "--fingerprint", spki_fingerprint(PEM), cwd=tmp_path,
     )  # fmt: skip
     assert out.returncode == 0, out.stderr
+    body = json.loads(out.stdout)
+    assert body["authenticated_binding"] is False and body["issuer_binding"] == "store_entry"
     store = rf.TrustStore.from_json(tmp_path / "t.json")
     assert not store.issuer_declared
-    res = verify(report(), strict("secure-v1", store, tmp_path))
+    res = verify(report(), strict(profile, store, tmp_path))
     assert res.accepted and res.reasons == ()
+    (tmp_path / "r.json").write_text(json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f3").to_dict()))
+    (tmp_path / "s.json").write_text(json.dumps(report("3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e6f4").to_dict()))
+    v2 = cli(
+        "verify", "-i", "s.json", "--trusted-keys", "t.json", "--profile", profile, *STRICT_KW, "--response-format", "v2",
+        cwd=tmp_path,
+    )  # fmt: skip
+    assert v2.returncode == 0, v2.stderr
+    assert json.loads(v2.stdout)["issuer_binding"] == "store_entry"
 
 
 # ------------------------------------------------------------------ the writing order, and a broken label
@@ -327,12 +364,21 @@ def test_direct_construction_cannot_name_a_key_it_does_not_hold():
 # ------------------------------------------------------------------ limits, as stated
 
 
-def test_limit_deleting_the_label_removes_the_label(migrated):
-    """Not authentication in either direction. secure-v1 can only refuse what is recorded."""
+@pytest.mark.parametrize("profile", STRICT)
+def test_limit_deleting_the_label_makes_it_look_like_any_entries_store(profile, migrated):
+    """A label in a file the operator controls is not authentication in either direction. The refusal can only act on what is
+    recorded, and nothing here detects the deletion. The same store is then accepted."""
     side(migrated / "new.json").unlink()
     store = rf.TrustStore.from_json(migrated / "new.json")
     assert not store.issuer_declared
-    assert verify(report(), strict("secure-v1", store, migrated)).accepted
+    assert verify(report(), strict(profile, store, migrated)).accepted
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_limit_a_copy_without_its_label_is_accepted(profile, migrated, tmp_path_factory):
+    other = tmp_path_factory.mktemp("copy")
+    shutil.copy(migrated / "new.json", other / "copied.json")
+    assert verify(report(), strict(profile, rf.TrustStore.from_json(other / "copied.json"), other)).accepted
 
 
 def test_limit_from_dict_has_no_file_to_look_beside(migrated):

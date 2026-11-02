@@ -62,7 +62,7 @@ def test_the_note_is_not_on_an_entries_store(tmp_path):
 
 @pytest.mark.parametrize(
     ("form", "who", "expected"),
-    [("legacy", FORGED, "not_bound"), ("entries", ALICE, "enrolled"), ("entries", FORGED, "not_established")],
+    [("legacy", FORGED, "not_bound"), ("entries", ALICE, "store_entry"), ("entries", FORGED, "not_established")],
 )
 def test_the_versioned_response_states_the_binding(form, who, expected, tmp_path):
     (tmp_path / "r.json").write_text(json.dumps(report(who).to_dict()))

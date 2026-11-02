@@ -50,6 +50,7 @@ from .trust import KeyEntry, TrustStore
 # A versioned profile with its own rules, so that no existing parameter or profile changes meaning. Everything else in it is
 # as in ``confidential``. See TRUST_SPEC 8.3.
 SECURE_PROFILE_V1 = "secure-v1"
+ISSUER_ENROLLMENT_UNAUTHENTICATED = "ISSUER_ENROLLMENT_UNAUTHENTICATED"  # a configuration refusal, not a verdict on a report
 PROFILES = ("development", "confidential", "high-assurance", SECURE_PROFILE_V1)
 
 TRUSTED = "TRUSTED"
@@ -200,11 +201,11 @@ class VerificationPolicy:
                     "one does not, so a report could claim any issuer name. Run: regaudit-fhe trust migrate "
                     "(docs/DEPLOYMENT.md, 'Upgrading a trust store without issuers')"
                 )
-            if self.profile == SECURE_PROFILE_V1 and self.trust_store.issuer_declared:
+            if self.trust_store.issuer_declared:
                 raise PolicyError(
-                    f"the {SECURE_PROFILE_V1!r} profile refuses a store whose issuers were recorded as a local operator's "
-                    f"statement by 'trust migrate': {sorted(self.trust_store.issuer_declared)}. Enroll each key with "
-                    "'trust add' in a new store"
+                    f"{ISSUER_ENROLLMENT_UNAUTHENTICATED}: the {self.profile!r} profile refuses a store whose issuers were "
+                    f"recorded as a local operator's statement by 'trust migrate': {sorted(self.trust_store.issuer_declared)}. "
+                    "That is not an authenticated enrollment. See docs/MIGRATION_0.3.md"
                 )
             if self.max_age is None:
                 raise PolicyError(f"the {self.profile!r} profile requires max_age")
@@ -668,7 +669,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         # Only a development policy gets here. The verdict is what it always was, and it says less than it looks.
         note("ISSUER_UNBOUND")
     if entry is not None and entry.key_id in getattr(policy.trust_store, "issuer_declared", ()):
-        # The name was compared, with a name a local operator stated. That is not an authenticated binding.
+        # Only development gets here: the others refuse this store. The name was compared with a local operator's statement.
         note("ISSUER_OPERATOR_DECLARED")
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------

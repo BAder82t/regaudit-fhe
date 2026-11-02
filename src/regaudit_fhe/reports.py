@@ -665,8 +665,8 @@ class VerificationOutcome:
     ``trust_status`` is the field to branch on:
 
     * ``TRUSTED`` — integrity holds AND the issuer key is registered in the
-      supplied trust material, not revoked, and matches any pin. The signed
-      issuer name was compared with an enrolled one only if ``issuer_bound``.
+      supplied trust material, not revoked, and matches any pin. The signed issuer
+      name was compared with a name in the store only if ``issuer_bound``.
     * ``SELF_SIGNED_ONLY`` — integrity holds but no trust material was
       supplied, so the issuer is unauthenticated.
     * ``INVALID`` — integrity, issuer, revocation, pin or timestamp policy
@@ -692,7 +692,8 @@ class VerificationOutcome:
     timestamp_status: str = TS_ABSENT
     revoked: bool = False
     pin_ok: bool = True
-    # Whether the signed issuer name was compared with one the operator enrolled. Not part of the serialised outcome.
+    # Whether the signed issuer name was compared with a name the store states and no migration stated. Not an
+    # authenticated binding: none exists. Not part of the serialised outcome.
     issuer_bound: bool = field(default=False, repr=False, compare=False)
 
     @property
@@ -908,7 +909,7 @@ def _verify_envelope(
         sha256_valid=sha_ok,
         signature_valid=sig_ok,
         issuer_trusted=has_trust_material and issuer_ok,
-        issuer_bound=bound,
+        issuer_bound=bound and key_id not in store.issuer_declared,  # type: ignore[union-attr]
         timestamp_valid=ts_ok,
         issuer=env.issuer,
         key_id=key_id,

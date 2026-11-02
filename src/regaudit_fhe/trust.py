@@ -526,7 +526,7 @@ class TrustStore:
 
     @property
     def binds_issuers(self) -> bool:
-        """Whether this store states, for every key, the issuer name the operator enrolled it for.
+        """Whether this store states, for every key, an issuer name. It says nothing about how that name was established.
 
         A bare or ``keys`` store does not, whatever its number of keys or the shape of its key ids. Nothing else can
         supply that statement: the report's own issuer name is what is being checked.

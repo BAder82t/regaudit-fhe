@@ -69,12 +69,12 @@ def policy_evidence(disclosure: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def issuer_binding(result: dict[str, Any]) -> str:
-    """Whether the report's issuer name was compared with the one the operator enrolled for its key."""
+    """What the report's issuer name was compared with. No value here means an authenticated enrollment: none exists."""
     if "ISSUER_UNBOUND" in result["reasons"]:
         return "not_bound"  # the store states no issuer, so the name in the report is only a claim
     if not result["issuer_trusted"]:
         return "not_established"
-    return "operator_declared" if "ISSUER_OPERATOR_DECLARED" in result["reasons"] else "enrolled"
+    return "operator_declared" if "ISSUER_OPERATOR_DECLARED" in result["reasons"] else "store_entry"
 
 
 def response_v2(result: dict[str, Any], disclosure: dict[str, Any] | None) -> dict[str, Any]:

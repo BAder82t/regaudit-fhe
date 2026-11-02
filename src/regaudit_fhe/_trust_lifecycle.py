@@ -470,6 +470,7 @@ def migrate(
         "notice": "The source is unchanged. Under the new store a report whose signed issuer differs from the "
         "stated issuer is refused (ISSUER_MISMATCH): check the stated issuers against your reports first. "
         "Each --issuer is your statement as a local operator, not proof that the key belongs to that issuer: no "
-        "authenticated enrollment took place. confidential and high-assurance accept this store and label the "
-        "result ISSUER_OPERATOR_DECLARED, and secure-v1 refuses it.",
+        "authenticated enrollment took place. confidential, high-assurance and secure-v1 refuse this store "
+        "(ISSUER_ENROLLMENT_UNAUTHENTICATED). development accepts it and labels the result ISSUER_OPERATOR_DECLARED. "
+        "See docs/MIGRATION_0.3.md.",
     }

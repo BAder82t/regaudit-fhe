@@ -457,6 +457,8 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
             {
                 "enrolled": args.key_id,
                 "issuer": args.issuer,
+                "issuer_binding": "store_entry",
+                "authenticated_binding": False,
                 "fingerprint_sha256": actual,
                 "store": args.store,
                 "entries": len(entries),
@@ -782,7 +784,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     if trust_store is not None and trust_store.issuer_declared:
         sys.stderr.write(
             "note: this store's issuers were stated by a local operator with 'trust migrate'. The report's issuer name was "
-            "compared with that statement, which is not an authenticated binding.\n"
+            "compared with that statement, which is not an authenticated binding. confidential, high-assurance and "
+            "secure-v1 refuse this store.\n"
         )
     decision = None
     try:
@@ -938,8 +941,9 @@ def build_parser() -> argparse.ArgumentParser:
     t_revoke.set_defaults(func=_cmd_trust_revoke)
     t_migrate = trust_sub.add_parser(
         "migrate",
-        help="Write a new entries store from a bare or legacy one. The source is left unchanged; a legacy "
-        "revoked key becomes compromised with an unknown boundary.",
+        help="Write a new entries store from a bare or legacy one, for development and the lenient paths: its issuers "
+        "are your statement, and confidential, high-assurance and secure-v1 refuse it. The source is left unchanged; "
+        "a legacy revoked key becomes compromised with an unknown boundary.",
     )
     t_migrate.add_argument("--source", required=True)
     t_migrate.add_argument("--target", required=True, help="Must not exist.")

@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 import regaudit_fhe as rf
+from regaudit_fhe import _trust_lifecycle as lc
 from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.report_v2 import parse_envelope_strict
 from regaudit_fhe.trust import TrustStore
@@ -298,19 +299,22 @@ def test_T05_migration_preserves_the_accept_or_refuse_outcome_for_the_right_issu
     tmp_path, version, kind, form, profile
 ):
     env = report(version, kind)
-    out, _ = migrated(form)
+    source = tmp_path / "old.json"
+    source.write_text(json.dumps(STORES[form]))
+    lc.migrate(str(source), str(tmp_path / "new.json"), {KEY: ISSUER}, now=NOW)
+    new = TrustStore.from_json(tmp_path / "new.json")
+    if profile != "development":
+        # Owner's ruling: a migrated issuer is a local operator's statement and must not be treated as authenticated
+        # enrollment, so this store does not satisfy a strict policy. The accept-or-refuse table for these policies on an
+        # entries store is V01's, on a store the migration did not write.
+        with pytest.raises(PolicyError, match="ISSUER_ENROLLMENT_UNAUTHENTICATED"):
+            policy(tmp_path, profile, new)
+        return
+    before = verify(env, policy(tmp_path, profile, TrustStore.from_dict(STORES[form])))
     after_dir = tmp_path / "after"
     after_dir.mkdir()
-    after = verify(env, policy(after_dir, profile, TrustStore.from_dict(out)))
-    if profile == "development":
-        before = verify(env, policy(tmp_path, profile, TrustStore.from_dict(STORES[form])))
-        expected_blocking = set(before.blocking_reasons)
-    else:
-        # F-09: the old store is refused here, so the comparison is with the table written from the spec (V01), which the
-        # published versions satisfied on this same store. The harness runs the wheels themselves.
-        with pytest.raises(PolicyError, match="states the issuer of each key"):
-            policy(tmp_path, profile, TrustStore.from_dict(STORES[form]))
-        expected_blocking = expected(kind, profile, KEY_STATE[form])
+    after = verify(env, policy(after_dir, profile, new))
+    expected_blocking = set(before.blocking_reasons)
     if "KEY_REVOKED" in expected_blocking:
         expected_blocking = (expected_blocking - {"KEY_REVOKED"}) | {"KEY_COMPROMISED_NO_CHRONOLOGY"}
         assert after.key_status == "compromised"
