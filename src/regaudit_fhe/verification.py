@@ -36,7 +36,13 @@ from ._provenance import CONTRADICTION, UNVERIFIABLE
 from ._provenance import check_provenance as _check_provenance
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, decode_canonical_b64
-from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache, ReplayStateError
+from .replay import (
+    SCOPE_LOCAL_PERSISTENT,
+    TRUST_HISTORY_CEILING,
+    ReplayCache,
+    ReplayStateError,
+    SqliteReplayCache,
+)
 from .report_v2 import AuditEnvelopeV2
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
 from .trust import KeyEntry, TrustStore
@@ -67,7 +73,6 @@ HISTORY_FRESH = "FRESH"
 HISTORY_STALE = "STALE"
 
 DEFAULT_RETENTION = timedelta(days=30)
-TRUST_HISTORY_CEILING_WITHOUT_STORE = timedelta(hours=24)
 
 
 class PolicyError(RuntimeError):
@@ -321,35 +326,39 @@ def _bound_max_age(policy: VerificationPolicy) -> tuple[timedelta | None, bool, 
     return effective, effective < requested, False
 
 
-def _bound_history_age(policy: VerificationPolicy) -> tuple[timedelta, bool, bool]:
-    """(trust_history_max_age to enforce, whether it was lowered, whether the store's floor was unusable).
+@dataclass(frozen=True)
+class _HistoryBound:
+    limit: timedelta
+    not_as_of_or_before: datetime | None = None
+    applied: bool = False  # the setting was not honoured in full
+    failed: bool = False  # the store's floor could not be used: no history counts
 
-    The same rule as ``max_age``: raising the setting must not make a history that was already stale acceptable. A
-    durable store holds a floor. Without one nothing can remember the earlier setting, so the bound is a fixed
-    ceiling at the default: a raise above it is not honoured, and a raise below it cannot be seen.
+
+def _bound_history_age(policy: VerificationPolicy, *, use_store: bool = True) -> _HistoryBound:
+    """How old a trust history may be. The same principle as ``max_age``: raising the setting must not make a
+    history acceptable that was already stale.
+
+    Above the ceiling a setting is never honoured, whatever the cache says about itself. Below it, only the shipped
+    sqlite store is believed to remember the earlier setting, as a floor. If that floor cannot be used, no history
+    counts: a failure must not widen the window.
     """
     requested = policy.trust_history_max_age
-    binder = getattr(policy.replay_cache, "bind_trust_history_age", None)
-    if (
-        policy.replay_mode == "off"
-        or binder is None
-        or not getattr(policy.replay_cache, "durable", False)
-    ):
-        ceiling = min(requested, TRUST_HISTORY_CEILING_WITHOUT_STORE)
-        return ceiling, ceiling < requested, False
+    ceiling = min(requested, TRUST_HISTORY_CEILING)
+    cache = policy.replay_cache
+    if not use_store or policy.replay_mode == "off" or type(cache) is not SqliteReplayCache:
+        return _HistoryBound(ceiling, applied=ceiling < requested)
     try:
-        bound = binder(requested, persist=True)
-    except Exception:
-        if policy.replay_mode == "record":
-            return requested, False, True
         try:
-            bound = binder(requested, persist=False)
+            bound = cache.bind_trust_history_age(ceiling, persist=True)
         except Exception:
-            return requested, False, True
-    if not isinstance(bound, timedelta) or bound <= timedelta(0):
-        return requested, False, True
-    effective = min(bound, requested)
-    return effective, effective < requested, False
+            if policy.replay_mode == "record":
+                raise
+            bound = cache.bind_trust_history_age(ceiling, persist=False)
+        cutover = cache.trust_history_cutover()
+    except Exception:
+        return _HistoryBound(ceiling, applied=True, failed=True)
+    effective = min(bound, ceiling)
+    return _HistoryBound(effective, cutover, applied=effective < requested)
 
 
 def _replay_cutover(policy: VerificationPolicy) -> tuple[datetime | None, bool]:
@@ -371,14 +380,18 @@ def _aware_now(policy: VerificationPolicy) -> datetime:
 
 
 def _history_state(
-    policy: VerificationPolicy, now: datetime, limit: timedelta | None = None
+    policy: VerificationPolicy, now: datetime, bound: _HistoryBound | None = None
 ) -> str:
     history = policy.trust_history
-    if history is None or not history.authenticated:
+    if bound is None:
+        bound = _bound_history_age(policy, use_store=False)
+    if history is None or not history.authenticated or bound.failed:
         return HISTORY_UNPROVEN
     if history.as_of.tzinfo is None or history.as_of > now + policy.clock_skew:
         return HISTORY_UNPROVEN
-    if now - history.as_of > (policy.trust_history_max_age if limit is None else limit):
+    if now - history.as_of > bound.limit:
+        return HISTORY_STALE
+    if bound.not_as_of_or_before is not None and history.as_of <= bound.not_as_of_or_before:
         return HISTORY_STALE
     return HISTORY_FRESH
 
@@ -563,9 +576,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             replay_scope="NONE",
             replay_durable=None,
             consumption=CONSUMPTION_NOT_CHECKED,
-            trust_history=_history_state(
-                policy, now, min(policy.trust_history_max_age, TRUST_HISTORY_CEILING_WITHOUT_STORE)
-            ),
+            trust_history=_history_state(policy, now),
             **base,
         )
 
@@ -614,12 +625,12 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     issuer_trusted = entry is not None and identity_ok and sig_ok
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
-    history_limit, history_floor_applied, history_floor_failed = _bound_history_age(policy)
-    if history_floor_applied and policy.trust_history is not None:
+    history_bound = _bound_history_age(policy)
+    if history_bound.applied and policy.trust_history is not None:
         note("TRUST_HISTORY_FLOOR_APPLIED")
     if entry is not None:
         _apply_key_lifecycle(
-            entry, v2, issued, evidence, policy, now, history_limit, note=note, block=block
+            entry, v2, issued, evidence, policy, now, history_bound, note=note, block=block
         )
 
     # ----- timestamp policy ---------------------------------------------------
@@ -663,7 +674,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             policy,
             now,
             max_age=max_age,
-            floor_failed=floor_failed or history_floor_failed or cutover_failed,
+            floor_failed=floor_failed or history_bound.failed or cutover_failed,
             key_id=key_id,
             note=note,
             block=block,
@@ -686,7 +697,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         replay_scope=replay_scope,
         replay_durable=replay_durable,
         consumption=consumption,
-        trust_history=_history_state(policy, now, history_limit),
+        trust_history=_history_state(policy, now, history_bound),
         **base,
     )
 
@@ -698,7 +709,7 @@ def _apply_key_lifecycle(
     evidence: TimestampEvidence | None,
     policy: VerificationPolicy,
     now: datetime,
-    history_limit: timedelta,
+    history_bound: _HistoryBound,
     *,
     note: Callable[[str], None],
     block: Callable[[str], None],
@@ -724,7 +735,7 @@ def _apply_key_lifecycle(
     def history_ok() -> bool:
         return (
             policy.profile != "high-assurance"
-            and _history_state(policy, now, history_limit) == HISTORY_FRESH
+            and _history_state(policy, now, history_bound) == HISTORY_FRESH
         )
 
     if status == "compromised":
