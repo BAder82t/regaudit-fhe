@@ -155,6 +155,12 @@ def test_a_key_id_that_is_not_a_plain_string_does_not_count_as_bound():
     assert not rf.TrustStore(keys={kid: PEM}, entries={kid: entry}).binds_issuers
 
 
+def test_a_mapping_key_that_is_not_a_plain_string_does_not_count_as_bound():
+    kid = type("K", (str,), {})("bob-1")
+    entry = KeyEntry(key_id="bob-1", public_key_pem=PEM, status="active", issuer="bob-lab")
+    assert not rf.TrustStore(keys={kid: PEM}, entries={kid: entry}).binds_issuers
+
+
 # ------------------------------------------------------------------ what keeps working
 
 
