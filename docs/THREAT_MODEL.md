@@ -396,7 +396,7 @@ A limited key-recovery experiment was conducted against the library's evaluated 
 
 These observations are limited to the attack implementation, configurations, output shapes, and trials examined. They do not establish resistance to other attacks or provide a general IND-CPA-D security guarantee. The library's confidentiality claims remain conditional on its stated threat model, supported parameter configurations, and operational assumptions.
 
-The runs used fresh ciphertexts and one seed per setting, and not the output of a real audit circuit.
+The runs used fresh ciphertexts and one seed per setting, and not the output of a real audit circuit. The only library configuration tested was N=2^14 with the default 400-bit chain.
 
 ---
 
