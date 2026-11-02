@@ -47,7 +47,10 @@ from .report_v2 import AuditEnvelopeV2
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
 from .trust import KeyEntry, TrustStore
 
-PROFILES = ("development", "confidential", "high-assurance")
+# A versioned profile with its own rules, so that no existing parameter or profile changes meaning. Everything else in it is
+# as in ``confidential``. See TRUST_SPEC 8.3.
+SECURE_PROFILE_V1 = "secure-v1"
+PROFILES = ("development", "confidential", "high-assurance", SECURE_PROFILE_V1)
 
 TRUSTED = "TRUSTED"
 SELF_SIGNED_ONLY = "SELF_SIGNED_ONLY"
@@ -170,6 +173,11 @@ class VerificationPolicy:
             raise PolicyError("clock_skew must not be negative")
         if self.trust_history_max_age <= timedelta(0):
             raise PolicyError("trust_history_max_age must be positive")
+        if self.profile == SECURE_PROFILE_V1 and self.trust_history_max_age != TRUST_HISTORY_CEILING:
+            raise PolicyError(
+                f"the {SECURE_PROFILE_V1!r} profile has a fixed trust-history window of {TRUST_HISTORY_CEILING}: "
+                "trust_history_max_age cannot be set, larger or smaller"
+            )
         if self.verifier_id is not None and (
             not isinstance(self.verifier_id, str) or not self.verifier_id
         ):
@@ -340,7 +348,21 @@ class _HistoryBound:
     failed: bool = False  # the store's floor could not be used: no history counts
 
 
-def _bound_history_age(policy: VerificationPolicy, *, use_store: bool = True) -> _HistoryBound:
+def _fixed_history_window(policy: VerificationPolicy, now: datetime, *, use_store: bool) -> _HistoryBound:
+    """The same 24 hours on a new store, an existing one and no store state at all. Only what a shorter setting already
+    refused on this store is held back, by the cutover: it stays refused, and the window itself never moves."""
+    cache = policy.replay_cache
+    if not use_store or policy.replay_mode == "off" or type(cache) is not SqliteReplayCache:
+        return _HistoryBound(TRUST_HISTORY_CEILING)
+    try:
+        return _HistoryBound(TRUST_HISTORY_CEILING, cache.adopt_fixed_history_window(now=now))
+    except Exception:
+        return _HistoryBound(TRUST_HISTORY_CEILING, failed=True)
+
+
+def _bound_history_age(
+    policy: VerificationPolicy, now: datetime, *, use_store: bool = True
+) -> _HistoryBound:
     """How old a trust history may be. The same principle as ``max_age``: raising the setting must not make a
     history acceptable that was already stale.
 
@@ -348,6 +370,8 @@ def _bound_history_age(policy: VerificationPolicy, *, use_store: bool = True) ->
     sqlite store is believed to remember the earlier setting, as a floor. If that floor cannot be used, no history
     counts: a failure must not widen the window.
     """
+    if policy.profile == SECURE_PROFILE_V1:
+        return _fixed_history_window(policy, now, use_store=use_store)
     requested = policy.trust_history_max_age
     ceiling = min(requested, TRUST_HISTORY_CEILING)
     cache = policy.replay_cache
@@ -390,7 +414,7 @@ def _history_state(
 ) -> str:
     history = policy.trust_history
     if bound is None:
-        bound = _bound_history_age(policy, use_store=False)
+        bound = _bound_history_age(policy, now, use_store=False)
     if history is None or not history.authenticated or bound.failed:
         return HISTORY_UNPROVEN
     if history.as_of.tzinfo is None or history.as_of > now + policy.clock_skew:
@@ -634,7 +658,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         note("ISSUER_UNBOUND")
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
-    history_bound = _bound_history_age(policy)
+    history_bound = _bound_history_age(policy, now)
     if history_bound.applied and policy.trust_history is not None:
         note("TRUST_HISTORY_FLOOR_APPLIED")
     if entry is not None:

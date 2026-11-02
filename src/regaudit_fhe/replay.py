@@ -165,7 +165,8 @@ class InMemoryReplayCache:
 REPLAY_SCHEMA_VERSION = 2
 _CEILING_US = 24 * 3600 * 1_000_000
 _EMPTY, _LEGACY, _CURRENT = "empty", "legacy", "current"
-_ORIGINS = ("new", "operator-attested", "history-unknown")
+# fixed-window-adopted: a secure-v1 verifier took over a file on which a shorter trust-history setting had been served.
+_ORIGINS = ("new", "operator-attested", "history-unknown", "fixed-window-adopted")
 _CREATE_REPLAY = (
     "CREATE TABLE replay (key_id TEXT NOT NULL, run_id TEXT NOT NULL, expires_at REAL NOT NULL, "
     "PRIMARY KEY (key_id, run_id))"
@@ -260,6 +261,7 @@ def _read_meta(conn: sqlite3.Connection) -> dict[str, Any]:
         "new": migrated is None and cutover is None and history_cut is None,
         "operator-attested": migrated is not None and cutover is None,
         "history-unknown": migrated is not None and cutover is not None and history_cut is not None,
+        "fixed-window-adopted": history_cut is not None,
     }[origin]
     if not consistent:
         raise ReplayStateError("replay store policy record is corrupt")
@@ -650,6 +652,53 @@ class SqliteReplayCache:
     def bind_trust_history_age(self, requested: timedelta, *, persist: bool) -> timedelta:
         """The same, for ``trust_history_max_age``."""
         return self._bind_floor("trust_history_max_age_us", requested, persist=persist)
+
+    def adopt_fixed_history_window(self, *, now: datetime) -> datetime | None:
+        """For the ``secure-v1`` profile. Returns the time up to which a history is not fresh, if any.
+
+        The window is fixed at 24 hours. A floor of exactly that means nothing shorter was ever served on this file, since
+        floors only go down, and a normal call only reads. A lower floor means a history may already have been refused
+        here, and it must stay refused: the floor moves to 24 hours and every history as of now or earlier stops counting,
+        in one transaction. If a shorter setting is served here again, the next call does this again.
+        """
+        wanted = _CEILING_US
+        stamp = _stamp(now)
+        try:
+            conn = self._connect()
+            try:
+                if _classify(conn) == _EMPTY:  # ":memory:", or a file deleted under us: the record step reports it
+                    return None
+                meta = _read_meta(conn)
+                if meta["trust_history_max_age_us"] != wanted:
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        if _classify(conn) != _CURRENT:
+                            raise ReplayStateError("replay store changed during use")
+                        meta = _read_meta(conn)
+                        floor = meta["trust_history_max_age_us"]
+                        if floor is None:
+                            conn.execute(_FLOOR_UPDATE["trust_history_max_age_us"], (wanted,))
+                        elif floor != wanted:
+                            earlier = meta["trust_history_cutover"]
+                            meta["trust_history_cutover"] = stamp if earlier is None else max(earlier, stamp)
+                            conn.execute(
+                                "UPDATE replay_meta SET origin = 'fixed-window-adopted', "
+                                "trust_history_max_age_us = ?, trust_history_cutover = ? WHERE id = 1",
+                                (wanted, meta["trust_history_cutover"]),
+                            )
+                        conn.execute("COMMIT")
+                    except (sqlite3.Error, ReplayStateError):
+                        with contextlib.suppress(sqlite3.Error):
+                            conn.execute("ROLLBACK")
+                        raise
+                    with self._lock:
+                        self._lowest["trust_history_max_age_us"] = wanted
+                cut = meta["trust_history_cutover"]
+                return None if cut is None else datetime.fromtimestamp(cut, tz=timezone.utc)
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            raise ReplayStateError(f"replay store error: {exc}") from exc
 
     def _meta_or_none(self) -> dict[str, Any] | None:
         try:
