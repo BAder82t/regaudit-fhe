@@ -36,6 +36,8 @@ NEW = (
     "../test_revocation_tooling_and_cli.py",
     "../test_revocation_hostile_sequences.py",
     "../test_replay_migration.py",
+    "../test_replay_expiry_edge.py",
+    "../test_trust_history_floor.py",
     "../test_response_mode.py",
 )
 SOURCES = ("_revocation.py", "_revocation_state.py", "_revocation_gate.py")

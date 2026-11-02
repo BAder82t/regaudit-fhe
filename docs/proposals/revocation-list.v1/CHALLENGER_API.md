@@ -78,16 +78,16 @@ from regaudit_fhe.replay import SqliteReplayCache, migrate_replay_file, replay_f
 SqliteReplayCache(path)            # new file: schema 2. Published file: raises LegacyReplayFile
 replay_file_status(path)           # read-only: state (empty, legacy, current), rows, origin, floors, cutover
 migrate_replay_file(path, *, now, previous_max_age=None, previous_policy_unknown=False,
-                    previous_trust_history_max_age=timedelta(hours=24), assumed_clock_skew=timedelta(minutes=5), _fault=None)
+                    previous_trust_history_max_age=None, assumed_clock_skew=timedelta(minutes=5), _fault=None)
 cache.bind_max_age(requested, persist=True); cache.bind_trust_history_age(requested, persist=True)
-cache.max_age_floor(); cache.trust_history_age_floor(); cache.history_cutover()
+cache.max_age_floor(); cache.trust_history_age_floor(); cache.history_cutover(); cache.trust_history_cutover()
 ```
-Exactly one of `previous_max_age` and `previous_policy_unknown`. `ReplayMigrationRefused` leaves the file as it was. `_fault(point)` is called at `before-commit`, for a kill inside the transaction. A published file: `CREATE TABLE replay (key_id TEXT NOT NULL, run_id TEXT NOT NULL, expires_at REAL NOT NULL, PRIMARY KEY (key_id, run_id))`, nothing else.
+Exactly one of `previous_max_age` and `previous_policy_unknown`. `previous_trust_history_max_age` is optional and capped at 24 hours; without it a history as of the migration or earlier is not fresh. Migration builds a new file and swaps it in; the original stays at `<path>.pre-migration`. `ReplayMigrationRefused` leaves the file as it was. `_fault(point)` is called at `after-validation`, `after-destination-built`, `before-keeping-original`, `before-swap`, `after-swap` and `after-directory-sync`, for a kill at each step. A published file is exactly: `CREATE TABLE replay (key_id TEXT NOT NULL, run_id TEXT NOT NULL, expires_at REAL NOT NULL, PRIMARY KEY (key_id, run_id))`, its automatic index, and nothing else. Any other object in `sqlite_master`, in a legacy or current file, is refused. A real 0.2.1 file is at `tests/vectors/published_replay_files/by_0.2.1.json` (base64).
 ```
 regaudit-fhe replay status --db F
 regaudit-fhe replay migrate --db F (--previous-max-age-seconds N | --previous-policy-unknown) [--previous-trust-history-max-age-seconds N]
 ```
-Exit 0 done, 2 refused and the file is as it was, 3 unusable. New engine codes: `REPLAY_HISTORY_UNKNOWN` (blocking), `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` (informational).
+Exit 0 done, 2 refused with the file as it was, 3 unusable. Engine codes: `REPLAY_HISTORY_UNKNOWN` (blocking), `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` (informational). `clock_skew` is library-only: `VerificationPolicy(clock_skew=...)`. The trust-history ceiling is `regaudit_fhe.replay.TRUST_HISTORY_CEILING`, and only the exact `SqliteReplayCache` holds a history floor.
 
 ## Fault injection
 

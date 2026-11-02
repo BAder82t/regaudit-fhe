@@ -449,7 +449,10 @@ Requirements for `confidential` and `high-assurance`:
   (`docs/DEPLOYMENT.md`): the operator states the earlier `max_age`, which becomes
   the floor, or states that it is unknown, in which case every report issued up to
   the migration is refused (`REPLAY_HISTORY_UNKNOWN`). The same floor applies to
-  `trust_history_max_age`; with no durable store it has a fixed ceiling of 24 hours.
+  `trust_history_max_age`, which is also never honoured above 24 hours. Any database
+  object in a replay file beyond the exact expected ones is a refusal, at migration
+  and at every use. An entry lives through its expiry instant: a report is still
+  fresh at exactly `issued_at + max_age`.
 * **Failure.** If the cache is unreachable or errors, verification fails closed
   with `REPLAY_STATE_UNAVAILABLE`. `development` MAY fail open and MUST say so
   in `reasons`.

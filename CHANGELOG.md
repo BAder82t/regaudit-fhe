@@ -17,8 +17,14 @@ canonicalisation and schemas are unchanged. Default verification verdicts are un
   twice. The store keeps a floor, the smallest effective `max_age` served. It only goes down and survives restarts. Only when
   the setting exceeds the floor, the floor is enforced and the result carries the informational
   `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are unchanged. See `docs/TRUST_SPEC.md` 6.1.
-- The same for `trust_history_max_age` (`TRUST_HISTORY_FLOOR_APPLIED`). With no durable store nothing can remember the
-  setting, so a value above 24 hours is not honoured.
+- The same for `trust_history_max_age` (`TRUST_HISTORY_FLOOR_APPLIED`), and a value above 24 hours is no longer honoured on
+  any store: a caller with such a setting and a caller-supplied history older than 24 hours is now refused. If the floor
+  cannot be used, no history counts.
+- Replay: an identifier now lives through its expiry instant. With `clock_skew=0` a report first presented at exactly T was
+  accepted again at exactly T+max_age; that second presentation is now `REPLAY_DETECTED`. Library only, since the CLI and
+  server have no `clock_skew` option. No other verdict changes.
+- A replay file with any database object beyond the exact expected ones (a trigger, view, index or table) is refused, at
+  migration and at every use. A migration builds a clean new file and keeps the original as `FILE.pre-migration`.
 
 ### Added
 

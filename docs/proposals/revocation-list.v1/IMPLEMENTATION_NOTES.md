@@ -31,42 +31,66 @@ AI-assisted engineering work; not an audit and no production assurance. The API 
 
 ## F-07: replay policy floor and published files
 
-* A sqlite file now has a schema version: a `replay_meta` row holding the origin, the two floors, and any cutover. Floors only go down, and a larger setting is not honoured (`REPLAY_POLICY_FLOOR_APPLIED`).
+* A sqlite file now has a schema version: a `replay_meta` row holding the origin, the two floors, and any cutovers. Floors only go down, and a larger setting is not honoured (`REPLAY_POLICY_FLOOR_APPLIED`).
 * **A published file never recorded its policy, and its expired rows may be purged, so nothing can reconstruct either.** It is refused until an operator runs `regaudit-fhe replay migrate`, stating one of two things:
   * `--previous-max-age-seconds N`: the largest `max_age` it ever served. An **operator statement**, recorded as `operator-attested`. It becomes the floor. A statement its rows contradict is refused. A false one the rows cannot show is undetected.
   * `--previous-policy-unknown`: recorded as `history-unknown`. Every report issued up to the migration plus the clock skew is refused (`REPLAY_HISTORY_UNKNOWN`), because it may have been recorded and purged. Nothing is invented.
-* Migration is one exclusive sqlite transaction and touches no row. A malformed or ambiguous file (wrong columns, extra tables or views, wrong row types, failed integrity check) is refused and left as it was.
+* **A legacy file is untrusted input.** This replaced an in-place migration that carried a planted trigger over, so the same report was TRUSTED twice.
+  * `sqlite_master` is compared whole against the exact published shape: one table with its exact SQL, its automatic index, nothing else. Any trigger, view, index, table or other object is a refusal before a row is read. It is an allow-list, not a list of what looks dangerous.
+  * Also refused before sqlite opens it for use: a `-journal`, `-wal` or `-shm` sibling, WAL mode, not a regular file, not owned by the runner. And after: a non-zero `user_version`, a failed integrity check, a malformed row.
+  * The rows are read as values under `trusted_schema = OFF` and an exclusive lock, and written to a **new file** with fixed DDL. Nothing executable can carry over. That file is read back before the swap and again after it: objects, policy record and a digest over every row.
+  * **The original is kept at `<file>.pre-migration`**, a hard link with its bytes unchanged. Nothing uses it, and it is the operator's to delete. An existing different file at that name is refused, not overwritten.
+  * **A kill at any step** leaves `<file>` as the whole original or the whole new file. Before the swap, another run finishes it. After, another run says it is already current. A leftover temp is swept by the next run. Each step is tested with a real SIGKILL.
+  * The mode and group of the original are kept. A group- or world-writable mode is kept and reported, not changed. The file must be owned by whoever runs the migration. A symlinked path migrates the real file and the link stays. The directory needs hard links.
+* **The same schema check runs on every open and every operation on a current file,** since a trigger can be planted after migration: an unexpected object is `REPLAY_STATE_UNAVAILABLE` at the engine and exit 3 at the CLI, not a quiet loss of protection.
+* **Edits to `replay_meta`:** fields are checked against each other: origin against its cutovers and migration time, floor types and signs, the trust-history floor against the ceiling, the schema version. A row must exist. Incoherent records are refused.
+* **Undetectable for someone who can write the file:** a coherent edit. They can raise a floor, delete rows, turn the record into `origin = new`, or replace the file. The record carries a local integrity check of its own shape, not authentication, since no key is available. A running object catches a floor that went up. A new process cannot. Replay state is a local file, and that writer is out of scope, as before.
 
 **What changes for a deployment that upgrades with an existing replay file:**
 
 | Situation | Before | Now |
 |---|---|---|
 | Any use before migrating, `record` or `check`, any report | Worked | `SqliteReplayCache` raises `LegacyReplayFile`. CLI `verify` exits 3. `serve` refuses to start, exit 2. A file swapped in under a running process gives `REPLAY_STATE_UNAVAILABLE` (HTTP 503) |
+| A file with anything beyond the published shape | Worked | Refused at open and at migration. Not migratable: decide what to do with it by hand |
 | Migrated with the true `max_age`, setting unchanged | | Verdicts as before, and recorded decisions honoured |
 | Migrated with the true `max_age`, setting raised | Same report accepted twice | The stated value is enforced: `REPORT_TOO_OLD`, with the note |
 | Migrated as unknown | | Reports issued before the migration plus skew: refused, `REPLAY_HISTORY_UNKNOWN`. Later ones: as before |
 | Read-only file in `check` mode, not migrated | Worked | Refused, since migration needs to write |
 | New file, or replay off | | Unchanged |
 
-**What does not change:** with `max_age` unchanged or lowered on a current file, verdicts and reasons are as before. `check` mode records no identifier; it writes the floor, and keeps working on a read-only current file. A broken floor surfaces at the replay step with the existing `REPLAY_STATE_UNAVAILABLE`, so an already refused report keeps its exit path. In `development` that is a non-blocking note, as for any replay failure there.
+**Migration procedure changes since the last freeze:** stop every verifier first, because a journal sibling is refused; if one remains from a crash, let a published version open the file once. The file is replaced, not edited in place, so a process holding the old file open keeps writing to the kept original. No separate backup is needed for the file itself. Without `--previous-trust-history-max-age-seconds`, older trust histories stop counting (see F-12).
 
-**Limits:**
+**What does not change:** with `max_age` unchanged or lowered on a current file, verdicts and reasons are as before. `check` mode records no identifier; it writes the floor, and keeps working on a read-only current file. A broken floor surfaces at the replay step with the existing `REPLAY_STATE_UNAVAILABLE`, so an already refused report keeps its exit path. In `development` that is a non-blocking note, as for any replay failure there, so a raised `max_age` is honoured in that one failure case.
+
+**Remains open for F-07:**
 * An operator's false statement cannot be detected, except where rows contradict it.
 * A published version can still open a migrated file and ignores the floors. After a downgrade and return, identifiers it recorded under another policy cannot be told apart.
-* A restored backup of a current file with a higher floor is refused by a running object that remembers, not by a new process. Replay state is a local file.
+* A restored backup of a current file with a higher floor is refused by a running object that remembers, not by a new process.
 * A floor set by a mistaken low value stays, and so does one set by a second policy sharing the store, and any verification under the policy sets it, including of a report then refused. The remedy is a new replay file, which forgets identifiers.
+* A new replay file remembers nothing, and pointing a verifier at one is the operator's decision.
 * `max_age` with replay off keeps no state, so it has no floor (`development` only; other profiles require a replay cache). Raising `clock_skew` is not floored: it does not extend the old side of the window.
 * A third-party cache without the methods has no floor.
-* Pre-existing, not changed: at `clock_skew=0` the same report is accepted twice at exactly `T+max_age`.
+
+## The expiry edge
+
+Freshness is inclusive at exactly `issued_at + max_age`, and retention is exactly `max_age + 2 * clock_skew`, but the purge and `seen` treated the expiry instant as gone, so with `clock_skew=0` an identifier was forgotten at the last instant its report was fresh. Reproduced on the published 0.2.1 wheel with a first presentation at exactly T. The stores now keep an entry through its expiry instant. **Only verdict change:** that second presentation goes from TRUSTED to `REPLAY_DETECTED`. The CLI and server have no `clock_skew` option, so it is reachable through the library only.
 
 The same principle in the gate: the state record keeps a monotonic `policy_floor` of mode and evidence age. A raised evidence age is not honoured (`REVOCATION_POLICY_FLOOR_APPLIED`), and a record that served `required` refuses `advisory` (`REVOCATION_POLICY_DOWNGRADE`, blocking in every mode). A ceremony keeps it unless reset explicitly. **`off` cannot be refused**, because it reads nothing, and the ruling on `off` requires that.
 
 ## F-12: `trust_history_max_age`
 
-It is the same route: raising the setting turned a stale `TrustHistory` into a fresh one, so a historical report by a retired or compromised key could become acceptable because a setting changed. It is reachable only where a caller supplies an authenticated history, since the library produces none, and never under `high-assurance`, whose `history_ok()` stays false.
+It is the same route: raising the setting turned a stale `TrustHistory` fresh, so a historical report by a retired or compromised key could become acceptable because a setting changed. It is reachable only where a caller supplies an authenticated history, since the library produces none, and never under `high-assurance`, whose `history_ok()` stays false.
 
-* **With a durable shipped store** (always, under `confidential`): closed the same way, by a second floor in `replay_meta`. A raised setting is not honoured (`TRUST_HISTORY_FLOOR_APPLIED`, stale stays stale). A migration sets it to the stated value, default 24 hours, the library default: if the earlier setting was lower, state it.
-* **Without one** (`development` with replay off, an in-memory or third-party cache): it **cannot** be closed the same way, because nothing persists to remember the earlier setting. The conservative alternative is a fixed ceiling at the default, 24 hours: a larger setting is not honoured at all. A raise below the ceiling, say from 1 hour to 3, cannot be seen. That residual is at most 24 hours, in `development` or with a store that keeps nothing, and a test states it. **Verdict change:** only for a caller with no durable store, a setting above 24 hours, and a history older than 24 hours.
+| Route | Now |
+|---|---|
+| Any setting above 24 hours (C7-07, a new file, a self-declared durable cache, a subclass) | **Closed.** A fixed ceiling applies to every path. A cache's declaration about itself is not read. Only the exact shipped `SqliteReplayCache` is believed to hold a floor at all |
+| Broken floor (C7-08, a raising binder, a real file swapped for a published one) | **Closed.** A failure no longer widens anything: no history counts (`UNPROVEN`), in every profile |
+| Raise below 24 hours on a surviving shipped store, across restart | **Closed** by the floor |
+| First-contact legacy file with no statement | **Closed conservatively.** A history as of the migration or earlier is not fresh, since nothing says it was not already stale. Nothing is invented |
+| False operator statement of the earlier setting | **Bounded, not closed.** Refused above 24 hours. Below that it is believed |
+| Raise below 24 hours with no shipped store, a new file, or a restored backup in a new process | **Bounded, not closed.** It needs state that survives somewhere the verifier's host cannot rewrite, which does not exist here. The conservative behaviour is the ceiling: the window cannot exceed 24 hours, and tests named `limit` state it |
+
+**Verdict change:** a caller with a setting above 24 hours and a history older than 24 hours is now refused (`TRUST_STORE_FRESHNESS_UNPROVEN`, with `TRUST_HISTORY_FLOOR_APPLIED`), on every store. This was already a non-default setting used with a caller-supplied history. Default policies are unaffected.
 
 ## Retired key later marked compromised
 
@@ -102,9 +126,8 @@ It is the same route: raising the setting turned a stale `TrustHistory` into a f
 ## Evidence kinds
 
 * **Real:** the file store, under real processes killed with SIGKILL, real concurrent processes, new processes after a restart, files
-  damaged and restored on disk. Replay migration: a real process killed inside the transaction, new processes, the CLI and `serve` as processes,
-  backups restored on disk. Files from a real 0.2.1 wheel go through the same sequence in a harness outside the suite; in the suite a published
-  file is made with the same SQL the published versions run.
+  damaged and restored on disk. Replay migration: a real process killed at every step, new processes, the CLI and `serve` as processes, backups restored on disk. A file
+  really written by the published 0.2.1 wheel is a committed fixture in the suite, and a harness outside it runs the real 0.2.1 CLI.
 * **Simulated:** the independent store is a test double (`tests/experimental_revocation/trust_gate.py`), reached only through the private
   `_run_gate`. Every row under `high-assurance` with `required` is algorithm evidence only, and shows nothing about a real store. A torn
   write is made by truncating a file. Power loss has not been tested at all.

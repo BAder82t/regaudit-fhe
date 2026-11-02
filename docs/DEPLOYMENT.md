@@ -517,8 +517,8 @@ the deployment, not with this binary.
 ## Upgrading with an existing replay file
 
 A replay file written by a published version does not record what policy wrote it, and rows it has purged are gone. It is refused
-until migrated: `SqliteReplayCache` raises `LegacyReplayFile`, `regaudit-fhe verify` exits 3, and `serve` refuses to start. Back the file
-up, stop the verifiers using it, and run one of:
+until migrated: `SqliteReplayCache` raises `LegacyReplayFile`, `regaudit-fhe verify` exits 3, and `serve` refuses to start. Stop every verifier using the file,
+and run one of:
 
 ```bash
 regaudit-fhe replay status --db replay.db
@@ -530,9 +530,16 @@ regaudit-fhe replay migrate --db replay.db --previous-policy-unknown          # 
   before under that setting, and a larger setting is not honoured.
 * **Unknown:** every report issued up to the migration, plus the clock skew, is refused from then on (`REPLAY_HISTORY_UNKNOWN`), since it may have been
   recorded and purged. Later reports behave as before.
+* **`--previous-trust-history-max-age-seconds`** states the same for trust history, at most 86400. Without it, a trust history as of the migration or earlier
+  is not fresh.
 
-Migration is one transaction and changes no recorded row. A file it cannot read with certainty is refused and left as it was. A new, empty replay file
-needs no migration, and it also remembers nothing, so pointing a verifier at one is an explicit decision to forget.
+The file is treated as untrusted input. Anything but the exact published shape is refused, including triggers, views, indexes and extra tables: inspect such a file
+by hand, because someone changed it. The rows go into a new file, which is checked and swapped in; the original stays at `FILE.pre-migration`, unchanged. A kill at
+any step leaves the whole original or the whole new file. A `FILE-journal` left by a crash is refused: let a published version open the file once. The original's mode and
+group are kept, and the file must be owned by whoever runs this. A new, empty replay file needs no migration, and it also remembers nothing, so pointing a verifier
+at one is an explicit decision to forget.
 
 On a current file, floors for `max_age` and `trust_history_max_age` only go down. Going back to a larger value needs a new file. Two policies sharing one
-file are held to the smaller value.
+file are held to the smaller value. `trust_history_max_age` above 24 hours is never honoured. An unexpected object in the file at any time stops verification with
+`REPLAY_STATE_UNAVAILABLE` rather than running without protection. Someone who can write the file can still make a coherent edit that nothing here detects: keep it private
+to the verifier's account.
