@@ -818,7 +818,7 @@ def _warn_if_no_issuers(
     trusted_keys: Mapping[str, str] | TrustStore | None, trust_store: TrustStore | None
 ) -> None:
     store = trust_store if trust_store is not None else trusted_keys
-    if store is None or (isinstance(store, TrustStore) and store.binds_issuers):
+    if store is None or (type(store) is TrustStore and store.binds_issuers):
         return
     warnings.warn(
         "this trust material states no issuer for its keys, so issuer_trusted does not show that the report's "
@@ -845,7 +845,7 @@ def _verify_envelope(
     elif trusted_keys is not None:
         keys = trusted_keys
     has_trust_material = store is not None or keys is not None
-    bound = store is not None and store.binds_issuers
+    bound = type(store) is TrustStore and store.binds_issuers
 
     body_bytes = canonical_json(env.signed_body())
     sha_ok = sha256_hex(body_bytes) == env.receipt.get("sha256")

@@ -189,6 +189,11 @@ class VerificationPolicy:
         if self.profile != "development":
             if self.trust_store is None:
                 raise PolicyError(f"the {self.profile!r} profile requires a trust store")
+            if type(self.trust_store) is not TrustStore:
+                raise PolicyError(
+                    f"the {self.profile!r} profile requires exactly a TrustStore, not a subclass: what it reads about a "
+                    "key and its issuer must come from validated records"
+                )
             if not self.trust_store.binds_issuers:
                 raise PolicyError(
                     f"the {self.profile!r} profile requires a trust store that states the issuer of each key, and this "

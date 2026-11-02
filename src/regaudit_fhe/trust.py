@@ -156,6 +156,23 @@ class KeyEntry:
     parameter_set_pin: str | None = None
 
 
+def _is_validated_record(key_id: Any, entry: Any, pem: Any) -> bool:
+    """A record of exactly the types the parser builds. Nothing here can answer a comparison in its own way."""
+    if not (type(key_id) is str and type(entry) is KeyEntry and type(pem) is str):
+        return False
+    return (
+        all(type(v) is str for v in (entry.key_id, entry.public_key_pem, entry.status, entry.issuer))
+        and (entry.parameter_set_pin is None or type(entry.parameter_set_pin) is str)
+        and all(
+            v is None or type(v) is datetime for v in (entry.not_before, entry.retired_at, entry.compromised_from)
+        )
+        and all(
+            v is None or (type(v) is frozenset and all(type(item) is str for item in v))
+            for v in (entry.deployments, entry.primitives)
+        )
+    )
+
+
 def _checked_pem(key_id: str, pem: Any) -> str:
     """A PEM that parses as an Ed25519 public key; returns it normalised."""
     if not isinstance(pem, str):
@@ -316,6 +333,17 @@ class TrustStore:
                 raise TrustStoreError(
                     "trust-store keys/revoked/parameter_set_pins are inconsistent with entries"
                 )
+        # Worked out once, here, from the validated records. Malicious code in this process can still change it
+        # (object.__setattr__), and that is outside what this library can guarantee.
+        object.__setattr__(
+            self,
+            "_binds_issuers",
+            bool(self.entries)
+            and all(
+                _is_validated_record(key_id, entry, self.keys.get(key_id))
+                for key_id, entry in self.entries.items()
+            ),
+        )
 
     # ----- Loaders --------------------------------------------------------
 
@@ -463,7 +491,7 @@ class TrustStore:
         A bare or ``keys`` store does not, whatever its number of keys or the shape of its key ids. Nothing else can
         supply that statement: the report's own issuer name is what is being checked.
         """
-        return bool(self.entries) and all(entry.issuer for entry in self.entries.values())
+        return bool(self._binds_issuers)  # type: ignore[attr-defined]
 
     def is_known(self, key_id: str) -> bool:
         return key_id in self.keys
