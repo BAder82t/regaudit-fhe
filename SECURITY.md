@@ -17,6 +17,9 @@ security audit, and no production assurance is claimed.
 The issuer attribution limitation in v0.2.1 is described in
 [docs/advisories/issuer-attribution-0.2.1.md](docs/advisories/issuer-attribution-0.2.1.md).
 
+Replay protection limitations in v0.2.1 are described in
+[docs/advisories/replay-limitations-0.2.1.md](docs/advisories/replay-limitations-0.2.1.md).
+
 ## Reporting a vulnerability
 
 Email **b@vaultbytes.com** with the subject line `regaudit-fhe security`.
