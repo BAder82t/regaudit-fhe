@@ -338,6 +338,21 @@ def test_a_corrupt_policy_record_counts_no_history(tmp_path):
     assert not res.accepted and res.trust_history == "UNPROVEN"
 
 
+def test_a_running_object_that_remembers_a_lower_floor_counts_no_history_until_restarted(tmp_path):
+    """A stated limit. It reads as a replaced file, and it fails closed for history only."""
+    db = tmp_path / "run.db"
+    running = SqliteReplayCache(db)
+    assert stale(case(running, profile="confidential", trust_history_max_age=HOUR, as_of=T0 - 2 * HOUR))
+    assert stale(case(SqliteReplayCache(db), as_of=T0 - 2 * HOUR))  # another process takes the file over
+    later = T0 + 2 * HOUR
+    res = case(running, profile="confidential", trust_history_max_age=HOUR, as_of=later - timedelta(minutes=1), now=later)
+    assert not res.accepted and res.trust_history == "UNPROVEN"
+    fresh_object = case(
+        SqliteReplayCache(db), profile="confidential", trust_history_max_age=HOUR, as_of=later - timedelta(minutes=1), now=later
+    )
+    assert fresh(fresh_object)
+
+
 # ------------------------------------------------------------------ the other profiles
 
 

@@ -42,6 +42,10 @@ NEW = (
     "../test_f09_development_label.py",
     "../test_f09_store_migration.py",
     "../test_replay_shared_and_omitted.py",
+    "../test_secure_profile_v1.py",
+    "../test_issuer_name_rule.py",
+    "../test_trust_store_exact_class.py",
+    "../test_migration_operator_declared.py",
     "../test_response_mode.py",
 )
 SOURCES = ("_revocation.py", "_revocation_state.py", "_revocation_gate.py")

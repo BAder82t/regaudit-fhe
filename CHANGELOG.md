@@ -6,6 +6,9 @@ AI-assisted engineering work; not an audit and no production assurance. Report f
 canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with the authorized exceptions under
 Changed, below. Release scope is undecided, and this section describes a local experimental branch.
 
+**Before upgrading, read [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md). A trust store without issuers under `confidential` or `high-assurance`, and any replay file
+written by a published version, are refused until you migrate them.**
+
 ### Changed
 
 - **Upgrade action: `confidential` and `high-assurance` refuse a trust store that states no issuer (security, published
@@ -15,6 +18,12 @@ Changed, below. Release scope is undecided, and this section describes a local e
   key's issuer. See `docs/DEPLOYMENT.md`. `development` and the lenient library paths keep their verdicts.
 - With such a store in `development`, `reasons` gains `ISSUER_UNBOUND` and the CLI warns on stderr. `verify_envelope`'s result gains `issuer_bound`,
   which `to_dict` leaves out and `dataclasses.asdict` includes, and it raises a `DeprecationWarning`. `verify_receipt` does not warn, as its contract says. No verdict changes. Response format v2 gains `issuer_binding`.
+- **An `entries` store holding an ambiguous issuer name no longer loads, in any profile.** One rule at enrollment, loading and migration: not empty, no leading or trailing
+  whitespace, no whitespace other than U+0020, no control, zero-width, bidi or other invisible characters. Nothing is normalised. `verify` exits 3 and `serve` does not start. Signing is not
+  covered, but only a store with no issuers can accept such a report.
+- `trust migrate` records each issuer as a local operator's statement, in a file beside the target, and says so in its output, `trust list` and `trust status`. Results on such a store
+  gain `ISSUER_OPERATOR_DECLARED` in `reasons`. The record is a label and authenticates nothing. It is beside the store because published versions refuse an unknown member in it.
+- `confidential` and `high-assurance` refuse a `TrustStore` subclass (`PolicyError`), and issuer binding is worked out from validated records.
 - **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
   so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
   start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued
@@ -36,6 +45,8 @@ Changed, below. Release scope is undecided, and this section describes a local e
 
 ### Added
 
+- The `secure-v1` profile: `confidential` plus a fixed 24 hour trust-history window, the same on a new store, an existing store and with no store state, which a caller cannot set larger or
+  smaller. A store recorded as operator-declared is refused. The existing profiles keep their rules and make no such claim.
 - CLI `trust status`, `trust retire`, `trust revoke`: read-only lifecycle view, and one-way edits of an `entries`
   trust store (active to retired, active or retired to compromised; never re-dated, never loosened, never
   deleted). These edit a **local, unauthenticated file**; they are not authoritative revocation and do not

@@ -45,7 +45,7 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_CORS_ORIGINS`           | (empty)       | Comma-separated CORS allow-list. Empty = no cross-origin response.      |
 | `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
 | `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
-| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential` or `high-assurance`. Anything else aborts startup. |
+| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential`, `high-assurance` or `secure-v1`. Anything else aborts startup. |
 | `REGAUDIT_FHE_VERIFIER_ID`            | (empty)       | This verifier's audience identifier (required for `high-assurance`). |
 | `REGAUDIT_FHE_MAX_AGE_S`              | (empty)       | Refuse reports older than this many seconds. Must be positive and finite; required outside development. |
 | `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
@@ -477,8 +477,8 @@ limits egress to the destinations the deployment actually requires
 
 ## Production checklist
 
-Under `confidential` or `high-assurance` the trust store must be in the `entries` form: see
-[Upgrading a trust store without issuers](#upgrading-a-trust-store-without-issuers).
+Under `confidential`, `high-assurance` or `secure-v1` the trust store must be in the `entries` form: see
+[Upgrading a trust store without issuers](#upgrading-a-trust-store-without-issuers), and [MIGRATION_0.3.md](MIGRATION_0.3.md) for both upgrade actions.
 
 - [ ] HTTPS termination at the ingress (TLS 1.2+, OCSP stapling).
 - [ ] API keys stored in a secret manager, rotated quarterly.
@@ -518,6 +518,8 @@ Each of those gaps is operator-side: TLS, KMS, and runbooks live with
 the deployment, not with this binary.
 
 ## Upgrading with an existing replay file
+
+Start with [MIGRATION_0.3.md](MIGRATION_0.3.md), which covers this and the trust store together.
 
 A replay file written by a published version does not record what policy wrote it, and rows it has purged are gone. It is refused
 until migrated: `SqliteReplayCache` raises `LegacyReplayFile`, `regaudit-fhe verify` exits 3, and `serve` refuses to start. Stop every verifier using the file,
@@ -564,6 +566,9 @@ regaudit-fhe trust migrate --source old.json --target new.json \
 regaudit-fhe verify -i a_report_you_trust.json --trusted-keys new.json
 ```
 
+* **Your statement, not proof.** The output says `issuer_binding: operator-declared`, `authenticated_binding: false`, and a file beside the target records it. `confidential`
+  and `high-assurance` accept the store and label results `ISSUER_OPERATOR_DECLARED`; `secure-v1` refuses it. Keep the two files together. That file is a label: deleting it
+  strengthens nothing.
 * **You state every issuer.** Nothing is inferred, and a key with no statement refuses the whole migration. The name must be
   exactly what the key's reports carry: the comparison is byte for byte. Read the `issuer` field of reports you already trust, then check a
   sample against the new store before switching.
@@ -573,4 +578,5 @@ regaudit-fhe verify -i a_report_you_trust.json --trusted-keys new.json
   the code changes from `KEY_REVOKED` to `KEY_COMPROMISED_NO_CHRONOLOGY`. Parameter-set pins carry over.
 * **One key has one issuer.** Reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution. Keep the
   name the reports you still need carry, or enroll a new key for the new name.
+* **A name must be unambiguous.** See "Names that are refused" in [MIGRATION_0.3.md](MIGRATION_0.3.md#names-that-are-refused). An existing `entries` store holding such a name no longer loads.
 * **Reports are untouched** and nothing needs re-signing. A report's verdict is the same as before if the stated issuer is its issuer.

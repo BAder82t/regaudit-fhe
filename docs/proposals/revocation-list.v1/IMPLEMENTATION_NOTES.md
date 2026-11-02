@@ -106,6 +106,18 @@ statement beside a legacy store, which is the `entries` form in another syntax.
 Whether `development` and the lenient paths should refuse too is a later decision by the owner. Until then they are labelled, not changed. A departure from the proposal, section
 "Legacy keys": it said such a store verifies in every profile.
 
+On candidate 2, by the owner's rulings: binding is worked out at construction from records of exactly the parsed types, and a strict policy refuses a `TrustStore` subclass. An issuer's name
+has one rule (`trust.issuer_name_problem`). A migration's issuer is an operator's statement, recorded beside the store because every published version refuses an unknown member in it. Two
+defaults here are the coordinator's and await the owner: the existing strict profiles accept a labelled store, and `secure-v1` refuses it whole. `development` and `verify_trusted` with its default
+policy still accept a subclass. Not covered: malicious code in the verifier's process, and a store whose label was deleted, copied away or skipped with `from_dict`.
+
+## F-12 in `secure-v1`
+
+The owner's ruling is a fixed 24 hour window in a versioned profile, not a reinterpretation of `trust_history_max_age`. An explicit 24 hours cannot be told from an omitted setting, since the dataclass default
+is that value, and it is harmless. `secure-v1` requires a replay store, as `confidential` does, so "stateless" here means that the window reads no state: with any cache but the shipped sqlite store nothing is
+asked of it. The shipped store's floor can only be below 24 hours if a shorter setting was served, and then it moves up with a cutover, in one transaction, which is the one place a floor rises. Another
+running process that remembered the lower floor then treats it as a replaced file, and counts no history until restarted. A restored backup, or a new file, forgets what a shorter setting refused there. The window still holds: it is bounded by 24 hours.
+
 ## Retired key later marked compromised
 
 `next_list` now **refuses** a compromise time after the retirement. The clamp is gone: there is no flag for it, because rewriting a stated time is a decision about what is true. The refusal says which forms verifiers accept, and the operator states the retirement time or earlier, or no time for an unknown boundary. A list signed some other way is still refused by a verifier and latches: the key stays refused, the whole issuer fails closed, replays and later lists clear nothing, and only an accepted recovery statement or a re-baseline ceremony clears it. A real test runs the whole sequence on the file store.
@@ -137,7 +149,7 @@ Whether `development` and the lenient paths should refuse too is a later decisio
 ## Reason codes added since the frozen proposal
 
 `REVOCATION_HIGH_ASSURANCE_UNAVAILABLE` (configuration), `REVOCATION_POLICY_DOWNGRADE` (blocking in every mode), `REVOCATION_POLICY_FLOOR_APPLIED`
-(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED` and `ISSUER_UNBOUND` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
+(informational), and on the engine `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND` and `ISSUER_OPERATOR_DECLARED` (informational) and `REPLAY_HISTORY_UNKNOWN` (blocking), all added to TRUST_SPEC 8.3.
 
 ## Evidence kinds
 
