@@ -80,23 +80,37 @@ recomputes the receipt to detect tampering between issuance and review.
 
 ## The six primitives
 
-| Module        | API                       | Spec depth (budgeted) | Use case (technical evidence supporting…)                                |
-| ------------- | ------------------------- | --------------------- | ------------------------------------------------------------------------ |
-| `egf_imss`    | `audit_fairness`          | 4                     | NYC LL144, EU AI Act §10/§15, Colorado AI Act, CFPB workflows.           |
-| `etk_fpa_hbc` | `audit_provenance`        | 3                     | EU AI Act §10, 21 CFR Part 11, GDPR §22, HIPAA workflows.                |
-| `esc_cia`     | `audit_concordance`       | 4                     | FDA SaMD oncology PCCP, EU AI Act §15, EMA workflows.                    |
-| `ecp_qssp`    | `audit_calibration`       | 3                     | FDA SaMD UQ, EU AI Act §15, ISO/IEC 23053, UNECE WP.29 workflows.        |
-| `ew1_cdsf`    | `audit_drift`             | 1                     | EU AI Act §15, FDA SaMD PCCP, Basel III workflows.                       |
-| `ecmd_jps`    | `audit_disagreement`      | 5                     | OCC SR 11-7, EU AI Act §15, FDA SaMD PCCP workflows.                     |
+| Module        | API                       | Spec depth (plaintext model) | Declared depth (TenSEAL) | Use case (technical evidence supporting…)                                |
+| ------------- | ------------------------- | ---------------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| `egf_imss`    | `audit_fairness`          | 4                            | 4                        | NYC LL144, EU AI Act Art. 10/15, Colorado SB26-189 (fit unconfirmed), ECOA and Regulation B workflows. |
+| `etk_fpa_hbc` | `audit_provenance`        | 3                            | 3                        | EU AI Act Art. 10, 21 CFR Part 11, GDPR Art. 22, HIPAA workflows.        |
+| `esc_cia`     | `audit_concordance`       | 4                            | 5                        | FDA SaMD oncology PCCP, EU AI Act Art. 15/72, EMA workflows.             |
+| `ecp_qssp`    | `audit_calibration`       | 3                            | 4                        | FDA SaMD UQ, EU AI Act Art. 15/72, ISO/IEC 23053, UNECE WP.29 workflows. |
+| `ew1_cdsf`    | `audit_drift`             | 1                            | 2                        | EU AI Act Art. 15/72, FDA SaMD PCCP, Basel III workflows.                |
+| `ecmd_jps`    | `audit_disagreement`      | 5                            | 5                        | SR 26-2 and OCC Bulletin 2026-13, EU AI Act Art. 15/72, FDA SaMD PCCP workflows. |
+
+The status of these regulations as checked on 2026-11-01 is in
+[COMPLIANCE.md](COMPLIANCE.md#regulatory-status-notes). Default reports still sign
+older labels such as `OCC_SR_11_7` and `COLORADO_AI_ACT` from `REGULATION_MAP`.
 
 > **"Spec depth" is a design budget, not a measurement.** It is the
 > multiplicative depth each primitive is *allowed* to consume in the
 > plaintext slot-vector model, as written in `docs/specs/`. It is an
 > upper-bound target, not what the encrypted backend actually uses.
+> "Declared depth" is `DECLARED_DEPTH` in `regaudit_fhe.fhe.primitives`. It
+> differs from the spec for concordance, calibration and drift.
+
+> **`depth_budget.consumed` in a report is not measured by default.**
+> `envelope()` and `envelope_v2()` set `depth_consumed` to 6 unless the caller
+> passes a value. The CLI and the HTTP server do not pass one, so their reports
+> say `"consumed": 6` for each primitive even though they run the plaintext path.
+> A report would only have another number if the caller has passed one, for
+> example `last_depth(name)` after an encrypted call. `declared` is always 6, the
+> circuit-wide ceiling, and it is not the value of `DECLARED_DEPTH`.
 
 > **Compliance scope and disclaimer.** `regaudit-fhe` produces
-> *technical evidence* — encrypted scalars, signed envelopes,
-> parameter-set hashes, depth-budget attestations — that may support
+> *technical evidence* (encrypted scalars, signed envelopes,
+> parameter-set hashes, depth-budget fields) that may support
 > compliance workflows in the jurisdictions above. It does **not**
 > constitute legal compliance, conformity assessment, regulatory
 > acceptance, or a recognised audit. Read [COMPLIANCE.md](COMPLIANCE.md)
@@ -109,22 +123,31 @@ recomputes the receipt to detect tampering between issuance and review.
 | Term                  | Meaning                                                                 | Where it lives                                                    |
 | --------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | **Spec depth**        | Design budget in the plaintext model (table above). Theoretical.        | `docs/specs/*.md`                                                 |
-| **Declared depth**    | Per-backend ceiling enforced at runtime on TenSEAL; the run fails if exceeded. It can be *higher* than spec depth because TenSEAL has no native rotation (rotation and prefix sums cost extra levels). | `DECLARED_DEPTH` in `regaudit_fhe.fhe.primitives` |
-| **Observed depth**    | Levels actually consumed on the real CKKS execution path. Measured.     | `benchmarks/results/SUMMARY.md`, `last_depth(name)` / `last_depths()` |
+| **Declared depth**    | Per-backend ceiling checked at runtime on TenSEAL; the run fails if the observed-depth counter exceeds it. It can be *higher* than spec depth because TenSEAL has no native rotation (rotation and prefix sums cost extra levels). | `DECLARED_DEPTH` in `regaudit_fhe.fhe.primitives` |
+| **Observed depth**    | The `EncryptedSlotVec.depth` counter after an encrypted call. It is not a reading of the modulus chain. | `benchmarks/results/SUMMARY.md`, `last_depth(name)` / `last_depths()` |
 
 Observed depth is always ≤ declared depth. It is **not** required to
 equal spec depth: it can be lower (for example, fairness is budgeted at
-4 but consumes 1) or the declared ceiling can exceed the spec budget
+4 but counts 1) or the declared ceiling can exceed the spec budget
 (concordance: spec 4, declared 5 on TenSEAL). All declared ceilings fit
 within the d=6 CKKS circuit, leaving headroom for downstream
 commit-and-verify chaining. The `last_depth` state is held in a
 `ContextVar`, so concurrent encrypted calls do not race on it.
 
-Observed vs. declared depth, measured on TenSEAL (identical at
+The counter does not count `mul_scalar` or negation, and TenSEAL spends a level on
+both. The runtime check only compares the declared ceiling with this counter. We
+counted the levels left on the output ciphertext with TenSEAL 0.3.18 at N = 2^14,
+on the default 400-bit chain and on the 360-bit chain, and both gave the same result.
+The levels used were fairness 2, provenance 1, concordance 6, calibration 5, drift 2
+and disagreement 5 (with non-zero polynomial coefficients). For concordance and
+calibration this is above the declared depth of 5 and 4. All of them fit in the 6
+levels of the 360-bit chain. We did not run this count at N = 2^15.
+
+Observed vs. declared depth, as counted on TenSEAL (identical at
 N = 2^14 and 2^15):
 
 ```
-Each ▮ = 1 consumed level (observed). "decl" = TenSEAL declared ceiling;
+Each ▮ = 1 counted level (observed). "decl" = TenSEAL declared ceiling;
 "spec" = design budget from the table above.
 
     primitive             1 2 3 4 5 6   observed  decl  spec
@@ -288,7 +311,8 @@ A `TRUSTED` verdict answers the first two only.
    `parameter_set` and `parameter_set_hash` do not contradict each other. This is a bug detector, not a defence
    against an adversarial signer.
 4. **Did the computation really run under FHE?** **Not provided.** `backend` is what the signer asserted, and a
-   default library call signs `plaintext` even on the encrypted path.
+   default library call signs `plaintext` even on the encrypted path. Signed provenance gives authenticated claims:
+   the signature shows who made the claim, and it does not independently verify that an encrypted computation ran.
 
 A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
@@ -590,7 +614,8 @@ receipt's `public_key_pem` is a convenience only: a verifier checks the signatur
 against the key **it** registered, never the embedded one. `timestamps` sit outside
 the signature and bind a *sealed digest* of the signed body plus the signature. The
 canonical test vectors under [`tests/vectors/report_v2/`](tests/vectors/report_v2/)
-pin the exact bytes.
+pin the exact bytes. The `"consumed": 2` in this example is a value the test vector
+passes; a report from the CLI says 6.
 
 `report.v1` keeps its original canonical bytes and fields: `key_id` and the public
 key live in the unsigned receipt, so a v1 report cannot bind its issuer key,
@@ -730,11 +755,22 @@ python benchmarks/bench_fhe.py --rings 14 15 --reps 3
 
 Add `--rings 16` for `N = 2^16` (slower; uses several GB of RAM).
 
-The "Threshold flip" column is the rate at which CKKS noise causes the
-encrypted circuit to disagree with the plaintext circuit on a boolean
-breach decision over 10–20 trials with inputs sampled near the breach
-boundary. Zero flips across both rings means CKKS noise does not
-change a regulatory threshold decision at the audit precision targets.
+The "Threshold flip" column is the rate at which the encrypted circuit
+disagrees with the plaintext circuit on a boolean breach decision. The default
+is 20 trials per primitive, and the result files do not record the number used.
+
+The benchmark only measures this rate for fairness, drift and disagreement.
+For provenance, concordance and calibration `bench_fhe.py` writes a fixed `0.0`
+since those primitives have no breach boolean. Therefore the `0.00%` in those
+rows is a placeholder and not a result.
+
+The inputs in the three measured samplers are not close to the threshold. From
+2000 plaintext draws of each sampler, the fairness inputs were at least about
+0.01 from the threshold and usually about 0.23. The drift inputs were at least
+about 0.002 away. The disagreement sampler is one fixed input about 0.005 away.
+The biggest absolute errors in the table for those primitives are about 7e-6 or
+smaller. Zero flips shows that noise did not change the decision for these inputs.
+This does not show that noise cannot change a decision close to the threshold.
 
 ## Verify a fresh clone
 

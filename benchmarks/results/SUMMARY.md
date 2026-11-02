@@ -18,3 +18,11 @@ Rings tested: 2^14, 2^15.
 | calibration | 2^15 | 16384 | 16 | 3/4 | 0 | 2 | 1 | 0.081 | 6929 | 2899304 | 0.00e+00 | 0.00% |
 | drift | 2^15 | 16384 | 16 | 2/2 | 12 | 1 | 2 | 0.643 | 6937 | 2899422 | 7.06e-06 | 0.00% |
 | disagreement | 2^15 | 16384 | 16 | 3/5 | 0 | 12 | 0 | 0.642 | 6608 | 2899279 | 1.29e-08 | 0.00% |
+
+**Note on the Threshold flip column.** The benchmark only measures this rate for
+fairness, drift and disagreement. For provenance, concordance and calibration
+`bench_fhe.py` writes a fixed `0.0` since those primitives have no breach boolean,
+so `0.00%` in those rows is a placeholder and not a result. The measured samplers
+use inputs that are not close to the threshold, so zero flips does not show that
+noise cannot change a decision close to the threshold. See the README section
+"Real CKKS benchmarks".

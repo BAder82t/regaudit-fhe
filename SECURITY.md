@@ -27,16 +27,55 @@ days and provide a remediation timeline within ten business days.
 
 ## Threat model
 
-`regaudit-fhe` operates inside a standard CKKS threat model:
+The full model is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). This section
+keeps three things apart: what 0.2.1 does, what is experimental, and what is
+only an intended design.
 
-- The audit operator (the entity running the primitives) is honest but
-  curious. Encrypted inputs are never decrypted server-side.
-- Auditor-public quantities are the regulation citations, the audit
-  envelope schema, and a set of public group-cardinality scalars
-  documented in each primitive's specification under `docs/specs/`.
-- IND-CPA security at 128 bits is inherited from the underlying CKKS
-  parameter set (`N = 2^15`, `log Q ~ 240`, hybrid key switching
-  `dnum = 3`).
+**Actual behaviour in 0.2.1**
 
-Findings outside that model — for example, side-channel timing on the
-audit operator's host — should be reported through the same channel.
+- The default path, the CLI and the HTTP server run on plaintext. The host
+  running them can read the inputs.
+- The encrypted path is six Python functions in `regaudit_fhe.fhe.primitives`,
+  available with the `[fhe]` extra (TenSEAL). Each function takes plaintext
+  arguments, the context holds the secret key, and one process encrypts,
+  evaluates and decrypts. There is no separation between the party that
+  evaluates and the party that holds the key.
+- Not every input is encrypted. `fairness_encrypted` encrypts only `y_pred`, and
+  `y_true`, `group_a` and `group_b` are plaintext in the same call.
+- The functions decrypt more than the values in the report. The calibration
+  function decrypts a real-valued membership signal for each class, and a party
+  who sees that signal and knows `quantiles` and `score_range` can solve for each
+  per-class score, within CKKS error. The disagreement function decrypts a
+  per-slot output vector for each model.
+- The default parameters are `N = 2^15` with a 360-bit chain for `CKKSParams()`,
+  and `N = 2^14` with a 400-bit chain for `build_d6_context()`. `CKKSParams` checks
+  them against the SEAL log Q bounds for 128-bit IND-CPA in `SEAL_MAX_LOG_Q_128`.
+  No separate security estimate is recorded in this repository, and nothing in the
+  code sets a key-switching `dnum` value.
+- The library makes no IND-CPA-D claim. See
+  [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) §5.1.
+- Declared depth is only compared with a counter, and the counter does not count
+  every level TenSEAL uses. With TenSEAL 0.3.18 at `N = 2^14`, concordance used
+  6 levels against a declared 5 and calibration used 5 against a declared 4.
+- A signed report carries authenticated claims. The signature does not
+  independently verify that an encrypted computation ran.
+
+**Replay protection limitation in v0.2.1:** Python library integrations that explicitly configure `clock_skew=0` may accept the same signed report twice at the exact freshness-expiry boundary. The CLI and HTTP server use the nonzero default and are not affected by this specific configuration issue. Until the correction is released, library integrators should retain a positive clock-skew allowance and avoid `clock_skew=0`. This limitation is scheduled for correction in the next release.
+
+**Experimental configurations**
+
+- The OpenFHE backend (`[openfhe]`) is experimental, covers five of the six
+  primitives and is not the verified reference. Its context also keeps the secret
+  key, so the same single-process limit applies.
+
+**Intended future architecture, not delivered in 0.2.1**
+
+- An honest-but-curious operator would see only ciphertexts and auditor-public
+  scalars, and a separate party would hold the CKKS secret key and decrypt the
+  output. The roles and key custody in the threat model describe this design.
+  Nothing in 0.2.1 provides this separation.
+- Group counts and the other values called auditor-public are a design assumption
+  for that deployment. The library does not publish them.
+
+Findings outside this model, for example side-channel timing on the audit
+operator's host, should be reported through the same channel.
