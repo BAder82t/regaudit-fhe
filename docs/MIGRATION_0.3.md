@@ -45,17 +45,19 @@ regaudit-fhe trust migrate --source old.json --target new.json --issuer KEY_ID=I
 regaudit-fhe trust migrate --source old.json --target new.json --issuer KEY_ID=ISSUER
 ```
 
-Repeat `--issuer` for every key: nothing is inferred. The source is left unchanged. The command writes `new.json.issuer-provenance.json` beside the store to record what happened, the output says
-`issuer_binding: operator-declared`, `authenticated_binding: false`, and `development` results carry `ISSUER_OPERATOR_DECLARED`. A flat `revoked` key becomes `compromised` with an unknown boundary, and it stays
-refused. Published versions read `new.json` as it is, and ignore the file beside it.
+Repeat `--issuer` for every key: nothing is inferred. A flat `revoked` key becomes `compromised` with an unknown boundary, and it stays refused. The output says `issuer_binding: operator-declared`, `authenticated_binding: false`,
+and `development` results carry `ISSUER_OPERATOR_DECLARED`.
 
-**That file is a label in a file you control, not authentication, and it can be removed.** Deleting it, or copying the store without it, gives a store nothing can tell from a hand-written one, and strict
-profiles then accept it. That does not make the names any better established. Do not do this: the refusal is there because nothing has established them.
+**The store records this, on each entry, as `issuer_source: operator-declared`.** The record goes with the store through a copy or a move. Deliberately deleting it from the file is an edit of local state that nothing can detect, and
+it does not make the names any better established.
+
+**Published versions refuse a migrated store.** 0.1.0, 0.1.1, 0.2.0 and 0.2.1 do not know that member, so `TrustStore.from_json` raises and `regaudit-fhe verify` exits 3. That fails closed. **Keep the source store: `trust migrate` leaves it unchanged, and it is
+the way back** to an older verifier.
 
 ### Names that are refused
 
 Everywhere a name is enrolled, loaded or migrated, and in every profile, an issuer may not be empty, have leading or trailing whitespace, contain
-whitespace other than an ordinary space, or contain a control, zero-width, bidi or other invisible character. **An existing `entries` store holding such
+whitespace other than an ordinary space, contain a control, zero-width, bidi or other invisible character, or consist only of combining marks or blank characters. **An existing `entries` store holding such
 a name no longer loads**: `verify` exits 3 and `serve` does not start. Nothing is normalised for you, because that could turn one issuer into
 another. Correct the name in the store only if it is what the key's reports actually carry; a report signed under the old name needs a new key. Names such
 as `Acme Bank Ltd` and `Banque Générale` are fine.

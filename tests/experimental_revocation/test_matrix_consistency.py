@@ -46,6 +46,8 @@ NEW = (
     "../test_issuer_name_rule.py",
     "../test_trust_store_exact_class.py",
     "../test_migration_operator_declared.py",
+    "../test_envelope_object_exact_types.py",
+    "../test_guidance_for_strict_users.py",
     "../test_response_mode.py",
 )
 SOURCES = ("_revocation.py", "_revocation_state.py", "_revocation_gate.py")

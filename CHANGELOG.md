@@ -17,14 +17,15 @@ store with `trust add`. Any replay file written by a published version is refuse
   such a store before reading a report: `PolicyError`, CLI exit 2, and `serve` does not start. Build a new store with `regaudit-fhe trust add`. See `docs/MIGRATION_0.3.md`. `development` and the lenient
   library paths keep their verdicts.
 - **Upgrade action: the same profiles refuse an issuer that only `trust migrate --issuer` stated (`ISSUER_ENROLLMENT_UNAUTHENTICATED`).** That is an operator's assertion, and no authenticated enrollment exists. `development`
-  accepts such a store and labels results `ISSUER_OPERATOR_DECLARED`. The record is a file beside the store, because published versions refuse an unknown member in it, and it is a label: it can be removed.
+  accepts such a store and labels results `ISSUER_OPERATOR_DECLARED`. The record is `issuer_source` on each entry of the store, so it survives a copy, a move and `from_dict`. **Published versions refuse a migrated store (`verify` exits 3), which fails closed: keep the source store, which is left unchanged and is the way back.**
 - With such a store in `development`, `reasons` gains `ISSUER_UNBOUND` and the CLI warns on stderr. `verify_envelope`'s result gains `issuer_bound`,
   which `to_dict` leaves out and `dataclasses.asdict` includes, and it raises a `DeprecationWarning`. `verify_receipt` does not warn, as its contract says. No verdict changes. Response format v2 gains `issuer_binding`.
 - **An `entries` store holding an ambiguous issuer name no longer loads, in any profile.** One rule at enrollment, loading and migration: not empty, no leading or trailing
-  whitespace, no whitespace other than U+0020, no control, zero-width, bidi or other invisible characters. Nothing is normalised. `verify` exits 3 and `serve` does not start. Signing is not
+  whitespace, no whitespace other than U+0020, no control, zero-width, bidi or other invisible characters, and not only combining marks or blanks. Nothing is normalised. `verify` exits 3 and `serve` does not start. Signing is not
   covered, but only a store with no issuers can accept such a report.
 - `trust migrate` says its issuers are a local operator's statement, in its output, `trust list` and `trust status`. `trust add`'s output gains `issuer_binding` and `authenticated_binding: false`.
 - `confidential` and `high-assurance` refuse a `TrustStore` subclass (`PolicyError`), and issuer binding is worked out from validated records.
+- Under the same profiles, `verify_report` gives `INVALID` with `MALFORMED_ENVELOPE` for an envelope object that is a subclass, has an added attribute, or has a field that is not plain JSON. A `str` subclass as `issuer` could otherwise answer the comparison and get `TRUSTED` for the wrong issuer. Reports read from JSON are not affected.
 - **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
   so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
   start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued

@@ -20,8 +20,7 @@ Differences from it: [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 ## Trust store form
 
 `confidential`, `high-assurance` and `secure-v1` raise `PolicyError` for a store with `binds_issuers` false, or one that is not exactly a `TrustStore`, before any report is read. In `development` it gets
-`ISSUER_UNBOUND` in `reasons`. Response format v2 has `issuer_binding`: `store_entry`, `operator_declared`, `not_bound` or `not_established`; none means authenticated. `TrustStore.issuer_declared` holds the keys a migration
-recorded, read by `from_json` from `FILE.issuer-provenance.json`. Every strict profile refuses a store where it is non-empty (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), and `development` adds `ISSUER_OPERATOR_DECLARED`. `trust.issuer_name_problem` is the name rule.
+`ISSUER_UNBOUND` in `reasons`. Response format v2 has `issuer_binding`: `store_entry`, `operator_declared`, `not_bound` or `not_established`; none means authenticated. `TrustStore.issuer_declared` holds the keys whose entry has `issuer_source: operator-declared`, worked out from the entries. Every strict profile refuses a store where it is non-empty (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), and `development` adds `ISSUER_OPERATOR_DECLARED`. `trust.issuer_name_problem` is the name rule.
 
 `secure-v1` (`verification.SECURE_PROFILE_V1`) has the fixed window: `SqliteReplayCache.adopt_fixed_history_window`.
 

@@ -108,10 +108,11 @@ Whether `development` and the lenient paths should refuse too is a later decisio
 
 On candidate 2, by the owner's rulings: binding is worked out at construction from records of exactly the parsed types, and a strict policy refuses a `TrustStore` subclass. An issuer's name
 has one rule (`trust.issuer_name_problem`). A migration's issuer is an operator's statement and must not be treated as authenticated enrollment, so every strict profile refuses such a store
-(`ISSUER_ENROLLMENT_UNAUTHENTICATED`, a configuration refusal) and `development` labels it. The record is beside the store because every published version refuses an unknown member in it. No authenticated enrollment
+(`ISSUER_ENROLLMENT_UNAUTHENTICATED`, a configuration refusal) and `development` labels it. The record is `issuer_source` on each entry, so it survives a copy, a move and `from_dict`. By the owner's ruling a published version refusing such a store is a downgrade limitation that fails closed, and the source store is the way back. A file from a pre-release candidate beside a store is refused, so that it cannot weaken anything. No authenticated enrollment
 exists. `trust add` and a hand-written `entries` store keep working under strict profiles, and `issuer_binding` calls them `store_entry`: whether they should count is open with the owner, and a hand-written store cannot be told
-from one built with `trust add`. `development` and `verify_trusted` with its default policy still accept a subclass. Not covered: malicious code in the verifier's process, and a store whose label was deleted, copied away or skipped
-with `from_dict`, which is then accepted.
+from one built with `trust add`. `development` and `verify_trusted` with its default policy still accept a subclass. Not covered: malicious code in the verifier's process, and a deliberate edit deleting the member from the file, which is then accepted.
+
+An envelope object is untrusted input, by the owner's ruling: under a strict profile it must be exactly the class, with nothing added, and every field plain JSON (`verification._is_untrusted_object`), checked before any field is read. `development` and the lenient paths are not covered.
 
 ## F-12 in `secure-v1`
 

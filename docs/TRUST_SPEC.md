@@ -104,12 +104,13 @@ Four cases, by the owner's ruling, under the strict profiles `confidential`, `hi
 | `entries`, enrolled with `trust add`, or written by hand | Accepted when every other requirement passes, as normal enrollment. `issuer_binding` is `store_entry`, and it does not mean authenticated. Whether this should count is open | Accepted |
 | Authenticated enrollment | Permitted when it exists. None exists, and none is implemented | |
 
-The record of a migration is a file beside the store, since every published version refuses an unknown member in the store itself. It is a label in a
-file the operator controls, not authentication, and it can be removed: deleting it, copying the store without it, or loading the JSON with `from_dict` gives a store that nothing can tell
-from a hand-written one, and a strict profile accepts that.
+The record of a migration is in the store: `issuer_source: "operator-declared"` on each entry. It travels with the store through a copy, a move or `from_dict`. Any other value is refused. Deliberately deleting the member
+from the file is an edit of local state, outside the guarantee: nothing can detect it, the store then looks like a hand-written one, and a strict profile accepts it.
+
+Published versions refuse an unknown member in a store, so every one of them refuses a migrated store, which fails closed. An older verifier is a downgrade limitation, and the source store stays the way back.
 
 An issuer's name follows one rule at enrollment, trust-store parsing and migration, in every profile, and is never normalised: it may not be empty, have leading or
-trailing whitespace, contain whitespace other than U+0020, or contain a control, format (zero-width, bidi), unassigned, private-use or blank character. Look-alike letters,
+trailing whitespace, contain whitespace other than U+0020, contain a control, format (zero-width, bidi), unassigned, private-use or blank character, or render as nothing because it has no letter, number, punctuation mark or symbol. A combining mark after a base character is fine. Look-alike letters,
 double spaces and Unicode normal forms stay different names. A signer is not held to this rule, but only a store with no issuers can then accept its report.
 
 In `development`, and on the lenient library paths `verify_envelope` and `verify_report(parse_envelope(...))`, such a store
@@ -772,7 +773,8 @@ one function, called by every entry point.
 and with no store state: `trust_history_max_age` other than 24 hours is refused when the policy is built, and a history older than 24 hours is never fresh. On a
 store where a shorter setting was served, the floor moves to 24 hours and the trust-history cutover to that moment, in one transaction, so what the shorter setting
 refused stays refused; if that cannot be written, no history counts. The other profiles keep their own rules, including the floor and the ceiling in 6.1, and make
-no such claim. Under `confidential`, `high-assurance` and `secure-v1` the store must be exactly a `TrustStore`, not a subclass, and §3.1 says which stores they refuse.
+no such claim. Under `confidential`, `high-assurance` and `secure-v1` the store must be exactly a `TrustStore`, not a subclass, and §3.1 says which stores they refuse. An envelope object passed to the
+verifier must be exactly `AuditEnvelope` or `AuditEnvelopeV2` with every field plain JSON, or the result is `INVALID` with `MALFORMED_ENVELOPE` before any field is read. Malicious code in the verifier's process is outside this.
 
 A `high-assurance` deployment MUST refuse to start if any required element is
 missing, and MUST NOT fall back to a weaker profile.
