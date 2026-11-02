@@ -408,6 +408,9 @@ def test_G20_unsafe_configurations_are_refused_at_startup(w, tmp_path, change, t
     if change.get("asserted"):
         kw["historical_acceptance"] = "signer-asserted"
         profile = "development"
+    if store is not None:
+        # F-09: a strict policy now refuses this store on its own, so only development reaches the gate's check.
+        profile = "development"
     pol = policy(w, tmp_path, profile=profile, store=store, **kw)
     with pytest.raises(PolicyError, match=text):
         tg.verify_with_revocation(report(w), pol, context)

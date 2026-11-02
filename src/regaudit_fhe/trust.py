@@ -419,6 +419,15 @@ class TrustStore:
             parameter_set_pin=self.parameter_set_pins.get(key_id),
         )
 
+    @property
+    def binds_issuers(self) -> bool:
+        """Whether this store states, for every key, the issuer name the operator enrolled it for.
+
+        A bare or ``keys`` store does not, whatever its number of keys or the shape of its key ids. Nothing else can
+        supply that statement: the report's own issuer name is what is being checked.
+        """
+        return bool(self.entries) and all(entry.issuer for entry in self.entries.values())
+
     def is_known(self, key_id: str) -> bool:
         return key_id in self.keys
 

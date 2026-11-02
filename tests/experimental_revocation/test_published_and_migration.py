@@ -58,6 +58,7 @@ STORES: dict[str, dict[str, Any]] = {
 # Key-state refusal per store form, for a report with no verified timestamp.
 RETIRED = {"KEY_RETIRED_NO_CHRONOLOGY", "TRUST_STORE_FRESHNESS_UNPROVEN"}
 COMPROMISED = {"KEY_COMPROMISED_NO_CHRONOLOGY"}
+UNBOUND_FORMS = ("bare", "legacy-active", "legacy-revoked")
 KEY_STATE: dict[str, set[str]] = {
     "bare": set(),
     "legacy-active": set(),
@@ -116,6 +117,12 @@ def test_V01_without_opt_in_every_published_report_keeps_its_verdict(
     tmp_path, version, kind, form, profile
 ):
     store = TrustStore.from_dict(STORES[form])
+    if profile != "development" and form in UNBOUND_FORMS:
+        # F-09, owner's ruling: these policies refuse a store that states no issuer, before any report is read.
+        # test_T05 holds the same reports to this table on the migrated store.
+        with pytest.raises(PolicyError, match="states the issuer of each key"):
+            policy(tmp_path, profile, store)
+        return
     pol = policy(tmp_path, profile, store)
     env = report(version, kind)
     d = tg.verify_with_revocation(
@@ -225,7 +232,11 @@ def test_V04_opting_in_with_a_legacy_store_is_a_configuration_error_not_a_verdic
     tmp_path, form, mode
 ):
     store = TrustStore.from_dict(STORES[form])
-    pol = policy(tmp_path, "confidential", store)
+    # F-09: confidential refuses this store on its own now, which is also a configuration error and not a verdict. Only
+    # development reaches the gate's check, so that is where this asserts it.
+    with pytest.raises(PolicyError, match="states the issuer of each key"):
+        policy(tmp_path, "confidential", store)
+    pol = policy(tmp_path, "development", store)
     ctx = tg.RevocationContext(mode, tg.MemoryCasStore(), {ISSUER: _pin(_world())})
     with pytest.raises(PolicyError, match="REVOCATION_STORE_UNSUPPORTED"):
         tg.verify_with_revocation(report("0.2.1", "v2-audience"), pol, ctx)
@@ -287,16 +298,23 @@ def test_T05_migration_preserves_the_accept_or_refuse_outcome_for_the_right_issu
     tmp_path, version, kind, form, profile
 ):
     env = report(version, kind)
-    before = verify(env, policy(tmp_path, profile, TrustStore.from_dict(STORES[form])))
     out, _ = migrated(form)
     after_dir = tmp_path / "after"
     after_dir.mkdir()
     after = verify(env, policy(after_dir, profile, TrustStore.from_dict(out)))
-    assert before.accepted is after.accepted
-    expected_blocking = set(before.blocking_reasons)
+    if profile == "development":
+        before = verify(env, policy(tmp_path, profile, TrustStore.from_dict(STORES[form])))
+        expected_blocking = set(before.blocking_reasons)
+    else:
+        # F-09: the old store is refused here, so the comparison is with the table written from the spec (V01), which the
+        # published versions satisfied on this same store. The harness runs the wheels themselves.
+        with pytest.raises(PolicyError, match="states the issuer of each key"):
+            policy(tmp_path, profile, TrustStore.from_dict(STORES[form]))
+        expected_blocking = expected(kind, profile, KEY_STATE[form])
     if "KEY_REVOKED" in expected_blocking:
         expected_blocking = (expected_blocking - {"KEY_REVOKED"}) | {"KEY_COMPROMISED_NO_CHRONOLOGY"}
-        assert after.key_status == "compromised" and before.key_status == "revoked"
+        assert after.key_status == "compromised"
+    assert after.accepted is (not expected_blocking)
     assert set(after.blocking_reasons) == expected_blocking
 
 

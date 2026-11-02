@@ -4,12 +4,13 @@ Tenant B holds a key the verifier enrolled for B. B signs a report whose signed 
 is issuer attribution: a TRUSTED result with ``issuer_trusted`` true says the name in the report is the name the operator
 enrolled for the key that verified it. A store that states no issuer cannot show that, however few keys it holds.
 
-``EXPECTED`` is what happens today. The rows for a store without issuers are the open defect, not a requirement. The
-correction changes those rows and nothing else in this file's table.
+A store without issuers is refused under ``confidential`` and ``high-assurance``, loudly and before any report is read. In
+``development`` and on the lenient library paths the verdict is unchanged.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import subprocess
@@ -25,6 +26,7 @@ import regaudit_fhe as rf
 from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.report_v2 import envelope_v2, parse_envelope, parse_envelope_strict
 from regaudit_fhe.reports import verify_envelope
+from regaudit_fhe.trust import KeyEntry
 from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 
 T = datetime.now(timezone.utc).replace(microsecond=0)
@@ -99,14 +101,14 @@ def outcome(env, profile: str, form: str, tmp_path: Path) -> str:
 # form, profile -> the v2 substitution's outcome.
 EXPECTED = {
     ("bare", "development"): "TRUSTED",
-    ("bare", "confidential"): "TRUSTED",
-    ("bare", "high-assurance"): "TRUSTED",
+    ("bare", "confidential"): "POLICY_REFUSED",
+    ("bare", "high-assurance"): "POLICY_REFUSED",
     ("legacy", "development"): "TRUSTED",
-    ("legacy", "confidential"): "TRUSTED",
-    ("legacy", "high-assurance"): "TRUSTED",
+    ("legacy", "confidential"): "POLICY_REFUSED",
+    ("legacy", "high-assurance"): "POLICY_REFUSED",
     ("legacy-one-key", "development"): "TRUSTED",
-    ("legacy-one-key", "confidential"): "TRUSTED",
-    ("legacy-one-key", "high-assurance"): "TRUSTED",
+    ("legacy-one-key", "confidential"): "POLICY_REFUSED",
+    ("legacy-one-key", "high-assurance"): "POLICY_REFUSED",
     ("entries", "development"): "INVALID",
     ("entries", "confidential"): "INVALID",
     ("entries", "high-assurance"): "INVALID",
@@ -145,10 +147,11 @@ def test_a_lookalike_of_the_enrolled_name_is_a_different_name(name, tmp_path):
 @pytest.mark.parametrize("profile", PROFILES)
 def test_control_another_tenants_key_id_never_verifies(form, profile, tmp_path):
     """Claiming A's key_id with B's key is caught by the key comparison on every form: it needs no issuer."""
-    try:
-        pol = policy(profile, {**STORES[form]}, tmp_path)
-    except PolicyError:
-        pytest.skip("this policy refuses this store form")
+    if form in UNBOUND and profile != "development":
+        with pytest.raises(PolicyError, match="states the issuer of each key"):
+            policy(profile, STORES[form], tmp_path)
+        return
+    pol = policy(profile, STORES[form], tmp_path)
     res = verify(report(signer(b"tenant-b", "alice-bank", "alice-1")), pol)
     assert not res.accepted and not res.issuer_trusted
     assert {"KEY_EMBEDDED_MISMATCH", "ISSUER_UNKNOWN"} & set(res.blocking_reasons)
@@ -214,8 +217,8 @@ def _cli(tmp_path: Path, form: str, profile: str) -> subprocess.CompletedProcess
 
 CLI_EXIT = {
     ("legacy", "development"): 0,
-    ("legacy", "confidential"): 0,
-    ("legacy", "high-assurance"): 0,
+    ("legacy", "confidential"): 2,
+    ("legacy", "high-assurance"): 2,
     ("entries", "development"): 1,
     ("entries", "confidential"): 1,
     ("entries", "high-assurance"): 1,
@@ -228,6 +231,8 @@ def test_the_real_cli(form, profile, tmp_path):
     assert out.returncode == CLI_EXIT[form, profile], out.stderr
     if form == "entries":
         assert json.loads(out.stdout)["reason"] == "ISSUER_MISMATCH"
+    elif profile != "development":
+        assert not out.stdout and "states the issuer of each key" in out.stderr and "trust migrate" in out.stderr
 
 
 def _server(form: str, profile: str, tmp_path: Path):
@@ -258,12 +263,17 @@ def _server(form: str, profile: str, tmp_path: Path):
     return client_for(build_app(config=cfg), base_url="http://127.0.0.1:8000")
 
 
+@pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
+@pytest.mark.parametrize("form", UNBOUND)
+def test_the_http_server_will_not_start_on_a_store_without_issuers(form, profile, tmp_path):
+    with pytest.raises(PolicyError, match="states the issuer of each key"):
+        _server(form, profile, tmp_path)
+
+
 @pytest.mark.parametrize(
     ("form", "profile", "expected"),
     [
         ("legacy", "development", "TRUSTED"),
-        ("legacy", "confidential", "TRUSTED"),
-        ("legacy", "high-assurance", "TRUSTED"),
         ("entries", "development", "INVALID"),
         ("entries", "confidential", "INVALID"),
         ("entries", "high-assurance", "INVALID"),
@@ -284,3 +294,34 @@ def test_a_revocation_mode_already_refuses_a_store_without_issuers(tmp_path):
     pol = VerificationPolicy(trust_store=rf.TrustStore.from_dict(STORES["legacy"]))
     with pytest.raises(PolicyError, match="REVOCATION_STORE_UNSUPPORTED"):
         gate.verify_with_revocation(report(FORGED), pol, ctx)
+
+
+# ------------------------------------------------------------------ the refusal itself
+
+
+@pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
+def test_verify_trusted_refuses_the_policy_not_the_report(profile, tmp_path):
+    strict = policy(profile, STORES["entries"], tmp_path)
+    with pytest.raises(PolicyError, match="states the issuer of each key"):
+        rf.verify_trusted(json.dumps(report(ALICE).to_dict()), rf.TrustStore.from_dict(STORES["legacy"]), policy=strict)
+
+
+@pytest.mark.parametrize("profile", ["confidential", "high-assurance"])
+def test_a_strict_policy_cannot_be_moved_onto_a_store_without_issuers(profile, tmp_path):
+    strict = policy(profile, STORES["entries"], tmp_path)
+    with pytest.raises(PolicyError):
+        dataclasses.replace(strict, trust_store=rf.TrustStore.from_dict(STORES["legacy"]))
+
+
+def test_an_entry_built_without_an_issuer_does_not_count_as_bound(tmp_path):
+    entry = KeyEntry(key_id="bob-1", public_key_pem=BOB.public_key_pem(), status="active", issuer=None)
+    store = rf.TrustStore(keys={"bob-1": BOB.public_key_pem()}, entries={"bob-1": entry})
+    assert not store.binds_issuers
+    with pytest.raises(PolicyError):
+        VerificationPolicy(
+            profile="confidential",
+            trust_store=store,
+            max_age=timedelta(hours=1),
+            replay_mode="record",
+            replay_cache=SqliteReplayCache(tmp_path / "e.db"),
+        )

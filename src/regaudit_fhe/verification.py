@@ -181,6 +181,12 @@ class VerificationPolicy:
         if self.profile != "development":
             if self.trust_store is None:
                 raise PolicyError(f"the {self.profile!r} profile requires a trust store")
+            if not self.trust_store.binds_issuers:
+                raise PolicyError(
+                    f"the {self.profile!r} profile requires a trust store that states the issuer of each key, and this "
+                    "one does not, so a report could claim any issuer name. Run: regaudit-fhe trust migrate "
+                    "(docs/DEPLOYMENT.md, 'Upgrading a trust store without issuers')"
+                )
             if self.max_age is None:
                 raise PolicyError(f"the {self.profile!r} profile requires max_age")
             if self.replay_mode == "off" or self.replay_cache is None:
