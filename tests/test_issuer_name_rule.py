@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,28 @@ BAD = {
     "private use": "acme",
     "unassigned": "acme\U000e0fff",
     "lone surrogate": "acme\ud800",
+    "combining acute only": "\u0301",
+    "two combining marks only": "\u0301\u0323",
+    "marks and a space only": "\u0301 \u0323",
+    "enclosing mark only": "\u20dd",
+    "spacing mark only": "\u0903",
+    "null notehead only": "\U0001d159",
+    "null notehead inside": "ac\U0001d159me",
+    "Khitan filler only": "\U00016fe4",
+    "Khitan filler inside": "ac\U00016fe4me",
+    "object replacement only": "\ufffc",
+    "object replacement inside": "ac\ufffcme",
+    "halfwidth Hangul filler only": "\uffa0",
+    "Hangul choseong filler only": "\u115f",
+    "Hangul jungseong filler only": "\u1160",
+    "Khmer inherent vowel only": "\u17b4",
+    "supplementary variation selector only": "\U000e0100",
+    "tag only": "\U000e0020",
+    "ideographic half fill space only": "\u303f",
+    "Egyptian full blank only": "\U00013441",
+    "Egyptian half blank only": "\U00013442",
+    "musical format only": "\U0001d173",
+    "shorthand format only": "\U0001bca0",
 }
 GOOD = [
     "acme",
@@ -74,6 +97,15 @@ GOOD = [
     "בנק לאומי",
     "Crédit Agricole S.A. (France)",
     "Bank 🏦",
+    "Banque Ge\u0301ne\u0301rale",
+    "e\u0301cole",
+    "धन बैंक",
+    "ธนาคารกรุงเทพ",
+    "בַּנְק",
+    "Q\u0323uoc",
+    "...",
+    "123",
+    "A",
 ]
 
 
@@ -102,6 +134,41 @@ def test_legitimate_names_pass_the_rule_and_are_kept_byte_for_byte(name):
 @pytest.mark.parametrize("value", [None, 5, b"acme", ["acme"]])
 def test_only_a_string_is_a_name(value):
     assert issuer_name_problem(value) == "must be a non-empty string"
+
+
+# Default_Ignorable_Code_Point, Unicode 16: none of these renders as anything on its own.
+_DEFAULT_IGNORABLE = [
+    0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, *range(0x180B, 0x1810), *range(0x200B, 0x2010),
+    *range(0x202A, 0x202F), *range(0x2060, 0x2070), 0x3164, *range(0xFE00, 0xFE10), 0xFEFF, 0xFFA0,
+    *range(0xFFF0, 0xFFF9), *range(0x1BCA0, 0x1BCA4), *range(0x1D173, 0x1D17B), *range(0xE0000, 0xE1000),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("position", ["alone", "inside"])
+def test_every_default_ignorable_code_point_is_refused(position):
+    wrap = (lambda c: c) if position == "alone" else (lambda c: f"ac{c}me")
+    accepted = [hex(c) for c in _DEFAULT_IGNORABLE if issuer_name_problem(wrap(chr(c))) is None]
+    assert not accepted
+
+
+def test_no_lone_code_point_outside_letters_numbers_punctuation_and_symbols_is_a_name():
+    accepted = []
+    for point in range(sys.maxunicode + 1):
+        char = chr(point)
+        if issuer_name_problem(char) is None and unicodedata.category(char)[0] not in "LNPS":
+            accepted.append(hex(point))
+    assert not accepted
+
+
+def test_a_mark_after_a_base_character_is_part_of_a_name():
+    for mark in ("\u0301", "\u20dd", "\u0903"):
+        assert issuer_name_problem(f"a{mark}") is None
+
+
+def test_the_name_is_kept_as_written_and_a_decomposed_form_stays_a_different_name():
+    decomposed = "Banque Ge\u0301ne\u0301rale"
+    assert rf.TrustStore.from_dict(entries(decomposed)).entry("k").issuer == decomposed
+    assert unicodedata.normalize("NFC", decomposed) != decomposed
 
 
 # ------------------------------------------------------------------ parsing

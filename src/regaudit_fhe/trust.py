@@ -105,9 +105,10 @@ _ENTRY_KEYS = frozenset(
 )
 
 
-# Blank or invisible, and not in a category that says so. The rest of what renders as nothing is category C or Z.
+# Blank or invisible, and not in a category that says so. The rest of what renders as nothing is category C or Z, or a
+# mark with nothing to sit on, which the base check below refuses.
 _BLANK_CODE_POINTS = frozenset(
-    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0}
+    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x303F, 0x3164, 0xFFA0, 0xFFFC, 0x13441, 0x13442, 0x16FE4, 0x1D159}
     | set(range(0x180B, 0x1810))
     | set(range(0xFE00, 0xFE10))
     | set(range(0xE0100, 0xE01F0))
@@ -119,8 +120,9 @@ def issuer_name_problem(name: Any) -> str | None:
 
     A name that reads as empty, or that renders the same as another one, is ambiguous, and a comparison is byte for byte. So it
     is refused, and never normalised into another issuer: empty, leading or trailing whitespace, whitespace other than U+0020,
-    and control, format (zero-width, bidi), unassigned, private-use or blank characters anywhere. It says nothing about
-    look-alike letters, double spaces or Unicode normalisation form: those remain different names.
+    control, format (zero-width, bidi), unassigned, private-use or blank characters anywhere, and a name with no letter,
+    number, punctuation or symbol, so only marks. It says nothing about look-alike letters, double spaces, a mark with no
+    base before it in an otherwise visible name, or Unicode normalisation form: those remain different names.
     """
     if type(name) is not str or not name:
         return "must be a non-empty string"
@@ -132,6 +134,8 @@ def issuer_name_problem(name: Any) -> str | None:
             return f"must not contain the invisible or control character U+{ord(char):04X}"
         if category[0] == "Z" and char != " ":
             return f"must not contain whitespace other than U+0020 (found U+{ord(char):04X})"
+    if not any(unicodedata.category(char)[0] in "LNPS" for char in name):
+        return "must contain a letter, number, punctuation mark or symbol: it would render as nothing"
     return None
 
 
