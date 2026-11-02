@@ -59,6 +59,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from ._storage_policy import acl_problem, directory_problem, file_problem, platform_problem
+
 SCOPE_LOCAL_PROCESS = "LOCAL_PROCESS"
 SCOPE_LOCAL_PERSISTENT = "LOCAL_PERSISTENT"
 
@@ -574,50 +576,6 @@ def migrate_replay_file(
     }
 
 
-def _directory_problem(directory: str) -> str | None:
-    """Whoever can change a directory on the way to the file can replace what is under it.
-
-    Each directory, as written and resolved, must belong to us or to root and not be writable by group or others.
-    A sticky directory above the parent is allowed, because others cannot rename what they do not own. The parent
-    itself may not be sticky, because anyone could create the file first.
-    """
-    euid = os.geteuid()
-    real = os.path.realpath(directory)
-    for chain in (directory, real):
-        current = chain
-        while True:
-            try:
-                info = os.lstat(current)
-            except OSError as exc:
-                return f"cannot inspect {current!r}: {exc}"
-            if info.st_uid not in (euid, 0):
-                return f"{current!r} belongs to another account"
-            if not stat.S_ISLNK(info.st_mode):
-                if not stat.S_ISDIR(info.st_mode):
-                    return f"{current!r} is not a directory"
-                sticky_above = current != real and bool(info.st_mode & stat.S_ISVTX)
-                if stat.S_IMODE(info.st_mode) & 0o022 and not sticky_above:
-                    return f"{current!r} is writable by group or others"
-            parent = os.path.dirname(current)
-            if parent == current:
-                break
-            current = parent
-    return None
-
-
-def _file_problem(info: os.stat_result) -> str | None:
-    if not stat.S_ISREG(info.st_mode):
-        return "it is not a regular file"
-    if info.st_uid != os.geteuid():
-        return "it belongs to another account"
-    if stat.S_IMODE(info.st_mode) & 0o022:
-        # No trusted group can be declared yet, so a group-writable mode cannot be judged and is refused.
-        return f"mode {stat.S_IMODE(info.st_mode):04o} lets group or others write it"
-    if info.st_nlink != 1:
-        return "it has more than one name"
-    return None
-
-
 class SqliteReplayCache:
     """Local replay records in a sqlite file. A new file is created 0600, whatever the umask.
 
@@ -693,15 +651,10 @@ class SqliteReplayCache:
         with contextlib.suppress(OSError):  # it exists, or sqlite reports why it cannot be opened
             os.close(os.open(self._absolute, flags | getattr(os, "O_CLOEXEC", 0), 0o600))
 
-    def _platform_problem(self) -> str | None:
-        if os.name != "posix" or not hasattr(os, "geteuid") or not hasattr(os, "O_NOFOLLOW"):
-            return "this platform cannot establish the owner and permissions of the file"
-        return None
-
     def _refuse_unsafe_directories(self) -> None:
         if self._absolute is None:
             return
-        problem = self._platform_problem() or _directory_problem(os.path.dirname(self._absolute))
+        problem = platform_problem() or directory_problem(os.path.dirname(self._absolute))
         if problem is not None:
             raise ReplayStorageUnsafe(f"replay store {self._path!r} refused: {problem}")
 
@@ -709,7 +662,7 @@ class SqliteReplayCache:
         """The problem with the file as it opens now, if any, and which file that is."""
         if self._absolute is None:
             return "it is not a file", None
-        problem = self._platform_problem() or _directory_problem(os.path.dirname(self._absolute))
+        problem = platform_problem() or directory_problem(os.path.dirname(self._absolute))
         if problem is not None:
             return problem, None
         flags = (
@@ -721,12 +674,13 @@ class SqliteReplayCache:
             return f"cannot open it without following a link: {exc}", None
         try:
             info = os.fstat(fd)
+            problem = file_problem(info) or acl_problem("the file", fd=fd)
         finally:
             os.close(fd)
         identity = (info.st_dev, info.st_ino)
         if self._identity is not None and identity != self._identity:
             return "the file was replaced while in use", identity
-        return _file_problem(info), identity
+        return problem, identity
 
     def _require_safe_storage(self) -> tuple[int, int]:
         problem, identity = self._storage_state()

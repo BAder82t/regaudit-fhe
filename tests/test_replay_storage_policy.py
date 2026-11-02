@@ -265,7 +265,7 @@ def test_a_file_of_another_account_is_refused(tmp_path, monkeypatch):
     seeded(tmp_path / "replay.db")
     real = os.geteuid()
     cache = SqliteReplayCache(tmp_path / "replay.db")
-    monkeypatch.setattr(replay_module, "_directory_problem", lambda directory: None)
+    monkeypatch.setattr(replay_module, "directory_problem", lambda directory: None)
     monkeypatch.setattr(os, "geteuid", lambda: real + 1)
     with pytest.raises(ReplayStorageUnsafe, match="another account"):
         cache.enforce_private_storage()
@@ -285,6 +285,57 @@ def test_a_platform_that_cannot_establish_it_is_refused(tmp_path, monkeypatch, m
     monkeypatch.delattr(os, missing)
     with pytest.raises(ReplayStorageUnsafe, match="this platform cannot establish"):
         SqliteReplayCache(tmp_path / "replay.db", private_storage=True)
+
+
+def test_an_unknown_platform_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "freebsd14")
+    with pytest.raises(ReplayStorageUnsafe, match="this platform cannot establish"):
+        SqliteReplayCache(tmp_path / "replay.db", private_storage=True)
+
+
+macos = pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACLs")
+
+
+def set_acl(path: Path, entry: str) -> None:
+    subprocess.run(["/bin/chmod", "+a", entry, str(path)], check=True, capture_output=True)  # noqa: S603
+
+
+@macos
+@pytest.mark.parametrize("right", ["write", "append", "delete", "writesecurity"])
+def test_an_acl_letting_others_change_the_file_is_refused_and_not_called_durable(world, right):
+    seeded(world / "replay.db")
+    set_acl(world / "replay.db", f"group:everyone allow {right}")
+    out, verdict = verify_cli(world)
+    assert out.returncode == 3 and verdict is None and "ACL" in out.stderr
+    assert not SqliteReplayCache(world / "replay.db").durable
+
+
+@macos
+def test_an_acl_letting_others_change_the_parent_directory_is_refused(world):
+    box = world / "box"
+    box.mkdir(mode=0o700)
+    set_acl(box, "group:everyone allow add_file")
+    out, _ = verify_cli(world, str(box / "replay.db"))
+    assert out.returncode == 3 and "ACL" in out.stderr and not list(box.iterdir())
+
+
+@macos
+def test_an_acl_added_while_in_use_fails_closed(tmp_path):
+    db = tmp_path / "replay.db"
+    env = envelope()
+    active = policy(SqliteReplayCache(db, private_storage=True))
+    assert verify(env, active).accepted
+    set_acl(db, "group:everyone allow write")
+    res = verify(env, active)
+    assert not res.accepted and res.blocking_reasons == ("REPLAY_STATE_UNAVAILABLE",)
+
+
+@macos
+def test_a_deny_only_acl_is_accepted(world):
+    seeded(world / "replay.db")
+    set_acl(world / "replay.db", "group:everyone deny delete")
+    out, verdict = verify_cli(world)
+    assert out.returncode == 0 and verdict["trust_status"] == "TRUSTED", out.stderr
 
 
 # ----------------------------------------------------------------------------- the file opened, not the path checked
