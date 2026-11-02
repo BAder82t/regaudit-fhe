@@ -759,7 +759,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             sys.stderr.write("--replay-mode requires --replay-db\n")
             return 2
         try:
-            replay_cache = SqliteReplayCache(args.replay_db)
+            replay_cache = SqliteReplayCache(
+                args.replay_db, private_storage=args.profile != "development"
+            )
         except ReplayStateError as exc:
             sys.stderr.write(f"--replay-db: {exc}\n")
             return 3

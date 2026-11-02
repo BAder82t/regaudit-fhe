@@ -75,6 +75,10 @@ class ReplayMigrationRefused(ReplayStateError):
     """Nothing was migrated: the state is ambiguous or malformed, or the request is."""
 
 
+class ReplayStorageUnsafe(ReplayStateError):
+    """The file or a directory above it fails the storage policy, or this platform cannot establish it."""
+
+
 def _stamp(moment: datetime) -> float:
     """POSIX seconds for an aware datetime; anything else fails closed."""
     if moment.tzinfo is None or moment.utcoffset() is None:
@@ -96,9 +100,11 @@ def _check_text(*values: str) -> None:
 @runtime_checkable
 class ReplayCache(Protocol):
     scope: str
-    # True only if a recorded identifier survives a process restart (is committed to
-    # disk before ``record`` returns). Disclosed in every verification result.
-    durable: bool
+
+    @property
+    def durable(self) -> bool:
+        """True only if a recorded identifier survives a process restart (is committed to disk before ``record``
+        returns) in storage that passes the policy. Disclosed in every verification result."""
 
     def seen(self, key_id: str, run_id: str, *, now: datetime) -> bool:
         """Whether the pair is currently recorded (does not record)."""
@@ -568,15 +574,78 @@ def migrate_replay_file(
     }
 
 
-class SqliteReplayCache:
-    scope = SCOPE_LOCAL_PERSISTENT
-    durable = True  # committed to the sqlite file before record() returns
+def _directory_problem(directory: str) -> str | None:
+    """Whoever can change a directory on the way to the file can replace what is under it.
 
-    def __init__(self, path: str | Path, capacity: int = 1_000_000) -> None:
+    Each directory, as written and resolved, must belong to us or to root and not be writable by group or others.
+    A sticky directory above the parent is allowed, because others cannot rename what they do not own. The parent
+    itself may not be sticky, because anyone could create the file first.
+    """
+    euid = os.geteuid()
+    real = os.path.realpath(directory)
+    for chain in (directory, real):
+        current = chain
+        while True:
+            try:
+                info = os.lstat(current)
+            except OSError as exc:
+                return f"cannot inspect {current!r}: {exc}"
+            if info.st_uid not in (euid, 0):
+                return f"{current!r} belongs to another account"
+            if not stat.S_ISLNK(info.st_mode):
+                if not stat.S_ISDIR(info.st_mode):
+                    return f"{current!r} is not a directory"
+                sticky_above = current != real and bool(info.st_mode & stat.S_ISVTX)
+                if stat.S_IMODE(info.st_mode) & 0o022 and not sticky_above:
+                    return f"{current!r} is writable by group or others"
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+    return None
+
+
+def _file_problem(info: os.stat_result) -> str | None:
+    if not stat.S_ISREG(info.st_mode):
+        return "it is not a regular file"
+    if info.st_uid != os.geteuid():
+        return "it belongs to another account"
+    if stat.S_IMODE(info.st_mode) & 0o022:
+        # No trusted group can be declared yet, so a group-writable mode cannot be judged and is refused.
+        return f"mode {stat.S_IMODE(info.st_mode):04o} lets group or others write it"
+    if info.st_nlink != 1:
+        return "it has more than one name"
+    return None
+
+
+class SqliteReplayCache:
+    """Local replay records in a sqlite file. A new file is created 0600, whatever the umask.
+
+    ``private_storage`` applies the storage policy from the start, and a strict profile applies it through
+    :meth:`enforce_private_storage`: the file and the directories above it must be ours and not writable by others,
+    and the file must stay the same file while this object is in use. Existing modes are never changed.
+
+    This keeps out other unprivileged accounts. It does not detect a change made under the same account or by an
+    administrator, or a restored backup. The records are not authenticated.
+    """
+
+    scope = SCOPE_LOCAL_PERSISTENT
+
+    def __init__(
+        self, path: str | Path, capacity: int = 1_000_000, *, private_storage: bool = False
+    ) -> None:
         self._path = str(path)
+        self._absolute = None if self._path in ("", ":memory:") else os.path.abspath(self._path)
         self._capacity = capacity
         self._lock = threading.Lock()
         self._lowest: dict[str, int] = {}
+        self._private = False
+        self._identity: tuple[int, int] | None = None
+        if private_storage:
+            self._refuse_unsafe_directories()
+        self._create_restricted()
+        if private_storage:
+            self.enforce_private_storage()
         try:
             conn = self._connect()
             try:
@@ -603,8 +672,87 @@ class SqliteReplayCache:
         except (sqlite3.Error, OSError) as exc:
             raise ReplayStateError(f"cannot open replay store {self._path!r}: {exc}") from exc
 
+    @property
+    def durable(self) -> bool:
+        """Committed to the file before record() returns, and the file passes the storage policy."""
+        return self._storage_state()[0] is None
+
+    def enforce_private_storage(self) -> None:
+        """Refuse this file unless it passes the storage policy, now and at every later connection."""
+        if (
+            self._absolute is None
+        ):  # ":memory:" is a new database per connection: it fails closed at the record step
+            return
+        self._private = True
+        self._require_safe_storage()
+
+    def _create_restricted(self) -> None:
+        if self._absolute is None:
+            return
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        with contextlib.suppress(OSError):  # it exists, or sqlite reports why it cannot be opened
+            os.close(os.open(self._absolute, flags | getattr(os, "O_CLOEXEC", 0), 0o600))
+
+    def _platform_problem(self) -> str | None:
+        if os.name != "posix" or not hasattr(os, "geteuid") or not hasattr(os, "O_NOFOLLOW"):
+            return "this platform cannot establish the owner and permissions of the file"
+        return None
+
+    def _refuse_unsafe_directories(self) -> None:
+        if self._absolute is None:
+            return
+        problem = self._platform_problem() or _directory_problem(os.path.dirname(self._absolute))
+        if problem is not None:
+            raise ReplayStorageUnsafe(f"replay store {self._path!r} refused: {problem}")
+
+    def _storage_state(self) -> tuple[str | None, tuple[int, int] | None]:
+        """The problem with the file as it opens now, if any, and which file that is."""
+        if self._absolute is None:
+            return "it is not a file", None
+        problem = self._platform_problem() or _directory_problem(os.path.dirname(self._absolute))
+        if problem is not None:
+            return problem, None
+        flags = (
+            os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            fd = os.open(self._absolute, flags)
+        except OSError as exc:
+            return f"cannot open it without following a link: {exc}", None
+        try:
+            info = os.fstat(fd)
+        finally:
+            os.close(fd)
+        identity = (info.st_dev, info.st_ino)
+        if self._identity is not None and identity != self._identity:
+            return "the file was replaced while in use", identity
+        return _file_problem(info), identity
+
+    def _require_safe_storage(self) -> tuple[int, int]:
+        problem, identity = self._storage_state()
+        if problem is not None or identity is None:
+            raise ReplayStorageUnsafe(f"replay store {self._path!r} refused: {problem}")
+        self._identity = identity
+        return identity
+
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
+        if self._private:
+            identity = self._require_safe_storage()
+            assert self._absolute is not None
+            target = f"{Path(self._absolute).as_uri()}?nofollow=1"
+            conn = sqlite3.connect(target, timeout=5.0, isolation_level=None, uri=True)
+            try:
+                after = os.lstat(self._absolute)
+            except OSError as exc:
+                conn.close()
+                raise ReplayStorageUnsafe(f"replay store {self._path!r} refused: {exc}") from exc
+            if (after.st_dev, after.st_ino) != identity:
+                conn.close()
+                raise ReplayStorageUnsafe(
+                    f"replay store {self._path!r} refused: the file was replaced while it was opened"
+                )
+        else:
+            conn = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
         conn.execute("PRAGMA trusted_schema = OFF")
         return conn
 

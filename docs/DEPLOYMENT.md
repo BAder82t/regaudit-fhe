@@ -517,6 +517,16 @@ Under `confidential`, `high-assurance` or `secure-v1` the trust store must be an
 Each of those gaps is operator-side: TLS, KMS, and runbooks live with
 the deployment, not with this binary.
 
+## Where the replay file can live
+
+Under `confidential`, `high-assurance` and `secure-v1` the replay file has to be one that other accounts cannot change. The file must be a regular file with one name, not a symlink, owned by the account running the verifier and not writable by group or others. Its parent directory must belong to that account or to root and not be writable by group or others, and every directory above it must too, except that a sticky directory like `/tmp` is allowed above the parent. A new file is created `0600` whatever the umask. A good default is `0600` for the file and `0700` for its directory.
+
+Anything else is refused: `verify` exits 3, `serve` does not start, and a verifier already running answers `REPLAY_STATE_UNAVAILABLE`. It also fails closed if the file is replaced, deleted or made writable while a process is using it. Nothing changes an existing file's mode for you. There is no way yet to name a trusted group, so `0660` is refused. `0640` and `0644` are accepted because others can read but not write them, so choose `0600` if the report identifiers in the file should stay private. `development` still accepts these files but reports `replay_durable: false`.
+
+This keeps out other unprivileged accounts and that is all it does. The records are not authenticated. A process running as the same account, an administrator or someone restoring an older copy can still remove a record, and the verifier would not notice, so a report it refused could then be accepted again. Protecting against that needs an independent store, which this version does not have.
+
+These are the limits of the checks. Windows is refused under the strict profiles, because the owner and permissions cannot be established. Only the mode bits and owner are read. On Linux an ACL that grants write shows up in the group bits and is refused, but macOS ACLs are not seen. On a network filesystem the owner and mode the client sees may not be what the server enforces, and `flock`-style behaviour differs too, so that is not supported. A custom `ReplayCache` object is responsible for its own storage.
+
 ## Upgrading with an existing replay file
 
 Start with [MIGRATION_0.3.md](MIGRATION_0.3.md), which covers this and the trust store together.

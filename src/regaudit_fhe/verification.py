@@ -223,6 +223,12 @@ class VerificationPolicy:
                     f"the {self.profile!r} profile requires a persistent replay cache "
                     "(an in-memory cache is lost on restart)"
                 )
+            enforce_storage = getattr(self.replay_cache, "enforce_private_storage", None)
+            if enforce_storage is not None:
+                try:
+                    enforce_storage()
+                except ReplayStateError as exc:
+                    raise PolicyError(f"the {self.profile!r} profile refuses this: {exc}") from exc
         if self.profile == "high-assurance" and self.verifier_id is None:
             raise PolicyError("the 'high-assurance' profile requires a verifier_id (audience)")
 

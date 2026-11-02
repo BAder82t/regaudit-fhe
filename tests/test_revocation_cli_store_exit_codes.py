@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from regaudit_fhe import _revocation_cli as revocation_cli
+from regaudit_fhe import _revocation_state as st
 from regaudit_fhe.trust import ISSUER_PROVENANCE_SUFFIX, MAX_TRUST_STORE_BYTES
 
 from .test_revocation_tooling_and_cli import cli, op, verify_cli  # noqa: F401
@@ -177,31 +179,133 @@ def test_rebaseline_exits_3_on_malformed_pins(world):
     assert "pin file" in out.stderr and "refused" not in out.stderr
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C3-06, open: rebaseline commits the state record before save_pin reads the pin file. Not part of C3-01.",
-)
 def test_rebaseline_on_malformed_pins_changes_nothing(world):
     cwd, fps = world
     (cwd / "pins.json").write_text("{")
     before = snapshot(cwd)
-    rebaseline(cwd, fps)
+    assert rebaseline(cwd, fps).returncode == 3
     assert snapshot(cwd) == before
 
 
-def test_rebaseline_that_failed_on_malformed_pins_still_fails_closed_and_can_be_repeated(world):
+def test_rebaseline_that_failed_on_malformed_pins_leaves_verification_as_it_was(world):
     cwd, fps = world
     pins = (cwd / "pins.json").read_bytes()
     (cwd / "pins.json").write_text("{")
     assert rebaseline(cwd, fps).returncode == 3
-    (cwd / "pins.json").write_bytes(
-        pins
-    )  # the operator repairs the file: the old pin no longer matches the record
-    stale = verify_cli(cwd)
-    assert stale.returncode == 3, stale.stdout + stale.stderr
-    assert json.loads(stale.stdout)["trust_status"] != "TRUSTED"
-    assert rebaseline(cwd, fps).returncode == 0
+    (cwd / "pins.json").write_bytes(pins)
     assert verify_cli(cwd).returncode == 1  # no list yet: refused by policy, as before the failure
+    assert rebaseline(cwd, fps).returncode == 0
+    assert verify_cli(cwd).returncode == 1
+
+
+@pytest.mark.parametrize("flag", ["--clear-key-actions", "--reset-policy-floor", "--accept-loss"])
+def test_rebaseline_flags_change_nothing_when_the_pins_are_malformed(world, flag):
+    cwd, fps = world
+    (cwd / "pins.json").write_text("{")
+    before = snapshot(cwd)
+    args = _pin_args(fps, "pins.json", "state")
+    assert (
+        cli("revocation", "rebaseline", *args, "--trusted-keys", "t.json", flag, cwd=cwd).returncode
+        == 3
+    )
+    assert snapshot(cwd) == before
+
+
+def test_rebaseline_on_a_group_writable_pin_file_changes_nothing(world):
+    cwd, fps = world
+    (cwd / "pins.json").chmod(0o660)
+    before = snapshot(cwd)
+    assert rebaseline(cwd, fps).returncode == 3
+    assert snapshot(cwd) == before
+
+
+def test_rebaseline_with_a_pin_directory_it_cannot_write_changes_nothing(world, tmp_path_factory):
+    cwd, fps = world
+    box = tmp_path_factory.mktemp("pins")
+    (box / "pins.json").write_bytes((cwd / "pins.json").read_bytes())
+    (box / "pins.json").chmod(0o600)
+    box.chmod(0o500)
+    before = snapshot(cwd)
+    try:
+        args = _pin_args(fps, str(box / "pins.json"), "state")
+        assert (
+            cli("revocation", "rebaseline", *args, "--trusted-keys", "t.json", cwd=cwd).returncode
+            == 3
+        )
+        assert snapshot(cwd) == before
+    finally:
+        box.chmod(0o700)
+
+
+def test_rebaseline_on_malformed_pins_does_not_create_a_state_directory(world):
+    cwd, fps = world
+    (cwd / "other-pins.json").write_text("{")
+    args = _pin_args(fps, "other-pins.json", "other-state")
+    out = cli(
+        "revocation", "rebaseline", *args, "--trusted-keys", "t.json", "--accept-loss", cwd=cwd
+    )
+    assert out.returncode == 3 and not (cwd / "other-state").exists()
+
+
+class _Args:
+    """What the parser gives ``_cmd_rebaseline``, for the failures only an in-process fault can reach."""
+
+    def __init__(
+        self, cwd: Path, fps: dict[str, str], state: str = "state", accept_loss: bool = False
+    ):
+        self.pins, self.state, self.issuer = str(cwd / "pins.json"), str(cwd / state), "acme"
+        self.authority_key, self.authority_fingerprint = (
+            str(cwd / "authority.pub"),
+            fps["authority"],
+        )
+        self.anchor_key, self.anchor_fingerprint = str(cwd / "anchor.pub"), fps["anchor"]
+        self.first_use, self.baseline_epoch, self.baseline_digest = False, 0, None
+        self.authority_generation, self.recovery_epoch, self.recovery_digest = 1, 0, None
+        self.trusted_keys = str(cwd / "t.json")
+        self.clear_key_actions, self.accept_loss, self.reset_policy_floor = (
+            False,
+            accept_loss,
+            False,
+        )
+
+
+def _save_fails(*_args, **_kwargs):
+    raise st.PinStoreError("the disk filled up")
+
+
+def test_a_save_that_fails_after_the_checks_puts_the_record_back(world, monkeypatch, capsys):
+    cwd, fps = world
+    before = snapshot(cwd)
+    monkeypatch.setattr(st, "save_pin", _save_fails)
+    assert revocation_cli._cmd_rebaseline(_Args(cwd, fps)) == 3
+    assert "the disk filled up" in capsys.readouterr().err
+    assert snapshot(cwd) == before
+
+
+def test_a_save_that_fails_removes_a_record_that_did_not_exist_before(world, monkeypatch):
+    cwd, fps = world
+    monkeypatch.setattr(st, "save_pin", _save_fails)
+    assert revocation_cli._cmd_rebaseline(_Args(cwd, fps, "empty-state", accept_loss=True)) == 3
+    assert not [p for p in (cwd / "empty-state").iterdir() if p.name != ".lock"]
+
+
+def test_a_record_changed_during_the_ceremony_is_not_overwritten_by_the_undo(
+    world, monkeypatch, capsys
+):
+    cwd, fps = world
+    store = st.FileStateStore(cwd / "state")
+    newer = []
+
+    def someone_else_writes(_path, pin):
+        current = store.read(pin.issuer)
+        newer.append(current + b" ")
+        assert store.cas(pin.issuer, current, newer[0])
+        raise st.PinStoreError("the disk filled up")
+
+    monkeypatch.setattr(st, "save_pin", someone_else_writes)
+    assert revocation_cli._cmd_rebaseline(_Args(cwd, fps)) == 3
+    assert "repeat the ceremony" in capsys.readouterr().err
+    assert store.read("acme") == newer[0]
 
 
 @pytest.mark.parametrize("command", [enroll, rebaseline], ids=["enroll", "rebaseline"])

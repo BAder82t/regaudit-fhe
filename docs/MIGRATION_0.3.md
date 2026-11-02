@@ -77,6 +77,10 @@ on that file. The original stays at `replay.db.pre-migration`. Do not point a ve
 Full details are in [DEPLOYMENT.md](DEPLOYMENT.md#upgrading-with-an-existing-replay-file). After migrating, give each `max_age` its own replay file and always pass
 `max_age`: two settings on one file are held to the smaller one.
 
+### Permissions on the replay file
+
+Under `confidential`, `high-assurance` and `secure-v1`, a replay file that other accounts can change is refused, and so is one owned by another account, a symlink, a file with a second name, or a file in a directory that group or others can write. `verify` exits 3 and `serve` does not start. Nothing is changed for you, so fix the mode or move the file yourself. This includes a file that keeps a group-writable mode through `replay migrate`, which only warns about it. New files are now `0600` in every profile, where they were `0644`, so a second account can no longer read a new file. A read-only verifier running under a different account from the one that writes the file is refused under the strict profiles. `development` accepts all of these, but `replay_durable` is `false` for an unsafe file. Details and limits are in [DEPLOYMENT.md](DEPLOYMENT.md#where-the-replay-file-can-live).
+
 ## 3. Optional: the `secure-v1` profile
 
 A new, versioned profile: `confidential` with **a fixed 24 hour trust-history window**, the same on a new store, an existing store and with no store state. `trust_history_max_age` cannot be set, larger or

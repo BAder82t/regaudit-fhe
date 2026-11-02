@@ -128,6 +128,28 @@ class FileStateStore:
         except OSError as exc:
             raise StateUnavailable(f"state record: {exc}") from exc
 
+    def remove(self, issuer: str, expected: bytes) -> bool:
+        """Take the record away if it is still ``expected``. Only undoing a ceremony calls this."""
+        try:
+            import fcntl
+        except ImportError as exc:  # pragma: no cover - supported platforms have it
+            raise StateUnavailable("this platform has no flock; the file store refuses") from exc
+        self._check_dir()
+        try:
+            lock_fd = os.open(
+                self.dir / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                if self.read(issuer) != expected:
+                    return False
+                self.path(issuer).unlink()
+            finally:
+                os.close(lock_fd)
+        except OSError as exc:
+            raise StateUnavailable(f"state record: {exc}") from exc
+        return True
+
     def cas(self, issuer: str, expected: bytes | None, new: bytes) -> bool:
         try:
             import fcntl
@@ -292,6 +314,27 @@ def load_pins(path: str | Path) -> dict[str, Pin]:
     if any(pin.issuer != issuer for issuer, pin in pins.items()):
         raise PinStoreError("a pin is filed under another issuer")
     return pins
+
+
+def check_pin_file_usable(path: str | Path) -> None:
+    """Before a ceremony changes anything: the pin file can be read, and a new version can be written beside it."""
+    target = Path(path)
+    if target.exists():
+        load_pins(target)
+    if not os.access(target.parent, os.W_OK | os.X_OK):
+        raise PinStoreError(f"cannot write the pin file: {str(target.parent)!r} is not writable")
+
+
+def undo_rebaseline(
+    store: FileStateStore, issuer: str, written: bytes, before: bytes | None
+) -> None:
+    """Put the record back after the new pin could not be saved, so that a failed ceremony changes nothing.
+
+    Only if the record is still the one this ceremony wrote: anything newer is left alone.
+    """
+    undone = store.remove(issuer, written) if before is None else store.cas(issuer, written, before)
+    if not undone:
+        raise StateUnavailable("the record changed during the ceremony; repeat the ceremony")
 
 
 def save_pin(path: str | Path, pin: Pin) -> None:

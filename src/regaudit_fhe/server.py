@@ -549,6 +549,7 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
     # is not even read.
     trust_path = (trust_store_path or os.environ.get("REGAUDIT_FHE_TRUST_STORE", "")).strip()
     replay_db = os.environ.get("REGAUDIT_FHE_REPLAY_DB", "").strip()
+    profile = os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip()
     config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
@@ -562,10 +563,12 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
         ),
         trust_store=TrustStore.from_json(trust_path) if trust_path else None,
         allow_self_signed=os.environ.get("REGAUDIT_FHE_ALLOW_SELF_SIGNED", "0") == "1",
-        profile=os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip(),
+        profile=profile,
         verifier_id=os.environ.get("REGAUDIT_FHE_VERIFIER_ID", "").strip() or None,
         max_age_s=_env_float("REGAUDIT_FHE_MAX_AGE_S"),
-        replay_cache=SqliteReplayCache(replay_db) if replay_db else None,
+        replay_cache=SqliteReplayCache(replay_db, private_storage=profile != "development")
+        if replay_db
+        else None,
         replay_mode=os.environ.get("REGAUDIT_FHE_REPLAY_MODE", "off").strip(),
         trusted_proxies=tuple(
             p.strip()

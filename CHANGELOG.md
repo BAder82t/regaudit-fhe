@@ -11,6 +11,8 @@ store with `trust add`. Any replay file written by a published version is refuse
 
 ### Changed
 
+- **Replay file storage under the strict profiles.** `confidential`, `high-assurance` and `secure-v1` refuse a replay file that another account owns or can write, directly or through a directory above it, and refuse symlinks and other file types. New files are `0600` in every profile. `replay_durable` is `false` for an unsafe file under `development`. This does not protect against the same account, an administrator or a restored backup. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#where-the-replay-file-can-live).
+- **`revocation enroll` and `rebaseline` exit 3 for an unusable trust store**, where they exited 2. A failed `rebaseline` now leaves the state record as it was, instead of changing it before finding that the pin file could not be saved.
 - **Upgrade action: `confidential` and `high-assurance` refuse a trust store that states no issuer (security, published
   0.1.0 to 0.2.1).** With a bare or `keys` store, any enrolled key could sign under any issuer name and get `TRUSTED` with
   `issuer_trusted` true, in every policy, and nothing in the output said so. The number of keys makes no difference. The policy now refuses

@@ -152,7 +152,9 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
     try:
         pin = _pin_from_args(args)
         store = _trust_store(args.trusted_keys)
+        st.check_pin_file_usable(args.pins)
         state = _state_dir(args.state)
+        before = state.read(pin.issuer)
         st.rebaseline(
             state,
             pin,
@@ -162,7 +164,13 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
             accept_loss=args.accept_loss,
             reset_policy_floor=args.reset_policy_floor,
         )
-        st.save_pin(args.pins, pin)
+        written = state.read(pin.issuer)
+        try:
+            st.save_pin(args.pins, pin)
+        except (st.PinStoreError, OSError):
+            if written is not None:
+                st.undo_rebaseline(state, pin.issuer, written, before)
+            raise
     # TrustStoreError is a ValueError, so this comes first
     except (st.StateUnavailable, st.PinStoreError, TrustStoreError, OSError) as exc:
         sys.stderr.write(f"{exc}\n")
