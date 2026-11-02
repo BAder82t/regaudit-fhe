@@ -9,3 +9,5 @@ The issue affects issuer attribution, not the cryptographic validity of the sign
 The legacy-store behavior has been reproduced in v0.2.1 using the CLI under `development`, `confidential`, and `high-assurance` policies.
 
 The older bare `{key_id: PEM}` trust-store form has the same limitation. This was reproduced through the library.
+
+**Caller-built objects:** `verify_report` in 0.1.0, 0.1.1, 0.2.0 and 0.2.1 can also give `TRUSTED` with `issuer_trusted: true` for the wrong issuer, on any trust-store form, when Python code builds the envelope object itself and sets its `issuer` to a `str` subclass that overrides comparison. This needs that object to be passed to `verify_report` in the same process. A report read from JSON, by `parse_envelope`, the CLI or the HTTP server, has a plain string and is not affected. On 0.2.0 and 0.2.1, `verify_trusted` refuses the same object. Until the correction is released, parse reports from their JSON text and do not pass envelope objects received from untrusted code to `verify_report`. No patch release is planned for this.
