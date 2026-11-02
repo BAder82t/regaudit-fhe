@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -325,6 +327,210 @@ def test_a_record_changed_during_the_ceremony_is_not_overwritten_by_the_undo(
     assert revocation_cli._cmd_rebaseline(_Args(cwd, fps)) == 3
     assert "repeat the ceremony" in capsys.readouterr().err
     assert store.read("acme") == newer[0]
+
+
+# ----------------------------------------------------------------------------- C3-08: enrollment
+
+
+def _enroll_args(
+    cwd: Path, fps: dict[str, str], authority: str = "authority", pins: str = "new-pins.json"
+):
+    args = _Args(cwd, fps, "new-state")
+    args.pins = str(cwd / pins)
+    args.authority_key, args.authority_fingerprint = str(cwd / f"{authority}.pub"), fps[authority]
+    return args
+
+
+def _state_records(directory: Path) -> list[str]:
+    return sorted(p.name for p in directory.glob("*.state"))
+
+
+def test_enroll_with_a_pin_directory_it_cannot_write_writes_nothing_and_can_be_retried(
+    world, tmp_path_factory
+):
+    cwd, fps = world
+    box = tmp_path_factory.mktemp("pins")
+    box.chmod(0o500)
+    args = _pin_args(fps, str(box / "pins.json"), "new-state")
+    before = snapshot(cwd)
+    try:
+        out = cli("revocation", "enroll", *args, "--trusted-keys", "t.json", cwd=cwd)
+        assert out.returncode == 3, out.stderr
+        assert snapshot(cwd) == before and not (cwd / "new-state").exists()
+    finally:
+        box.chmod(0o700)
+    out = cli("revocation", "enroll", *args, "--trusted-keys", "t.json", cwd=cwd)
+    assert out.returncode == 0, out.stderr
+    assert json.loads((box / "pins.json").read_text())["pins"]["acme"]
+
+
+def test_enroll_checks_the_pin_directory_before_it_writes_a_record(
+    world, tmp_path_factory, monkeypatch
+):
+    cwd, fps = world
+    box = tmp_path_factory.mktemp("pins")
+    box.chmod(0o500)
+
+    def must_not_run(*_args, **_kwargs):
+        raise AssertionError("the record was written before the pin directory was checked")
+
+    monkeypatch.setattr(st, "enroll", must_not_run)
+    args = _enroll_args(cwd, fps)
+    args.pins = str(box / "pins.json")
+    try:
+        assert revocation_cli._cmd_enroll(args) == 3
+    finally:
+        box.chmod(0o700)
+
+
+def test_a_failed_pin_write_during_enroll_removes_the_record_and_a_retry_succeeds(
+    world, monkeypatch, capsys
+):
+    cwd, fps = world
+    with monkeypatch.context() as during:
+        during.setattr(st, "save_pin", _save_fails)
+        assert revocation_cli._cmd_enroll(_enroll_args(cwd, fps)) == 3
+    assert "the disk filled up" in capsys.readouterr().err
+    assert _state_records(cwd / "new-state") == [] and not (cwd / "new-pins.json").exists()
+    assert revocation_cli._cmd_enroll(_enroll_args(cwd, fps)) == 0
+    assert len(_state_records(cwd / "new-state")) == 1
+    pins = json.loads((cwd / "new-pins.json").read_text())["pins"]
+    assert list(pins) == ["acme"]
+    record = (cwd / "new-state" / _state_records(cwd / "new-state")[0]).read_text()
+    assert pins["acme"]["enrollment_id"] in record
+
+
+def test_a_record_changed_during_a_failed_enroll_is_not_removed(world, monkeypatch, capsys):
+    cwd, fps = world
+    store = st.FileStateStore(cwd / "new-state")
+    newer = []
+
+    def someone_else_writes(_path, pin):
+        current = store.read(pin.issuer)
+        newer.append(current + b" ")
+        assert store.cas(pin.issuer, current, newer[0])
+        raise st.PinStoreError("the disk filled up")
+
+    monkeypatch.setattr(st, "save_pin", someone_else_writes)
+    assert revocation_cli._cmd_enroll(_enroll_args(cwd, fps)) == 3
+    assert "repeat the ceremony" in capsys.readouterr().err
+    assert store.read("acme") == newer[0]
+
+
+def test_enroll_after_a_good_save_is_unchanged(world):
+    cwd, fps = world
+    assert enroll(cwd, fps).returncode == 0
+    before = snapshot(cwd)
+    out = enroll(cwd, fps)
+    assert out.returncode == 2 and "already enrolled" in out.stderr
+    assert snapshot(cwd) == before
+
+
+def _crash_at(point: str, cwd: Path, argv: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    """A real process that dies at a real write, with no cleanup: ``os._exit`` runs no handler."""
+    code = f"""
+import os, sys
+from regaudit_fhe import _revocation_state as st
+from regaudit_fhe.cli import main
+def die(*_a, **_k):
+    os._exit(9)
+{point}
+sys.exit(main(sys.argv[1:]))
+"""
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", code, *argv],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_a_crash_before_the_record_is_written_leaves_nothing(world):
+    cwd, fps = world
+    args = (
+        "revocation",
+        "enroll",
+        *_pin_args(fps, "new-pins.json", "new-state"),
+        "--trusted-keys",
+        "t.json",
+    )
+    before = snapshot(cwd)
+    assert _crash_at("st.enroll = die", cwd, args).returncode == 9
+    after = snapshot(cwd)
+    after.pop("new-state", None)
+    assert after == before
+    assert enroll(cwd, fps).returncode == 0
+
+
+def test_a_crash_after_the_record_and_before_the_pin_fails_closed_and_is_recoverable(world):
+    """No journal: the record stays. It grants nothing without a pin, a retry says so, and rebaseline recovers it."""
+    cwd, fps = world
+    enroll_args = (
+        "revocation",
+        "enroll",
+        *_pin_args(fps, "new-pins.json", "new-state"),
+        "--trusted-keys",
+        "t.json",
+    )
+    assert _crash_at("st.save_pin = die", cwd, enroll_args).returncode == 9
+    assert len(_state_records(cwd / "new-state")) == 1 and not (cwd / "new-pins.json").exists()
+    record = (cwd / "new-state" / _state_records(cwd / "new-state")[0]).read_bytes()
+
+    no_pin = verify_cli(
+        cwd,
+        "--revocation-pins",
+        "new-pins.json",
+        "--revocation-state",
+        "new-state",
+        mode="required",
+    )
+    assert no_pin.returncode == 3, no_pin.stdout + no_pin.stderr
+
+    # a retry changes nothing and names the way out, and a different authority cannot get in that way
+    for authority in ("authority", "authority2"):
+        again = enroll(cwd, fps, authority=authority)
+        assert again.returncode == 2 and "re-baselining" in again.stderr
+        assert (cwd / "new-state" / _state_records(cwd / "new-state")[0]).read_bytes() == record
+        assert not (cwd / "new-pins.json").exists()
+
+    args = _pin_args(fps, "new-pins.json", "new-state")
+    out = cli("revocation", "rebaseline", *args, "--trusted-keys", "t.json", cwd=cwd)
+    assert out.returncode == 0, out.stderr
+    assert len(_state_records(cwd / "new-state")) == 1
+    pins = json.loads((cwd / "new-pins.json").read_text())["pins"]
+    assert list(pins) == ["acme"]
+    assert (
+        pins["acme"]["enrollment_id"]
+        in (cwd / "new-state" / _state_records(cwd / "new-state")[0]).read_text()
+    )
+
+
+def test_a_crash_after_the_pin_is_saved_is_a_complete_enrollment(world):
+    cwd, fps = world
+    code_args = (
+        "revocation",
+        "enroll",
+        *_pin_args(fps, "new-pins.json", "new-state"),
+        "--trusted-keys",
+        "t.json",
+    )
+    point = (
+        "real = st.save_pin\n"
+        "def save_then_die(*a, **k):\n"
+        "    real(*a, **k)\n"
+        "    os._exit(9)\n"
+        "st.save_pin = save_then_die"
+    )
+    assert _crash_at(point.replace("\\n", "\n"), cwd, code_args).returncode == 9
+    pins = json.loads((cwd / "new-pins.json").read_text())["pins"]
+    assert (
+        pins["acme"]["enrollment_id"]
+        in (cwd / "new-state" / _state_records(cwd / "new-state")[0]).read_text()
+    )
+    again = enroll(cwd, fps)
+    assert again.returncode == 2 and "already enrolled" in again.stderr
 
 
 @pytest.mark.parametrize("command", [enroll, rebaseline], ids=["enroll", "rebaseline"])

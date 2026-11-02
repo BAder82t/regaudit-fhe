@@ -325,9 +325,7 @@ def check_pin_file_usable(path: str | Path) -> None:
         raise PinStoreError(f"cannot write the pin file: {str(target.parent)!r} is not writable")
 
 
-def undo_rebaseline(
-    store: FileStateStore, issuer: str, written: bytes, before: bytes | None
-) -> None:
+def undo_ceremony(store: FileStateStore, issuer: str, written: bytes, before: bytes | None) -> None:
     """Put the record back after the new pin could not be saved, so that a failed ceremony changes nothing.
 
     Only if the record is still the one this ceremony wrote: anything newer is left alone.

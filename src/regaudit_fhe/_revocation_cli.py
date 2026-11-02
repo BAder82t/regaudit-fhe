@@ -124,9 +124,17 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
         sys.stderr.write("this issuer is already enrolled; re-baselining is a separate ceremony\n")
         return 2
     try:
+        st.check_pin_file_usable(args.pins)
         state = _state_dir(args.state)
+        before = state.read(pin.issuer)
         st.enroll(state, pin, store, now=_now())
-        st.save_pin(args.pins, pin)
+        written = state.read(pin.issuer)
+        try:
+            st.save_pin(args.pins, pin)
+        except (st.PinStoreError, OSError):
+            if written is not None:
+                st.undo_ceremony(state, pin.issuer, written, before)
+            raise
     except ValueError as exc:
         sys.stderr.write(f"refused, nothing enrolled: {exc}\n")
         return 2
@@ -169,7 +177,7 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
             st.save_pin(args.pins, pin)
         except (st.PinStoreError, OSError):
             if written is not None:
-                st.undo_rebaseline(state, pin.issuer, written, before)
+                st.undo_ceremony(state, pin.issuer, written, before)
             raise
     # TrustStoreError is a ValueError, so this comes first
     except (st.StateUnavailable, st.PinStoreError, TrustStoreError, OSError) as exc:
