@@ -74,7 +74,10 @@ def test_an_honest_published_report_gets_the_same_verdict_after_migrating(versio
     after = verify(env, VerificationPolicy(trust_store=store_from(tmp_path), now=lambda: NOW))
     assert before.trust_status == after.trust_status == "TRUSTED"
     assert after.issuer_trusted
-    assert [r for r in before.reasons if r != "ISSUER_UNBOUND"] == list(after.reasons)
+    assert [r for r in before.reasons if r != "ISSUER_UNBOUND"] == [
+        r for r in after.reasons if r != "ISSUER_OPERATOR_DECLARED"
+    ]
+    assert "ISSUER_OPERATOR_DECLARED" in after.reasons  # owner's ruling: a migration's issuer is labelled as a statement
 
 
 @pytest.mark.parametrize(("version", "kind"), CASES)

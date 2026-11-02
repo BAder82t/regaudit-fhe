@@ -482,6 +482,7 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
                 "issuer": entry.issuer if entry else None,
                 "status": entry.status if entry else None,
                 "fingerprint_sha256": spki_fingerprint(pem),
+                **({"issuer_source": "operator-declared"} if key_id in store.issuer_declared else {}),
             }
         )
     print(json.dumps(rows, indent=2))
@@ -777,6 +778,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         sys.stderr.write(
             "warning: --trusted-keys states no issuer for its keys, so nothing compared the report's issuer name with "
             "the one enrolled for its key. See 'regaudit-fhe trust migrate'.\n"
+        )
+    if trust_store is not None and trust_store.issuer_declared:
+        sys.stderr.write(
+            "note: this store's issuers were stated by a local operator with 'trust migrate'. The report's issuer name was "
+            "compared with that statement, which is not an authenticated binding.\n"
         )
     decision = None
     try:

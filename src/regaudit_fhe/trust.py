@@ -14,9 +14,10 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import os
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -84,6 +85,8 @@ def _normalise_pem(pem: str) -> str:
 
 
 MAX_TRUST_STORE_BYTES = 4 * 1024 * 1024
+# Beside a migrated store, because the published versions refuse any unknown member in the store itself. See _read_declared.
+ISSUER_PROVENANCE_SUFFIX = ".issuer-provenance.json"
 _STATUSES = ("active", "retired", "compromised")
 _PRIMITIVE_NAMES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
 _ENTRY_KEYS = frozenset(
@@ -154,6 +157,34 @@ class KeyEntry:
     deployments: frozenset[str] | None = None
     primitives: frozenset[str] | None = None
     parameter_set_pin: str | None = None
+
+
+def _read_declared(path: str | Path) -> frozenset[str]:
+    """The keys a migration recorded as operator-declared, from the file beside the store.
+
+    This records what happened, and it is a label: deleting the file, copying the store without it, or loading the JSON with
+    ``from_dict`` loses it, and anyone who can write the file can write anything. A store loaded without it is not thereby
+    authenticated. It is not in the store itself because every published version refuses an unknown member there, and the
+    published versions must keep reading a migrated store. A file that is present and unusable is refused.
+    """
+    side = Path(os.path.realpath(path) + ISSUER_PROVENANCE_SUFFIX)
+    try:
+        if side.stat().st_size > MAX_TRUST_STORE_BYTES:
+            raise TrustStoreError(f"issuer provenance {str(side)!r} is too large")
+        payload = loads_strict(side.read_bytes(), max_bytes=MAX_TRUST_STORE_BYTES)
+    except FileNotFoundError:
+        return frozenset()
+    except (OSError, CanonicalError, RecursionError) as exc:
+        raise TrustStoreError(f"issuer provenance {str(side)!r} is unusable: {exc}") from exc
+    key_ids = payload.get("key_ids") if isinstance(payload, Mapping) else None
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("kind") != "operator-declared"
+        or not isinstance(key_ids, list)
+        or not all(isinstance(k, str) for k in key_ids)
+    ):
+        raise TrustStoreError(f"issuer provenance {str(side)!r} is not in the expected form")
+    return frozenset(key_ids)
 
 
 def _is_validated_record(key_id: Any, entry: Any, pem: Any) -> bool:
@@ -293,6 +324,8 @@ class TrustStore:
     # Operator-asserted snapshot time. In Phase 3A the store is a local file
     # with no authenticated provenance, so this is informational only.
     as_of: datetime | None = None
+    # Keys whose issuer a migration recorded as an operator's statement. A label, and not authentication: see _read_declared.
+    issuer_declared: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         # Copy and freeze: a caller must not be able to change trust material
@@ -303,6 +336,9 @@ class TrustStore:
             self, "parameter_set_pins", MappingProxyType(dict(self.parameter_set_pins))
         )
         object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+        object.__setattr__(self, "issuer_declared", frozenset(self.issuer_declared))
+        if not self.issuer_declared <= set(self.entries):
+            raise TrustStoreError("issuer_declared names a key_id that is not in entries")
         # Direct construction is held to the same rules as the loaders: every key
         # must be a real Ed25519 public key, and no key may sit under two ids (a
         # revoked or compromised key must not be re-labelled to regain trust).
@@ -433,7 +469,9 @@ class TrustStore:
             raise TrustStoreError(f"trust-store {str(path)!r} is nested too deeply") from exc
         if not isinstance(payload, Mapping):
             raise TrustStoreError(f"trust-store {str(path)!r} must be a JSON object")
-        return cls.from_dict(payload)
+        store = cls.from_dict(payload)
+        declared = _read_declared(path) & set(store.entries)
+        return replace(store, issuer_declared=declared) if declared else store
 
     @classmethod
     def _from_entries(cls, payload: Mapping[str, Any]) -> TrustStore:

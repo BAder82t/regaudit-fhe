@@ -28,7 +28,13 @@ from typing import Any
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
-from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError, issuer_name_problem
+from .trust import (
+    ISSUER_PROVENANCE_SUFFIX,
+    MAX_TRUST_STORE_BYTES,
+    TrustStore,
+    TrustStoreError,
+    issuer_name_problem,
+)
 
 __all__ = [
     "LOCAL_NOTICE",
@@ -150,6 +156,7 @@ def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
                 if entry.compromised_from
                 else None,
                 "fingerprint_sha256": spki_fingerprint(store.keys[kid]),
+                **({"issuer_source": "operator-declared"} if kid in store.issuer_declared else {}),
             }
         )
     if key_id is not None and not rows:
@@ -380,6 +387,8 @@ def migrate_store(
                     "KEY_REVOKED -> KEY_COMPROMISED_NO_CHRONOLOGY" if was == "revoked" else None
                 ),
                 "new_refusal_possible": "ISSUER_MISMATCH",
+                "issuer_binding": "operator-declared",
+                "authenticated_binding": False,
             }
         )
     out = {"entries": entries, "as_of": as_of}
@@ -392,6 +401,26 @@ def migrate_store(
     }:
         raise MigrationRefused("a key changed during migration")
     return out, report
+
+
+def _write_new(path: str, data: bytes, mode: int) -> None:
+    """A new file, durably, or nothing."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(path, mode)
+        directory = os.open(os.path.dirname(os.path.realpath(path)), os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+        raise
 
 
 def migrate(
@@ -408,18 +437,26 @@ def migrate(
     out, rows = migrate_store(payload, issuers, as_of=_utc(now))
     if os.path.lexists(target):
         raise MigrationRefused(f"{target!r} exists; migration never overwrites")
+    side = os.path.realpath(target) + ISSUER_PROVENANCE_SUFFIX
+    if os.path.lexists(side):
+        raise MigrationRefused(f"{side!r} exists; migration never overwrites")
     if not dry_run:
-        data = _dump(out).encode("utf-8")
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        provenance = {
+            "kind": "operator-declared",
+            "authenticated": False,
+            "declared_at": _utc(now),
+            "source_sha256": hashlib.sha256(Path(real).read_bytes()).hexdigest(),
+            "key_ids": sorted(out["entries"]),
+            "note": "Each issuer in the store beside this file is a local operator's statement, made with 'trust migrate'. "
+            "No authenticated enrollment took place. This file is a label: deleting it proves nothing.",
+        }
+        # The label first: a kill between the two leaves no store, rather than a store with no label.
+        _write_new(side, _dump(provenance).encode("utf-8"), mode)
         try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(target, mode)
+            _write_new(target, _dump(out).encode("utf-8"), mode)
         except BaseException:
             with contextlib.suppress(OSError):
-                os.unlink(target)
+                os.unlink(side)
             raise
     return {
         "scope": SCOPE,
@@ -427,6 +464,12 @@ def migrate(
         "target": target,
         "dry_run": dry_run,
         "keys": rows,
+        "issuer_provenance": side,
+        "issuer_binding": "operator-declared",
+        "authenticated_binding": False,
         "notice": "The source is unchanged. Under the new store a report whose signed issuer differs from the "
-        "stated issuer is refused (ISSUER_MISMATCH): check the stated issuers against your reports first.",
+        "stated issuer is refused (ISSUER_MISMATCH): check the stated issuers against your reports first. "
+        "Each --issuer is your statement as a local operator, not proof that the key belongs to that issuer: no "
+        "authenticated enrollment took place. confidential and high-assurance accept this store and label the "
+        "result ISSUER_OPERATOR_DECLARED, and secure-v1 refuses it.",
     }

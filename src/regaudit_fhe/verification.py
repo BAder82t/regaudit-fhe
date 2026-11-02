@@ -200,6 +200,12 @@ class VerificationPolicy:
                     "one does not, so a report could claim any issuer name. Run: regaudit-fhe trust migrate "
                     "(docs/DEPLOYMENT.md, 'Upgrading a trust store without issuers')"
                 )
+            if self.profile == SECURE_PROFILE_V1 and self.trust_store.issuer_declared:
+                raise PolicyError(
+                    f"the {SECURE_PROFILE_V1!r} profile refuses a store whose issuers were recorded as a local operator's "
+                    f"statement by 'trust migrate': {sorted(self.trust_store.issuer_declared)}. Enroll each key with "
+                    "'trust add' in a new store"
+                )
             if self.max_age is None:
                 raise PolicyError(f"the {self.profile!r} profile requires max_age")
             if self.replay_mode == "off" or self.replay_cache is None:
@@ -661,6 +667,9 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     if entry is not None and entry.issuer is None:
         # Only a development policy gets here. The verdict is what it always was, and it says less than it looks.
         note("ISSUER_UNBOUND")
+    if entry is not None and entry.key_id in getattr(policy.trust_store, "issuer_declared", ()):
+        # The name was compared, with a name a local operator stated. That is not an authenticated binding.
+        note("ISSUER_OPERATOR_DECLARED")
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
     history_bound = _bound_history_age(policy, now)

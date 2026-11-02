@@ -602,7 +602,10 @@ def apply_entries(store: TrustStore, listed: list[dict[str, Any]]) -> TrustStore
     payload: dict[str, Any] = {"entries": entries}
     if store.as_of is not None:
         payload["as_of"] = _z(store.as_of)
-    return TrustStore.from_dict(payload)
+    view = TrustStore.from_dict(payload)
+    if not store.issuer_declared:
+        return view
+    return replace(view, issuer_declared=store.issuer_declared & set(view.entries))
 
 
 # ----------------------------------------------------------------------------- authority: enrollment, routine transition, recovery
