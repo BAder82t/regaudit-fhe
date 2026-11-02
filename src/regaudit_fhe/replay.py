@@ -134,7 +134,8 @@ class InMemoryReplayCache:
             return effective
 
     def _purge(self, now: datetime) -> None:
-        for key in [k for k, exp in self._entries.items() if exp <= now]:
+        # Through its expiry instant, inclusive: a report is still fresh at exactly issued_at + max_age.
+        for key in [k for k, exp in self._entries.items() if exp < now]:
             del self._entries[key]
 
     def seen(self, key_id: str, run_id: str, *, now: datetime) -> bool:
@@ -693,7 +694,7 @@ class SqliteReplayCache:
             try:
                 _refuse_if_not_current(conn, self._path)
                 row = conn.execute(
-                    "SELECT 1 FROM replay WHERE key_id = ? AND run_id = ? AND expires_at > ?",
+                    "SELECT 1 FROM replay WHERE key_id = ? AND run_id = ? AND expires_at >= ?",
                     (key_id, run_id, stamp),
                 ).fetchone()
             finally:
@@ -715,7 +716,8 @@ class SqliteReplayCache:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     _refuse_if_not_current(conn, self._path)
-                    conn.execute("DELETE FROM replay WHERE expires_at <= ?", (stamp,))
+                    # Through its expiry instant, inclusive: a report is still fresh at exactly issued_at + max_age.
+                    conn.execute("DELETE FROM replay WHERE expires_at < ?", (stamp,))
                     present = conn.execute(
                         "SELECT 1 FROM replay WHERE key_id = ? AND run_id = ?", (key_id, run_id)
                     ).fetchone()
