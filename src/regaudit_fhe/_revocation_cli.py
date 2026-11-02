@@ -60,7 +60,7 @@ def _state_dir(path: str) -> st.FileStateStore:
 
 
 def _trust_store(path: str | None) -> TrustStore | None:
-    return TrustStore.from_json(path) if path else None
+    return TrustStore.from_json(path, private_storage=True) if path else None
 
 
 def _baseline(args: argparse.Namespace) -> tuple[int | None, str | None]:
@@ -239,7 +239,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     """Exit 0 accepted | 1 refused | 3 a store is unusable."""
     try:
         state, pin = _context_parts(args)
-        store = TrustStore.from_json(args.trusted_keys)
+        store = TrustStore.from_json(args.trusted_keys, private_storage=True)
         raw = _read_document(args.document)
     except (st.PinStoreError, TrustStoreError, OSError) as exc:
         sys.stderr.write(f"{exc}\n")

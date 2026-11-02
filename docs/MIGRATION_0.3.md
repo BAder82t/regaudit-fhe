@@ -54,6 +54,10 @@ it does not make the names any better established.
 **Published versions refuse a migrated store.** 0.1.0, 0.1.1, 0.2.0 and 0.2.1 do not know that member, so `TrustStore.from_json` raises and `regaudit-fhe verify` exits 3. That fails closed. **Keep the source store: `trust migrate` leaves it unchanged, and it is
 the way back** to an older verifier.
 
+### Permissions on the trust store
+
+Under `confidential`, `high-assurance` and `secure-v1`, a trust store file that another account owns or can write is refused, directly or through a directory above it, and so is a symlink or a file with a second name. `verify` exits 3 and `serve` does not start. A file owned by root is fine, and so are `0600`, `0640` and `0644`. `0660` is refused. Nothing is changed for you. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
+
 ### Names that are refused
 
 Everywhere a name is enrolled, loaded or migrated, and in every profile, an issuer may not be empty, have leading or trailing whitespace, contain

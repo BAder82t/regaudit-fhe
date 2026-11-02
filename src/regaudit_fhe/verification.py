@@ -201,6 +201,11 @@ class VerificationPolicy:
                     f"the {self.profile!r} profile requires exactly a TrustStore, not a subclass: what it reads about a "
                     "key and its issuer must come from validated records"
                 )
+            if self.trust_store.storage_problem is not None:
+                raise PolicyError(
+                    f"the {self.profile!r} profile refuses this trust store, because another account could change which "
+                    f"keys it trusts: {self.trust_store.storage_problem}"
+                )
             if not self.trust_store.binds_issuers:
                 raise PolicyError(
                     f"the {self.profile!r} profile requires a trust store that states the issuer of each key, and this "

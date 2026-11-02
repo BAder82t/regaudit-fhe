@@ -741,10 +741,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     trust_store: TrustStore | None = None
     if args.trusted_keys is not None:  # supplied (even if empty) => it must be usable
         try:
-            trust_store = TrustStore.from_json(args.trusted_keys.strip())
+            trust_store = TrustStore.from_json(
+                args.trusted_keys.strip(), private_storage=args.profile != "development"
+            )
         except TrustStoreError as exc:
             sys.stderr.write(f"--trusted-keys: {exc}\n")
             return 3
+        if trust_store.storage_problem is not None:  # only a development policy gets here
+            sys.stderr.write(
+                f"warning: another account could change which keys --trusted-keys trusts: {trust_store.storage_problem}\n"
+            )
     if trust_store is None and not args.allow_self_signed:
         sys.stderr.write(
             "no trust material: pass --trusted-keys to authenticate the issuer, or "

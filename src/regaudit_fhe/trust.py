@@ -14,7 +14,9 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -24,6 +26,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ._keys import spki_fingerprint
+from ._storage_policy import acl_problem, directory_problem, file_problem, platform_problem
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 
@@ -184,6 +187,56 @@ class KeyEntry:
     primitives: frozenset[str] | None = None
     parameter_set_pin: str | None = None
     issuer_source: str | None = None
+
+
+def _store_location_problem(path: str | Path) -> str | None:
+    problem = platform_problem()
+    if problem is None:
+        problem = directory_problem(os.path.dirname(os.path.abspath(path)))
+    if problem is None and os.path.islink(path):
+        problem = "it is a symbolic link"
+    return problem
+
+
+def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, str | None]:
+    """The text, and why another account could have changed it, if it could. Refuses that with ``private_storage``."""
+
+    def unsafe(reason: str) -> TrustStoreError:
+        return TrustStoreError(f"trust-store {str(path)!r} is not safe to use: {reason}")
+
+    problem = _store_location_problem(path)
+    if private_storage and problem is not None:
+        raise unsafe(problem)
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    if private_storage:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if stat.S_ISDIR(info.st_mode):
+                raise IsADirectoryError(errno.EISDIR, "Is a directory", str(path))
+            if info.st_size > MAX_TRUST_STORE_BYTES:
+                raise TrustStoreError(
+                    f"trust-store {str(path)!r} size {info.st_size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
+                )
+            if problem is None and platform_problem() is None:
+                problem = file_problem(info, owners=(os.geteuid(), 0)) or acl_problem(
+                    "the file", fd=handle.fileno()
+                )
+            if private_storage and problem is not None:
+                raise unsafe(problem)
+            body = handle.read(MAX_TRUST_STORE_BYTES + 1).decode("utf-8")
+            if problem is None and private_storage:
+                try:
+                    after = os.lstat(path)
+                except OSError as exc:
+                    raise unsafe(f"the file was replaced while it was read: {exc}") from exc
+                if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
+                    raise unsafe("the file was replaced while it was read")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
+    return body, problem
 
 
 def _refuse_old_record(path: str | Path) -> None:
@@ -348,6 +401,9 @@ class TrustStore:
     # Keys whose entry records an operator's statement (OPERATOR_DECLARED). Worked out from the entries. Deleting the member
     # from the file is an edit of local state, and nothing here can detect it.
     issuer_declared: frozenset[str] = field(init=False, repr=False, compare=False)
+    # Why another account could have changed the file this was loaded from, if it could. Strict profiles refuse such
+    # a store. ``None`` also for a store built in memory: that is the caller's trust boundary, and no file was checked.
+    storage_problem: str | None = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
         # Copy and freeze: a caller must not be able to change trust material
@@ -476,17 +532,15 @@ class TrustStore:
         )
 
     @classmethod
-    def from_json(cls, path: str | Path) -> TrustStore:
-        """Load a TrustStore from a JSON file."""
-        try:
-            size = Path(path).stat().st_size
-            if size > MAX_TRUST_STORE_BYTES:
-                raise TrustStoreError(
-                    f"trust-store {str(path)!r} size {size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
-                )
-            body = Path(path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
+    def from_json(cls, path: str | Path, *, private_storage: bool = False) -> TrustStore:
+        """Load a TrustStore from a JSON file.
+
+        What is parsed is what was read from the descriptor that was checked. ``private_storage`` refuses a file another
+        account could change, as a strict profile needs. Otherwise the reason is kept in ``storage_problem``, and a
+        strict policy refuses the store later. That also checks ownership and write access only: the same account, an
+        administrator or a restored copy can still change which keys are trusted.
+        """
+        body, problem = _read_store_file(path, private_storage=private_storage)
         try:
             # strict JSON: a duplicated key must not silently replace an earlier entry or the revoked list
             payload = loads_strict(body, max_bytes=MAX_TRUST_STORE_BYTES)
@@ -499,7 +553,9 @@ class TrustStore:
         if not isinstance(payload, Mapping):
             raise TrustStoreError(f"trust-store {str(path)!r} must be a JSON object")
         _refuse_old_record(path)
-        return cls.from_dict(payload)
+        store = cls.from_dict(payload)
+        object.__setattr__(store, "storage_problem", problem)
+        return store
 
     @classmethod
     def _from_entries(cls, payload: Mapping[str, Any]) -> TrustStore:

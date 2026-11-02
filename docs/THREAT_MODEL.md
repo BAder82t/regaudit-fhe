@@ -322,6 +322,13 @@ unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted an
 `3` when it is supplied but unusable. None of this establishes that the trust
 history is complete; the O8 freshness requirement stays in force.
 
+**Trust store custody.** The strict profiles refuse a trust store file that another
+unprivileged account could change, by owner, permissions and ACLs where they can be read,
+because a writer of that file decides which keys are trusted. A process under the same
+account, an administrator or a restored copy can still change it and the verifier would
+not notice. A store built in memory is the caller's responsibility. See
+[DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
+
 **Replay file custody.** The strict profiles refuse a replay file that another
 unprivileged account could change, by owner and permissions. The records themselves
 are not authenticated. A process under the same account, an administrator or a

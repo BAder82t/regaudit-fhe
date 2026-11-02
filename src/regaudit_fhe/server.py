@@ -561,7 +561,9 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
             if s.strip()
         ),
-        trust_store=TrustStore.from_json(trust_path) if trust_path else None,
+        trust_store=TrustStore.from_json(trust_path, private_storage=profile != "development")
+        if trust_path
+        else None,
         allow_self_signed=os.environ.get("REGAUDIT_FHE_ALLOW_SELF_SIGNED", "0") == "1",
         profile=profile,
         verifier_id=os.environ.get("REGAUDIT_FHE_VERIFIER_ID", "").strip() or None,
