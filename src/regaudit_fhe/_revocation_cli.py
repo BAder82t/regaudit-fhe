@@ -113,12 +113,13 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
         pin = _pin_from_args(args)
         store = _trust_store(args.trusted_keys)
         pins = st.load_pins(args.pins) if Path(args.pins).exists() else {}
-    except ValueError as exc:
-        sys.stderr.write(f"refused, nothing enrolled: {exc}\n")
-        return 2
+    # TrustStoreError is a ValueError, so this comes first
     except (st.PinStoreError, TrustStoreError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
+    except ValueError as exc:
+        sys.stderr.write(f"refused, nothing enrolled: {exc}\n")
+        return 2
     if pin.issuer in pins:
         sys.stderr.write("this issuer is already enrolled; re-baselining is a separate ceremony\n")
         return 2
@@ -162,12 +163,13 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
             reset_policy_floor=args.reset_policy_floor,
         )
         st.save_pin(args.pins, pin)
-    except ValueError as exc:
-        sys.stderr.write(f"refused: {exc}\n")
-        return 2
+    # TrustStoreError is a ValueError, so this comes first
     except (st.StateUnavailable, st.PinStoreError, TrustStoreError, OSError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 3
+    except ValueError as exc:
+        sys.stderr.write(f"refused: {exc}\n")
+        return 2
     _emit({"rebaselined": pin.issuer, "enrollment_id": pin.enrollment_id})
     return 0
 
