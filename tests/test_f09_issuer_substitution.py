@@ -25,8 +25,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import regaudit_fhe as rf
 from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.report_v2 import envelope_v2, parse_envelope, parse_envelope_strict
-from regaudit_fhe.reports import verify_envelope
-from regaudit_fhe.trust import KeyEntry
+from regaudit_fhe.reports import verify_envelope, verify_envelope_or_raise, verify_receipt
+from regaudit_fhe.trust import KeyEntry, UntrustedIssuer
 from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 
 T = datetime.now(timezone.utc).replace(microsecond=0)
@@ -197,6 +197,19 @@ def test_the_legacy_verifier_with_a_store(form, expected):
 def test_the_legacy_verifier_with_a_plain_mapping():
     res = verify_envelope(report(FORGED, "v1"), trusted_keys=STORES["bare"])
     assert res.trust_status == "TRUSTED" and res.issuer_trusted and res.issuer == "alice-bank"
+
+
+@pytest.mark.parametrize(("form", "expected"), [("legacy", True), ("bare", True), ("entries", False)])
+def test_verify_receipt_and_verify_envelope_or_raise(form, expected):
+    """The two other published entry points on the legacy verifier: same verdict as it, on every form."""
+    env = report(FORGED, "v1")
+    store = rf.TrustStore.from_dict(STORES[form])
+    assert verify_receipt(env, trust_store=store) is expected
+    if expected:
+        assert verify_envelope_or_raise(env, trust_store=store).trust_status == "TRUSTED"
+    else:
+        with pytest.raises(UntrustedIssuer, match="issuer name"):
+            verify_envelope_or_raise(env, trust_store=store)
 
 
 def _cli(tmp_path: Path, form: str, profile: str) -> subprocess.CompletedProcess[str]:
