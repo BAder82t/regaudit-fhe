@@ -289,6 +289,25 @@ def test_a_save_that_fails_removes_a_record_that_did_not_exist_before(world, mon
     assert not [p for p in (cwd / "empty-state").iterdir() if p.name != ".lock"]
 
 
+def test_rebaseline_checks_the_pin_directory_before_it_touches_the_record(
+    world, tmp_path_factory, monkeypatch
+):
+    cwd, fps = world
+    box = tmp_path_factory.mktemp("pins")
+    box.chmod(0o500)
+
+    def must_not_run(*_args, **_kwargs):
+        raise AssertionError("the record was touched before the pin directory was checked")
+
+    monkeypatch.setattr(st, "rebaseline", must_not_run)
+    args = _Args(cwd, fps)
+    args.pins = str(box / "pins.json")
+    try:
+        assert revocation_cli._cmd_rebaseline(args) == 3
+    finally:
+        box.chmod(0o700)
+
+
 def test_a_record_changed_during_the_ceremony_is_not_overwritten_by_the_undo(
     world, monkeypatch, capsys
 ):

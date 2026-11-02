@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -295,8 +296,13 @@ def test_a_file_replaced_while_in_use_fails_closed(tmp_path):
     active = policy(SqliteReplayCache(db, private_storage=True))
     assert verify(env, active).accepted
     swap = tmp_path / "swap.db"
-    seeded(swap)
-    os.replace(swap, db)  # safe by itself: ours, 0600, no record of this report
+    shutil.copyfile(db, swap)
+    os.chmod(swap, 0o600)
+    conn = sqlite3.connect(swap, isolation_level=None)
+    conn.execute("DELETE FROM replay")
+    conn.close()
+    # Safe by itself, and the same policy floors, so only the file's identity can tell: ours, 0600, no record of this report.
+    os.replace(swap, db)
     res = verify(env, active)
     assert not res.accepted and res.blocking_reasons == ("REPLAY_STATE_UNAVAILABLE",)
 
@@ -419,6 +425,15 @@ def test_the_server_refuses_to_start_on_an_unsafe_file(world, profile):
     out = serve(world, world / "replay.db", profile)
     assert out.returncode != 0 and "ReplayStorageUnsafe" in out.stderr
     assert mode(world / "replay.db") == 0o666
+
+
+def test_the_server_creates_nothing_in_a_directory_others_can_write(world):
+    box = world / "box"
+    box.mkdir()
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    out = serve(world, box / "replay.db")
+    assert out.returncode != 0 and "writable by group or others" in out.stderr
+    assert not list(box.iterdir())
 
 
 def test_the_server_starts_on_a_safe_file(world):
