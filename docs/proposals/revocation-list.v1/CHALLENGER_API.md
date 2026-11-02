@@ -17,6 +17,10 @@ Differences from it: [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 | `regaudit_fhe.replay` | `SqliteReplayCache`, `migrate_replay_file`, `replay_file_status`, `LegacyReplayFile`, `ReplayMigrationRefused` |
 | `regaudit_fhe._verification_response` | `response_v2`, `revocation_evaluation`, `policy_evidence` |
 
+## Trust store form
+
+`confidential` and `high-assurance` raise `PolicyError` for a store with `binds_issuers` false, before any report is read.
+
 ## Enrollment
 
 ```python

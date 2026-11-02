@@ -3,18 +3,24 @@
 ## 0.3.0 — unreleased
 
 AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
-canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with one authorized exception
-(Changed, below). Release scope is undecided, and this section describes a local experimental branch.
+canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with the authorized exceptions under
+Changed, below. Release scope is undecided, and this section describes a local experimental branch.
 
 ### Changed
 
+- **Upgrade action: `confidential` and `high-assurance` refuse a trust store that states no issuer (security, published
+  0.1.0 to 0.2.1).** With a bare or `keys` store, any enrolled key could sign under any issuer name and get `TRUSTED` with
+  `issuer_trusted` true, in every policy, and nothing in the output said so. The number of keys makes no difference. The policy now refuses
+  such a store before reading a report: `PolicyError`, CLI exit 2, and `serve` does not start. Run `regaudit-fhe trust migrate`, stating each
+  key's issuer. See `docs/DEPLOYMENT.md`. `development` and the lenient library paths keep their verdicts.
 - **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
   so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
   start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued
   before the migration are refused (`REPLAY_HISTORY_UNKNOWN`). See `docs/DEPLOYMENT.md`.
 - Replay: raising `max_age` against a replay store no longer takes effect. A report that had gone stale, or whose
   identifier had expired under the earlier setting, used to become acceptable again, so the same report could be accepted
-  twice. The store keeps a floor, the smallest effective `max_age` served. It only goes down and survives restarts. Only when
+  twice. The same happened with no one raising anything, when two services with different settings shared a file or a later run left
+  `max_age` out. The store keeps a floor, the smallest effective `max_age` served. It only goes down and survives restarts. Only when
   the setting exceeds the floor, the floor is enforced and the result carries the informational
   `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are unchanged. See `docs/TRUST_SPEC.md` 6.1.
 - The same for `trust_history_max_age` (`TRUST_HISTORY_FLOOR_APPLIED`), and a value above 24 hours is no longer honoured on

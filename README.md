@@ -342,7 +342,7 @@ and, without a trust store, only means "the file is intact".
 | --- | --- |
 | `accepted` | The final decision. True only when `trust_status` is `TRUSTED`. |
 | `integrity_valid` | The hash and signature are consistent (checked against *your* registered key). |
-| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name matches. |
+| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name is the one enrolled for it. A trust store that states no issuer cannot show that last part: `confidential` and `high-assurance` refuse such a store, and `development` does not compare the name. |
 | `key_status` | `active`, `retired`, `compromised`, `revoked`, `unknown` or `none`. |
 | `chronology` / `timestamp_status` | How well the signing time is established (see the rules below). |
 | `blocking_reasons` | The codes that caused a refusal (for example `ISSUER_UNKNOWN`, `REPORT_TOO_OLD`). |

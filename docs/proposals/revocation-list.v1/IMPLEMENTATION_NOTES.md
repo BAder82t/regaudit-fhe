@@ -92,11 +92,27 @@ It is the same route: raising the setting turned a stale `TrustHistory` fresh, s
 
 **Verdict change:** a caller with a setting above 24 hours and a history older than 24 hours is now refused (`TRUST_STORE_FRESHNESS_UNPROVEN`, with `TRUST_HISTORY_FLOOR_APPLIED`), on every store. This was already a non-default setting used with a caller-supplied history. Default policies are unaffected.
 
+## F-09: issuer attribution
+
+The property is in TRUST_SPEC 3.1. The owner's ruling: `confidential` and `high-assurance` refuse a store without issuers (provisional, in the next
+security release), and the property is not inferred from the number of keys. `TrustStore.binds_issuers` is the test, and
+`VerificationPolicy.__post_init__` is the one place that refuses, so every route to a policy passes it: the CLI, `build_app`, `verify_trusted`, and
+`dataclasses.replace`. There is no opt-out.
+
+Rejected, with reasons: binding legacy keys where the issuer can be established, since a legacy store holds nothing independent and the report's name is what is
+being checked, and first-seen pinning lets the first attacker win; an `expected_issuer` per call, since it does not stop tenant B signing as A; a per-key
+statement beside a legacy store, which is the `entries` form in another syntax.
+
+Whether `development` and the lenient paths should refuse too is a later decision by the owner. Until then their verdicts are not changed. A departure from the proposal, section
+"Legacy keys": it said such a store verifies in every profile.
+
 ## Retired key later marked compromised
 
 `next_list` now **refuses** a compromise time after the retirement. The clamp is gone: there is no flag for it, because rewriting a stated time is a decision about what is true. The refusal says which forms verifiers accept, and the operator states the retirement time or earlier, or no time for an unknown boundary. A list signed some other way is still refused by a verifier and latches: the key stays refused, the whole issuer fails closed, replays and later lists clear nothing, and only an accepted recovery statement or a re-baseline ceremony clears it. A real test runs the whole sequence on the file store.
 
 ## Departures from the proposal's text
+
+- A store without issuers no longer verifies under `confidential` or `high-assurance` (F-09, above).
 
 | Section | Proposal | Implementation | Why |
 |---|---|---|---|

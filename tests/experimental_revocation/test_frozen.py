@@ -25,7 +25,7 @@ PINNED = {
 # Frozen proposal v2. The formats above did not change for it. Editing either file needs a deliberate re-pin.
 PINNED_DOCUMENTS = {
     "docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md": "7b87c13766da85e66d1728217566d6ac2431b6b5de289d0e6cd836101378a23e",
-    "docs/proposals/revocation-list.v1/TEST_MATRIX.md": "d4a059689c651bc0a002be76093d1231fd4b43e9c5ba4ccc1204823c1f3b32cc",
+    "docs/proposals/revocation-list.v1/TEST_MATRIX.md": "d289bfe69a4240720d2b87063ab47ed8882658b01af977bf6c4d70c5ad215c50",
 }
 
 

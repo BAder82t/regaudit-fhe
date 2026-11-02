@@ -88,6 +88,21 @@ matches **all** of:
 Embedding a key in the envelope is a convenience for self-consistency checks
 and MUST NOT be an authority.
 
+**Issuer attribution.** `issuer_trusted: true` means the signed issuer name is exactly the name the
+operator enrolled for the key that verified the report, and that key is enrolled, in scope and not revoked.
+The name comes from the trust store. It never comes from the report, the `key_id`, or the number of keys in the
+store: one key can sign under any name unless something the operator wrote says which name it has. It does not show
+that the operator's statement is true, or who held the key.
+
+A bare or `keys` store states no issuer, so it cannot give this. `confidential` and `high-assurance` refuse it when the
+policy is built (`PolicyError`; CLI exit 2; the server does not start), before any report is read, and there is no way to
+turn that off. `regaudit-fhe trust migrate` makes an `entries` store from one, with each issuer stated by the
+operator and never inferred.
+
+In `development`, and on the lenient library paths `verify_envelope` and `verify_report(parse_envelope(...))`, such a store
+keeps the verdicts it has always had, for compatibility. There `issuer_trusted` shows only that the key is enrolled, in scope and
+not revoked. A relying application MUST NOT treat the `issuer` field as attributed there.
+
 ### 3.2 `report.v2` signed identity fields
 
 These move into the **signed body** (v1 left them in the unsigned receipt):
@@ -553,7 +568,7 @@ original canonical signing format. v2 MUST NOT alter that format.
 |---|---|---|
 | `trust_status` | `TRUSTED` \| `SELF_SIGNED_ONLY` \| `INVALID` | The single classification. |
 | `integrity_valid` | bool | SHA-256 receipt and signature are consistent (against the registered key when trust material exists). |
-| `issuer_trusted` | bool | The issuer matched §3.1 items 1-6. False when no trust material was supplied. |
+| `issuer_trusted` | bool | The issuer matched §3.1 items 1-6. False when no trust material was supplied. See "Issuer attribution" in §3.1 for a store that states no issuer. |
 | `key_status` | `active` \| `retired` \| `compromised` \| `revoked` \| `unknown` \| `none` | State of the signing key in the trust store. |
 | `chronology` | `NONE` \| `SIGNER_ASSERTED` \| `AUTHENTICATED` | Best evidence class available. |
 | `signed_not_after` | RFC 3339 or null | Upper bound on signing time from authenticated evidence. |
