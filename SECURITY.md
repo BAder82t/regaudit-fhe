@@ -12,6 +12,11 @@ Only the latest release receives security updates. See `CHANGELOG.md` and
 releases rely on AI-assisted testing and review. They have had no independent external
 security audit, and no production assurance is claimed.
 
+## Known limitations
+
+Replay protection limitations in v0.2.1 are described in
+[docs/advisories/replay-limitations-0.2.1.md](docs/advisories/replay-limitations-0.2.1.md).
+
 ## Reporting a vulnerability
 
 Email **b@vaultbytes.com** with the subject line `regaudit-fhe security`.
