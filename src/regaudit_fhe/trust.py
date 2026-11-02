@@ -14,6 +14,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,6 +99,36 @@ _ENTRY_KEYS = frozenset(
         "parameter_set_pin",
     }
 )
+
+
+# Blank or invisible, and not in a category that says so. The rest of what renders as nothing is category C or Z.
+_BLANK_CODE_POINTS = frozenset(
+    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0}
+    | set(range(0x180B, 0x1810))
+    | set(range(0xFE00, 0xFE10))
+    | set(range(0xE0100, 0xE01F0))
+)
+
+
+def issuer_name_problem(name: Any) -> str | None:
+    """Why ``name`` cannot identify an issuer, or ``None``. The one rule for enrollment, trust-store parsing and migration.
+
+    A name that reads as empty, or that renders the same as another one, is ambiguous, and a comparison is byte for byte. So it
+    is refused, and never normalised into another issuer: empty, leading or trailing whitespace, whitespace other than U+0020,
+    and control, format (zero-width, bidi), unassigned, private-use or blank characters anywhere. It says nothing about
+    look-alike letters, double spaces or Unicode normalisation form: those remain different names.
+    """
+    if type(name) is not str or not name:
+        return "must be a non-empty string"
+    if name != name.strip():
+        return "must not have leading or trailing whitespace"
+    for char in name:
+        category = unicodedata.category(char)
+        if category[0] == "C" or ord(char) in _BLANK_CODE_POINTS:
+            return f"must not contain the invisible or control character U+{ord(char):04X}"
+        if category[0] == "Z" and char != " ":
+            return f"must not contain whitespace other than U+0020 (found U+{ord(char):04X})"
+    return None
 
 
 @dataclass(frozen=True)
@@ -193,6 +224,9 @@ def _parse_entry(key_id: str, entry: Any) -> KeyEntry:
     issuer = entry.get("issuer")
     if not isinstance(issuer, str) or not issuer:
         raise TrustStoreError(f"trust-store entry {key_id!r}: issuer is required")
+    problem = issuer_name_problem(issuer)
+    if problem is not None:
+        raise TrustStoreError(f"trust-store entry {key_id!r}: issuer {problem}")
     pem = _checked_pem(key_id, entry.get("public_key_pem"))
     status = entry.get("status")
     if status not in _STATUSES:
@@ -263,6 +297,9 @@ class TrustStore:
                 raise TrustStoreError(
                     f"trust-store entry stored under {map_key!r} names key_id {entry.key_id!r}"
                 )
+            problem = None if entry.issuer is None else issuer_name_problem(entry.issuer)
+            if problem is not None:
+                raise TrustStoreError(f"trust-store entry {map_key!r}: issuer {problem}")
         if self.entries:
             # The legacy views feed the older API and the entries feed the engine;
             # they must describe the same store or the two would disagree.

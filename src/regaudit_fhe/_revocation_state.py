@@ -37,7 +37,7 @@ from . import _revocation as rv
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, canonical_bytes, loads_strict
-from .trust import TrustStore
+from .trust import TrustStore, issuer_name_problem
 
 MAX_CAS_RETRIES = 8
 # Must hold the largest legal list (10 000 entries) in the mark, the archive and the joined actions at once.
@@ -230,8 +230,9 @@ def _pin_from(raw: Any) -> Pin:
         raise PinStoreError("a pin must have exactly the expected members")
     try:
         pin = Pin(**raw)
-        if not (isinstance(pin.issuer, str) and pin.issuer):
-            raise PinStoreError("a pin needs an issuer")
+        problem = issuer_name_problem(pin.issuer)
+        if problem is not None:
+            raise PinStoreError(f"a pin's issuer {problem}")
         if not (isinstance(pin.enrollment_id, str) and pin.enrollment_id):
             raise PinStoreError("a pin needs an enrollment_id")
         spki_fingerprint(pin.authority_pem)

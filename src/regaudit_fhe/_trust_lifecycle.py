@@ -28,7 +28,7 @@ from typing import Any
 from ._keys import spki_fingerprint
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
-from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
+from .trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError, issuer_name_problem
 
 __all__ = [
     "LOCAL_NOTICE",
@@ -352,6 +352,10 @@ def migrate_store(
     extra = sorted(set(issuers) - set(source.keys))
     if extra:
         raise MigrationRefused(f"issuer stated for unknown key_id(s) {extra}")
+    for kid in sorted(source.keys):
+        problem = issuer_name_problem(issuers[kid])
+        if problem is not None:
+            raise MigrationRefused(f"the issuer stated for {kid!r} {problem}; it is never normalised")
     entries: dict[str, dict[str, Any]] = {}
     report: list[dict[str, Any]] = []
     for kid in sorted(source.keys):
