@@ -26,7 +26,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ._keys import spki_fingerprint
-from ._storage_policy import acl_problem, directory_problem, file_problem, platform_problem
+from ._storage_policy import acl_problem, file_problem, platform_problem, resolve_directory
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 
@@ -189,13 +189,44 @@ class KeyEntry:
     issuer_source: str | None = None
 
 
-def _store_location_problem(path: str | Path) -> str | None:
+def _store_location(path: str | Path) -> tuple[str | None, str]:
+    """Why the file's location is unsafe, if it is, and the real path to open."""
+    raw = os.fspath(path)
     problem = platform_problem()
-    if problem is None:
-        problem = directory_problem(os.path.dirname(os.path.abspath(path)))
-    if problem is None and os.path.islink(path):
-        problem = "it is a symbolic link"
-    return problem
+    if problem is not None:
+        return problem, raw
+    head, tail = os.path.split(raw)
+    if tail in ("", ".", ".."):
+        return "it is not a file", raw
+    problem, directory = resolve_directory(head or ".")
+    if problem is not None:
+        return problem, raw
+    target = os.path.join(directory, tail)
+    if os.path.islink(target):
+        return "it is a symbolic link", target
+    return None, target
+
+
+def _opened_file_problem(info: os.stat_result, fd: int) -> str | None:
+    return file_problem(info, owners=(os.geteuid(), 0)) or acl_problem("the file", fd=fd)
+
+
+def store_storage_problem(path: str | Path) -> str | None:
+    """Why another account could change this store file, if it could. A file that is not there yet has no problem."""
+    problem, target = _store_location(path)
+    if problem is not None:
+        return problem
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(target, flags)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"cannot open it without following a link: {exc}"
+    try:
+        return _opened_file_problem(os.fstat(fd), fd)
+    finally:
+        os.close(fd)
 
 
 def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, str | None]:
@@ -204,14 +235,14 @@ def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, s
     def unsafe(reason: str) -> TrustStoreError:
         return TrustStoreError(f"trust-store {str(path)!r} is not safe to use: {reason}")
 
-    problem = _store_location_problem(path)
+    problem, target = _store_location(path)
     if private_storage and problem is not None:
         raise unsafe(problem)
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     if private_storage:
-        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        fd = os.open(path, flags)
+        fd = os.open(target, flags)
         with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())
             if stat.S_ISDIR(info.st_mode):
@@ -221,15 +252,13 @@ def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, s
                     f"trust-store {str(path)!r} size {info.st_size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
                 )
             if problem is None and platform_problem() is None:
-                problem = file_problem(info, owners=(os.geteuid(), 0)) or acl_problem(
-                    "the file", fd=handle.fileno()
-                )
+                problem = _opened_file_problem(info, handle.fileno())
             if private_storage and problem is not None:
                 raise unsafe(problem)
             body = handle.read(MAX_TRUST_STORE_BYTES + 1).decode("utf-8")
             if problem is None and private_storage:
                 try:
-                    after = os.lstat(path)
+                    after = os.lstat(target)
                 except OSError as exc:
                     raise unsafe(f"the file was replaced while it was read: {exc}") from exc
                 if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
@@ -403,7 +432,8 @@ class TrustStore:
     issuer_declared: frozenset[str] = field(init=False, repr=False, compare=False)
     # Why another account could have changed the file this was loaded from, if it could. Strict profiles refuse such
     # a store. ``None`` also for a store built in memory: that is the caller's trust boundary, and no file was checked.
-    storage_problem: str | None = field(init=False, repr=False, compare=False, default=None)
+    # A keyword field, so that dataclasses.replace carries it to a copy.
+    storage_problem: str | None = field(default=None, repr=False, compare=False, kw_only=True)
 
     def __post_init__(self) -> None:
         # Copy and freeze: a caller must not be able to change trust material

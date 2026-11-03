@@ -132,7 +132,7 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
         try:
             st.save_pin(args.pins, pin)
         except (st.PinStoreError, OSError):
-            if written is not None:
+            if written is not None and not st.pin_was_saved(args.pins, pin):
                 st.undo_ceremony(state, pin.issuer, written, before)
             raise
     except ValueError as exc:
@@ -176,7 +176,7 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
         try:
             st.save_pin(args.pins, pin)
         except (st.PinStoreError, OSError):
-            if written is not None:
+            if written is not None and not st.pin_was_saved(args.pins, pin):
                 st.undo_ceremony(state, pin.issuer, written, before)
             raise
     # TrustStoreError is a ValueError, so this comes first

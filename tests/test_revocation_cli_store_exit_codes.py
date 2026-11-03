@@ -533,6 +533,197 @@ def test_a_crash_after_the_pin_is_saved_is_a_complete_enrollment(world):
     assert again.returncode == 2 and "already enrolled" in again.stderr
 
 
+# ----------------------------------------------------------------------------- review findings
+
+
+macos = pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACLs")
+
+
+def _set_acl(path: Path, entry: str) -> None:
+    subprocess.run(["/bin/chmod", "+a", entry, str(path)], check=True, capture_output=True)  # noqa: S603
+
+
+def _state_record(cwd: Path) -> Path:
+    return next((cwd / "state").glob("*.state"))
+
+
+@macos
+def test_a_write_acl_on_the_state_record_stops_verification(world):
+    cwd, _ = world
+    assert verify_cli(cwd).returncode == 1
+    _set_acl(_state_record(cwd), "group:everyone allow write")
+    refused = verify_cli(cwd)
+    assert refused.returncode == 3, refused.stdout + refused.stderr
+
+
+@macos
+def test_a_write_acl_on_the_pin_file_stops_verification(world):
+    cwd, _ = world
+    _set_acl(cwd / "pins.json", "group:everyone allow write")
+    assert verify_cli(cwd).returncode == 3
+    assert (
+        cli(
+            "revocation",
+            "status",
+            "--pins",
+            "pins.json",
+            "--state",
+            "state",
+            "--issuer",
+            "acme",
+            cwd=cwd,
+        ).returncode
+        != 0
+    )
+
+
+@macos
+def test_a_write_acl_on_the_state_directory_stops_verification(world):
+    cwd, _ = world
+    _set_acl(cwd / "state", "group:everyone allow add_file")
+    assert verify_cli(cwd).returncode == 3
+
+
+def _move_under_a_writable_parent(cwd: Path) -> None:
+    """The state and pin files move below a directory others can write, and the tree is otherwise safe."""
+    box = cwd / "box"
+    box.mkdir()
+    (cwd / "state").rename(box / "state")
+    (cwd / "pins.json").rename(box / "pins.json")
+    (box).chmod(0o777)
+
+
+def test_a_parent_directory_others_can_write_stops_status(world):
+    cwd, _ = world
+    _move_under_a_writable_parent(cwd)
+    out = cli(
+        "revocation",
+        "status",
+        "--pins",
+        "box/pins.json",
+        "--state",
+        "box/state",
+        "--issuer",
+        "acme",
+        cwd=cwd,
+    )
+    assert out.returncode != 0 and "writable by group or others" in out.stderr
+
+
+def test_ingest_refuses_a_store_others_can_write(world):
+    cwd, _ = world
+    (cwd / "list.json").write_text("{}")
+    (cwd / "t.json").chmod(0o666)
+    before = snapshot(cwd)
+    out = cli(
+        "revocation", "ingest", "list", "list.json", "--pins", "pins.json", "--state", "state", "--issuer", "acme",
+        "--trusted-keys", "t.json", cwd=cwd,
+    )  # fmt: skip
+    assert out.returncode == 3 and "lets group or others write" in out.stderr
+    assert snapshot(cwd) == before
+
+
+@pytest.mark.parametrize("command", [enroll, rebaseline], ids=["enroll", "rebaseline"])
+def test_a_pin_directory_that_cannot_be_read_changes_nothing(world, tmp_path_factory, command):
+    """Mode 0300: the new pin could be renamed into place, and then the directory could not be opened to sync it."""
+    cwd, fps = world
+    box = tmp_path_factory.mktemp("pins")
+    (box / "pins.json").write_bytes((cwd / "pins.json").read_bytes())
+    (box / "pins.json").chmod(0o600)
+    box.chmod(0o300)
+    before = snapshot(cwd)
+    try:
+        if command is enroll:
+            out = cli(
+                "revocation",
+                "enroll",
+                *_pin_args(fps, str(box / "new.json"), "new-state"),
+                "--trusted-keys",
+                "t.json",
+                cwd=cwd,
+            )
+        else:
+            out = cli(
+                "revocation",
+                "rebaseline",
+                *_pin_args(fps, str(box / "pins.json"), "state"),
+                "--trusted-keys",
+                "t.json",
+                cwd=cwd,
+            )
+        assert out.returncode == 3, out.stderr
+        assert snapshot(cwd) == before
+    finally:
+        box.chmod(0o700)
+    assert sorted(p.name for p in box.iterdir()) == ["pins.json"]
+
+
+def _sync_fails_after_the_rename(monkeypatch) -> None:
+    """Only inside the pin save: its first sync is the file, its second is the directory after the rename."""
+    real_sync, real_save, calls = st._sync, st.save_pin, []
+
+    def second_call_fails(fd, fcntl):
+        if calls:
+            calls.append(fd)
+            if len(calls) == 3:
+                raise OSError("the directory could not be synced")
+        return real_sync(fd, fcntl)
+
+    def save(path, pin):
+        calls.append("saving")
+        return real_save(path, pin)
+
+    monkeypatch.setattr(st, "_sync", second_call_fails)
+    monkeypatch.setattr(st, "save_pin", save)
+
+
+def test_enroll_keeps_the_record_when_the_pin_is_already_in_place(world, monkeypatch, capsys):
+    cwd, fps = world
+    with monkeypatch.context() as during:
+        _sync_fails_after_the_rename(during)
+        assert revocation_cli._cmd_enroll(_enroll_args(cwd, fps)) == 3
+    assert "could not be synced" in capsys.readouterr().err
+    pins = json.loads((cwd / "new-pins.json").read_text())["pins"]
+    records = _state_records(cwd / "new-state")
+    assert len(records) == 1
+    assert pins["acme"]["enrollment_id"] in (cwd / "new-state" / records[0]).read_text()
+    args = (
+        "revocation",
+        "status",
+        "--pins",
+        "new-pins.json",
+        "--state",
+        "new-state",
+        "--issuer",
+        "acme",
+    )
+    assert cli(*args, cwd=cwd).returncode == 0
+
+
+def test_rebaseline_keeps_the_record_when_the_pin_is_already_in_place(world, monkeypatch, capsys):
+    cwd, fps = world
+    with monkeypatch.context() as during:
+        _sync_fails_after_the_rename(during)
+        assert revocation_cli._cmd_rebaseline(_Args(cwd, fps)) == 3
+    assert "could not be synced" in capsys.readouterr().err
+    pins = json.loads((cwd / "pins.json").read_text())["pins"]
+    assert pins["acme"]["enrollment_id"] in _state_record(cwd).read_text()
+    assert (
+        cli(
+            "revocation",
+            "status",
+            "--pins",
+            "pins.json",
+            "--state",
+            "state",
+            "--issuer",
+            "acme",
+            cwd=cwd,
+        ).returncode
+        == 0
+    )
+
+
 @pytest.mark.parametrize("command", [enroll, rebaseline], ids=["enroll", "rebaseline"])
 def test_a_wrong_fingerprint_is_still_a_refusal(world, command):
     cwd, fps = world

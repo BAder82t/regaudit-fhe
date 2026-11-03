@@ -43,8 +43,7 @@ def verify_cli(cwd: Path, report: str, store: str = "t.json", profile: str = "co
     return out, (json.loads(out.stdout) if out.stdout.strip() else None)
 
 
-@pytest.fixture
-def world(tmp_path: Path) -> Path:
+def make_world(tmp_path: Path) -> Path:
     """A store enrolling one key, a report from that key, and a report from an outsider's key under the same issuer."""
     for name in ("issuer", "outsider"):
         out = cli(
@@ -64,6 +63,11 @@ def world(tmp_path: Path) -> Path:
             "--issuer", "acme", "--deployment-id", "p", "--audience", "reg", cwd=tmp_path,
         ).returncode == 0  # fmt: skip
     return tmp_path
+
+
+@pytest.fixture
+def world(tmp_path: Path) -> Path:
+    return make_world(tmp_path)
 
 
 def add_outsider(path: Path, world: Path) -> None:
@@ -184,7 +188,7 @@ def test_a_symlink_swapped_in_after_the_location_check_is_refused_at_open(world,
     target = world / "real.json"
     target.write_bytes((world / "t.json").read_bytes())
     (world / "link.json").symlink_to(target)
-    monkeypatch.setattr(trust_module, "_store_location_problem", lambda path: None)
+    monkeypatch.setattr(trust_module, "_store_location", lambda path: (None, str(path)))
     with pytest.raises(TrustStoreError, match="unreadable"):
         rf.TrustStore.from_json(world / "link.json", private_storage=True)
 
@@ -226,7 +230,7 @@ def test_a_store_replaced_between_the_read_and_the_check_after_it_is_refused(wor
         return real_lstat(path, *args, **kwargs)
 
     monkeypatch.setattr(trust_module.os, "lstat", swapping)
-    monkeypatch.setattr(trust_module, "_store_location_problem", lambda path: None)
+    monkeypatch.setattr(trust_module, "_store_location", lambda path: (None, str(path)))
     with pytest.raises(TrustStoreError, match="replaced while it was read"):
         rf.TrustStore.from_json(world / "t.json", private_storage=True)
 
@@ -252,7 +256,7 @@ def test_a_store_owned_by_another_account_is_refused_and_one_owned_by_root_is_no
 
 def test_a_store_of_another_account_is_refused_on_the_real_path(world, monkeypatch):
     real = os.geteuid()
-    monkeypatch.setattr(trust_module, "_store_location_problem", lambda path: None)
+    monkeypatch.setattr(trust_module, "_store_location", lambda path: (None, str(path)))
     monkeypatch.setattr(os, "geteuid", lambda: real + 1)
     with pytest.raises(TrustStoreError, match="another account"):
         rf.TrustStore.from_json(world / "t.json", private_storage=True)

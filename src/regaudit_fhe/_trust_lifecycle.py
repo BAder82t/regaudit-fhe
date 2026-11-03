@@ -35,6 +35,7 @@ from .trust import (
     TrustStore,
     TrustStoreError,
     issuer_name_problem,
+    store_storage_problem,
 )
 
 __all__ = [
@@ -128,6 +129,14 @@ def _store_form(path: str) -> str:
     return "legacy-keys" if isinstance(payload.get("keys"), dict) else "bare-mapping"
 
 
+def _location_warnings(path: str) -> list[str]:
+    """Anything beyond the file's own mode, which :func:`_warnings` reports."""
+    problem = store_storage_problem(path)
+    if problem is None or problem.startswith("mode "):
+        return []
+    return [f"strict profiles refuse this store: {problem}"]
+
+
 def _warnings(mode: int) -> list[str]:
     if mode & 0o022:
         return [
@@ -165,7 +174,7 @@ def status_rows(path: str, key_id: str | None = None) -> dict[str, Any]:
     return {
         "store_form": _store_form(real),
         "store_mode": f"{mode:04o}",
-        "warnings": _warnings(mode),
+        "warnings": _warnings(mode) + _location_warnings(path),
         "as_of": _utc(store.as_of) if store.as_of else None,
         "authenticated": False,
         "issuer_authorized": False,

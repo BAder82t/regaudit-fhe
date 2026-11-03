@@ -1,0 +1,433 @@
+"""Findings from independent verification: paths that dodged the directory check, and ways to launder an unsafe store.
+
+Another process stands in for another account, and ownership is simulated where noted. See the module docstring of
+test_trust_store_storage_policy.py for what these checks do not protect against.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import dataclasses
+import errno
+import os
+import shutil
+import stat
+import sys
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import regaudit_fhe as rf
+from regaudit_fhe import _storage_policy as policy_module
+from regaudit_fhe import trust as trust_module
+from regaudit_fhe.replay import SqliteReplayCache
+from regaudit_fhe.trust import TrustStoreError
+from regaudit_fhe.verification import PolicyError, VerificationPolicy
+
+from .test_revocation_tooling_and_cli import cli
+from .test_trust_store_storage_policy import add_outsider, make_world, mode, verify_cli
+
+STRICT = ["confidential", "high-assurance", "secure-v1"]
+macos = pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACLs")
+
+
+@pytest.fixture
+def world(tmp_path: Path) -> Path:
+    return make_world(tmp_path)
+
+
+def set_acl(path: Path, entry: str) -> None:
+    import subprocess
+
+    subprocess.run(["/bin/chmod", "+a", entry, str(path)], check=True, capture_output=True)  # noqa: S603
+
+
+# ----------------------------------------------------------------------------- F1: a path written with ..
+
+
+def _evil_layout(world: Path) -> Path:
+    evil = world / "evil"
+    (evil / "sub").mkdir(parents=True)
+    shutil.copy(world / "t.json", evil / "t.json")
+    safe = world / "safe"
+    safe.mkdir()
+    (safe / "link").symlink_to(evil / "sub")
+    os.chmod(evil, 0o777)  # noqa: S103 - the point of the test
+    return safe
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_dotdot_after_a_link_is_checked_where_it_really_leads(world, profile):
+    _evil_layout(world)
+    out, verdict = verify_cli(world, "trusted.json", store="safe/link/../t.json", profile=profile)
+    assert out.returncode == 3 and verdict is None, out.stdout + out.stderr
+    assert "evil" in out.stderr and "writable by group or others" in out.stderr
+
+
+def test_dotdot_after_a_link_is_recorded_for_a_store_loaded_without_the_flag(world):
+    safe = _evil_layout(world)
+    store = rf.TrustStore.from_json(safe / "link" / ".." / "t.json")
+    assert store.storage_problem is not None
+    with pytest.raises(PolicyError, match="another account could change"):
+        VerificationPolicy(profile="confidential", trust_store=store)
+
+
+def test_a_rolled_back_store_is_not_reached_through_dotdot(world):
+    """The outcome: a key marked compromised must not come back through a directory others can write."""
+    _evil_layout(world)
+    assert verify_cli(world, "trusted.json", store="safe/link/../t.json")[0].returncode == 3
+
+
+def test_dotdot_in_a_safe_tree_still_works(world):
+    (world / "plain" / "sub").mkdir(parents=True)
+    shutil.copy(world / "t.json", world / "plain" / "t.json")
+    out, verdict = verify_cli(world, "trusted.json", store="plain/sub/../t.json")
+    assert out.returncode == 0 and verdict["trust_status"] == "TRUSTED", out.stderr
+
+
+def test_a_store_path_ending_in_dotdot_is_refused(world):
+    with pytest.raises(TrustStoreError):
+        rf.TrustStore.from_json(world / "..", private_storage=True)
+
+
+# ----------------------------------------------------------------------------- F2: a link in the middle of a chain
+
+
+def _chain(world: Path) -> tuple[Path, Path]:
+    real = world / "real"
+    real.mkdir(mode=0o700)
+    mid = world / "mid"
+    mid.mkdir()
+    (mid / "l2").symlink_to(real)
+    a = world / "a"
+    a.mkdir(mode=0o700)
+    (a / "l1").symlink_to(mid / "l2")
+    os.chmod(mid, 0o777)  # noqa: S103 - the point of the test
+    return a / "l1", real
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_the_directory_holding_a_middle_link_is_checked_for_a_store(world, profile):
+    path, real = _chain(world)
+    shutil.copy(world / "t.json", real / "t.json")
+    out, verdict = verify_cli(world, "trusted.json", store=str(path / "t.json"), profile=profile)
+    assert out.returncode == 3 and verdict is None and "mid" in out.stderr, out.stderr
+
+
+def test_the_directory_holding_a_middle_link_is_checked_for_a_replay_file(world):
+    path, real = _chain(world)
+    assert "mid" in (policy_module.directory_problem(str(path)) or "")
+    with pytest.raises(Exception, match="mid"):
+        SqliteReplayCache(path / "replay.db", private_storage=True)
+    assert not list(real.iterdir())
+
+
+def test_a_chain_of_links_in_safe_directories_still_works(world):
+    real = world / "real"
+    real.mkdir(mode=0o700)
+    shutil.copy(world / "t.json", real / "t.json")
+    (world / "l2").symlink_to(real)
+    (world / "l1").symlink_to("l2")
+    out, verdict = verify_cli(world, "trusted.json", store="l1/t.json")
+    assert out.returncode == 0 and verdict["trust_status"] == "TRUSTED", out.stderr
+
+
+def test_a_link_owned_by_another_account_is_refused(world, monkeypatch):
+    (world / "real").mkdir(mode=0o700)
+    (world / "link").symlink_to(world / "real")
+    real_lstat = os.lstat
+
+    def foreign_link(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if str(path).endswith("/link"):
+            fields = list(info)
+            fields[stat.ST_UID] = os.geteuid() + 1
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(policy_module.os, "lstat", foreign_link)
+    assert "another account" in policy_module.directory_problem(str(world / "link"))
+
+
+def test_a_link_loop_is_refused_without_hanging(world):
+    (world / "x").symlink_to(world / "y")
+    (world / "y").symlink_to(world / "x")
+    assert "too many symbolic links" in policy_module.directory_problem(str(world / "x"))
+
+
+def test_the_resolved_directory_is_what_gets_opened(world):
+    (world / "real").mkdir(mode=0o700)
+    (world / "link").symlink_to(world / "real")
+    problem, directory = policy_module.resolve_directory(str(world / "link"))
+    assert problem is None and directory == os.path.realpath(world / "real")
+
+
+# ----------------------------------------------------------------------------- F4: trust add and friends
+
+
+def _trust_add(world: Path, store: str = "t.json"):
+    return cli(
+        "trust", "add", "--store", store, "--key-id", "outsider", "--issuer", "acme", "--public-key", "outsider.pub",
+        "--fingerprint", (world / "outsider.fp").read_text(), cwd=world,
+    )  # fmt: skip
+
+
+def test_trust_add_will_not_launder_a_store_another_process_changed(world):
+    add_outsider(world / "t.json", world)
+    before = (world / "t.json").read_bytes()
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    out = _trust_add(world)
+    assert out.returncode == 3 and "another account could have changed" in out.stderr
+    assert (world / "t.json").read_bytes() == before and mode(world / "t.json") == 0o666
+    assert verify_cli(world, "outsider.json")[0].returncode == 3
+
+
+def test_trust_add_refuses_a_new_store_in_a_directory_others_can_write(world):
+    box = world / "box"
+    box.mkdir()
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    out = _trust_add(world, "box/new.json")
+    assert out.returncode == 3 and not list(box.iterdir())
+
+
+@pytest.mark.parametrize("file_mode", [0o600, 0o640, 0o644], ids=oct)
+def test_trust_add_keeps_the_mode_of_a_safe_store(world, file_mode):
+    os.chmod(world / "t.json", file_mode)
+    out = _trust_add(world)
+    assert out.returncode == 0, out.stderr
+    assert mode(world / "t.json") == file_mode
+
+
+def test_trust_add_still_creates_a_new_store_as_0644(world):
+    out = _trust_add(world, "new.json")
+    assert out.returncode == 0, out.stderr
+    assert mode(world / "new.json") == 0o644
+
+
+def test_trust_list_warns_about_an_unsafe_store(world):
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    out = cli("trust", "list", "--store", "t.json", cwd=world)
+    assert out.returncode == 0 and "another account could change" in out.stderr
+
+
+def test_trust_status_warns_about_a_directory_others_can_write(world):
+    box = world / "box"
+    box.mkdir()
+    shutil.copy(world / "t.json", box / "t.json")
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    out = cli("trust", "status", "--store", "box/t.json", cwd=world)
+    assert out.returncode == 0 and "strict profiles refuse this store" in out.stdout + out.stderr
+
+
+def test_serve_under_development_warns(world):
+    import subprocess
+
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    env = dict(os.environ, REGAUDIT_FHE_PROFILE="development", REGAUDIT_FHE_HOST_REFUSE="1")
+    process = subprocess.Popen(
+        [sys.executable, "-m", "regaudit_fhe.cli", "serve", "--trust-store", "t.json", "--port", "0"],
+        cwd=world, env=env, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True,
+    )  # fmt: skip
+    try:
+        line = process.stderr.readline()
+    finally:
+        process.terminate()
+        process.wait(timeout=30)
+        process.stderr.close()
+    assert "another account could change which keys this server trusts" in line
+
+
+def test_a_development_result_carries_the_reason(world):
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    _, verdict = verify_cli(world, "trusted.json", profile="development")
+    assert (
+        verdict["trust_status"] == "TRUSTED" and "TRUST_STORE_STORAGE_UNSAFE" in verdict["reasons"]
+    )
+
+
+def test_a_safe_result_does_not_carry_the_reason(world):
+    _, verdict = verify_cli(world, "trusted.json", profile="development")
+    assert "TRUST_STORE_STORAGE_UNSAFE" not in verdict["reasons"]
+
+
+# ----------------------------------------------------------------------------- F5: a copy of the object
+
+
+@pytest.mark.parametrize("profile", STRICT)
+def test_a_copy_of_an_unsafe_store_is_still_refused(world, profile):
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    store = rf.TrustStore.from_json(world / "t.json")
+    copied = dataclasses.replace(store)
+    assert copied.storage_problem == store.storage_problem is not None
+    with pytest.raises(PolicyError, match="another account could change"):
+        VerificationPolicy(profile=profile, trust_store=copied)
+
+
+# ----------------------------------------------------------------------------- F8: real ACL text
+
+
+@pytest.mark.parametrize(
+    ("text", "bad"),
+    [
+        ("!#acl 1\ngroup:AA:everyone:12:allow,inherited:read\n", False),
+        ("!#acl 1\ngroup:AA:everyone:12:deny,inherited:delete\n", False),
+        ("!#acl 1\ngroup:AA:everyone:12:allow,file_inherit:read\n", False),
+        ("!#acl 1\ngroup:AA:everyone:12:allow,inherited:write\n", True),
+        ("!#acl 1\ngroup:AA:everyone:12:allow,only_inherit:write\n", True),
+    ],
+)
+def test_real_acl_flags_are_understood(text, bad):
+    assert (policy_module._acl_text_problem(text, "x") is not None) is bad
+
+
+def test_an_unknown_acl_flag_fails_closed():
+    text = "!#acl 1\ngroup:AA:everyone:12:allow,brand_new:read\n"
+    assert "cannot be read reliably" in policy_module._acl_text_problem(text, "x")
+
+
+@macos
+@pytest.mark.parametrize(
+    ("entry", "accepted"),
+    [
+        ("group:everyone allow read,file_inherit", True),
+        ("group:everyone deny delete,file_inherit", True),
+        ("group:everyone allow write,file_inherit", False),
+    ],
+)
+def test_an_inherited_acl_is_judged_by_its_rights(world, entry, accepted):
+    box = world / "box"
+    box.mkdir(mode=0o700)
+    set_acl(box, entry)
+    shutil.copy(world / "t.json", box / "t.json")
+    out, verdict = verify_cli(world, "trusted.json", store="box/t.json")
+    if accepted:
+        assert out.returncode == 0 and verdict["trust_status"] == "TRUSTED", out.stderr
+    else:
+        assert out.returncode == 3 and verdict is None and "ACL" in out.stderr
+
+
+@macos
+def test_a_write_acl_for_a_group_is_refused_even_a_group_this_user_is_in(world):
+    set_acl(world / "t.json", "group:wheel allow write")
+    assert verify_cli(world, "trusted.json")[0].returncode == 3
+
+
+def _fake_libc(world_fd_result=1, *, errno_value=None, text_result=1):
+    def get_fd(_fd, _kind):
+        if errno_value is not None:
+            ctypes.set_errno(errno_value)
+        return world_fd_result
+
+    return SimpleNamespace(
+        acl_get_fd_np=get_fd,
+        acl_get_link_np=lambda _path, _kind: (ctypes.set_errno(errno.ENOENT), 0)[1],
+        acl_to_text=lambda _acl, _size: text_result,
+        acl_free=lambda _pointer: 0,
+    )
+
+
+def _with_functions_settable(fake):
+    for name in ("acl_get_fd_np", "acl_get_link_np", "acl_to_text", "acl_free"):
+        function = getattr(fake, name)
+        wrapper = lambda *a, _f=function: _f(*a)  # noqa: E731
+        setattr(fake, name, wrapper)
+    return fake
+
+
+@macos
+@pytest.mark.parametrize(
+    ("fake", "patch_text"),
+    [
+        (dict(world_fd_result=0, errno_value=errno.EIO), False),
+        (dict(text_result=0), False),
+        (dict(), True),
+    ],
+    ids=["read-error", "no-text", "undecodable"],
+)
+def test_an_acl_that_cannot_be_read_fails_closed(world, monkeypatch, fake, patch_text):
+    """The acl calls are faked: this host cannot produce these failures for real."""
+    library = _with_functions_settable(_fake_libc(**fake))
+    monkeypatch.setattr(policy_module.ctypes, "CDLL", lambda *_a, **_k: library)
+    if patch_text:
+        monkeypatch.setattr(policy_module.ctypes, "string_at", lambda *_a: b"\xff\xfe")
+    assert "cannot be read" in policy_module.acl_problem("x", fd=0)
+
+
+@macos
+def test_no_acl_is_not_a_problem(world):
+    fd = os.open(world / "t.json", os.O_RDONLY)
+    try:
+        assert policy_module.acl_problem("x", fd=fd) is None
+    finally:
+        os.close(fd)
+
+
+# ----------------------------------------------------------------------------- F10 and other routes
+
+
+def test_a_fifo_in_development_reads_as_it_did_and_is_recorded(world):
+    os.mkfifo(world / "fifo.json", 0o600)
+    body = (world / "t.json").read_bytes()
+
+    def writer():
+        with open(world / "fifo.json", "wb") as handle:
+            handle.write(body)
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    store = rf.TrustStore.from_json(world / "fifo.json")
+    thread.join(timeout=30)
+    assert list(store.keys) == ["issuer"] and "not a regular file" in store.storage_problem
+
+
+def test_a_symlinked_store_loaded_without_the_flag_is_refused_by_a_strict_policy(world):
+    (world / "link.json").symlink_to(world / "t.json")
+    store = rf.TrustStore.from_json(world / "link.json")
+    assert "symbolic link" in store.storage_problem
+    with pytest.raises(PolicyError, match="another account could change"):
+        VerificationPolicy(profile="confidential", trust_store=store)
+
+
+def test_a_real_root_owned_file_passes_the_storage_check():
+    """A file root really owns. It fails later, at parsing, for being no store."""
+    target = "/etc/hosts"
+    if not os.path.isfile(target) or os.stat(target).st_uid != 0 or os.geteuid() == 0:
+        pytest.skip("needs a root-owned file and a non-root user")
+    with pytest.raises(TrustStoreError) as caught:
+        rf.TrustStore.from_json(target, private_storage=True)
+    assert "not safe to use" not in str(caught.value)
+
+
+def test_a_file_removed_right_after_it_is_read_is_refused(world, monkeypatch):
+    real_lstat = os.lstat
+    monkeypatch.setattr(trust_module, "_store_location", lambda path: (None, str(path)))
+
+    def gone(path, *args, **kwargs):
+        if str(path).endswith("t.json"):
+            raise FileNotFoundError(path)
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(trust_module.os, "lstat", gone)
+    with pytest.raises(TrustStoreError, match="replaced while it was read"):
+        rf.TrustStore.from_json(world / "t.json", private_storage=True)
+
+
+def test_a_replay_cache_built_without_the_flag_is_refused_by_a_strict_policy_for_its_directory(
+    world, tmp_path
+):
+    box = tmp_path / "box"
+    box.mkdir(mode=0o700)
+    cache = SqliteReplayCache(box / "replay.db")
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    store = rf.TrustStore.from_json(world / "t.json", private_storage=True)
+    with pytest.raises(PolicyError, match="writable by group or others"):
+        VerificationPolicy(
+            profile="confidential",
+            trust_store=store,
+            verifier_id="reg",
+            max_age=__import__("datetime").timedelta(hours=1),
+            replay_cache=cache,
+            replay_mode="record",
+        )

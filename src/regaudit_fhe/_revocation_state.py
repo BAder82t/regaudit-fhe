@@ -35,6 +35,7 @@ from typing import Any, Protocol
 
 from . import _revocation as rv
 from ._keys import spki_fingerprint
+from ._storage_policy import acl_problem, directory_problem, platform_problem
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, canonical_bytes, loads_strict
 from .trust import TrustStore, issuer_name_problem
@@ -105,6 +106,9 @@ class FileStateStore:
             raise StateUnavailable("state directory is not a directory (symlinks are refused)")
         if _unsafe_owner_or_mode(info):
             raise StateUnavailable("state directory is group- or world-writable, or not ours")
+        problem = platform_problem() or directory_problem(str(self.dir))
+        if problem is not None:
+            raise StateUnavailable(f"state directory: {problem}")
 
     def read(self, issuer: str) -> bytes | None:
         self._check_dir()
@@ -122,6 +126,9 @@ class FileStateStore:
                     raise StateUnavailable("state record is not a regular file")
                 if _unsafe_owner_or_mode(info):
                     raise StateUnavailable("state record is group- or world-writable, or not ours")
+                problem = acl_problem("the state record", fd=handle.fileno())
+                if problem is not None:
+                    raise StateUnavailable(problem)
                 if info.st_size > MAX_RECORD_BYTES:
                     raise StateUnavailable("state record exceeds its size limit")
                 return handle.read()
@@ -293,6 +300,9 @@ def check_pin(pin: Pin) -> None:
 def load_pins(path: str | Path) -> dict[str, Pin]:
     """Read the pinned-authority file. Refuses one that another local user could write."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    problem = platform_problem() or directory_problem(str(Path(path).absolute().parent))
+    if problem is not None:
+        raise PinStoreError(f"the pin file's directory: {problem}")
     try:
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as handle:
@@ -301,6 +311,9 @@ def load_pins(path: str | Path) -> dict[str, Pin]:
                 raise PinStoreError("the pin file is not a regular file")
             if _unsafe_owner_or_mode(info):
                 raise PinStoreError("the pin file is group- or world-writable, or not ours")
+            problem = acl_problem("the pin file", fd=handle.fileno())
+            if problem is not None:
+                raise PinStoreError(problem)
             if info.st_size > MAX_PIN_FILE_BYTES:
                 raise PinStoreError("the pin file exceeds its size limit")
             doc = loads_strict(handle.read(), max_bytes=MAX_PIN_FILE_BYTES)
@@ -321,8 +334,21 @@ def check_pin_file_usable(path: str | Path) -> None:
     target = Path(path)
     if target.exists():
         load_pins(target)
-    if not os.access(target.parent, os.W_OK | os.X_OK):
-        raise PinStoreError(f"cannot write the pin file: {str(target.parent)!r} is not writable")
+    parent = target.parent
+    problem = platform_problem() or directory_problem(str(parent.absolute()))
+    if problem is not None:
+        raise PinStoreError(f"the pin file's directory: {problem}")
+    # Read as well, because the directory is opened to make a save durable.
+    if not os.access(parent, os.R_OK | os.W_OK | os.X_OK):
+        raise PinStoreError(f"cannot write the pin file: {str(parent)!r} cannot be used")
+
+
+def pin_was_saved(path: str | Path, pin: Pin) -> bool:
+    """A save can fail after the new pin is in place, when the directory cannot be synced."""
+    try:
+        return load_pins(path).get(pin.issuer) == pin
+    except PinStoreError:
+        return False
 
 
 def undo_ceremony(store: FileStateStore, issuer: str, written: bytes, before: bytes | None) -> None:

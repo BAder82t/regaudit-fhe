@@ -646,6 +646,8 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     signed_not_after = evidence.gen_time.isoformat() if evidence is not None else None
     if not v2:
         note("LEGACY_V1_FORMAT")
+    if store is not None and store.storage_problem is not None:  # a strict profile never gets here
+        note("TRUST_STORE_STORAGE_UNSAFE")
     if policy.check_provenance:
         prov_status, _ = _check_provenance(env)
         if prov_status == CONTRADICTION:

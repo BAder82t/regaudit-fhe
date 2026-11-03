@@ -58,7 +58,7 @@ from .replay import (
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope_strict
 from .reports import AuditEnvelope, Signer, commitments_for, envelope
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
-from .trust import TrustStore, TrustStoreError
+from .trust import TrustStore, TrustStoreError, store_storage_problem
 from .verification import (
     PROFILES,
     PolicyError,
@@ -412,6 +412,13 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
                 f"refused, nothing enrolled: {why}; a report key must be another key\n"
             )
             return 2
+    problem = store_storage_problem(args.store)
+    if problem is not None:
+        sys.stderr.write(
+            f"refused, nothing written: another account could have changed {args.store!r}: {problem}. "
+            "Fix that and check what the store holds first, because adding a key would make it look reviewed.\n"
+        )
+        return 3
     try:
         payload = _load_store_payload(args.store)
     except (TrustStoreError, CanonicalError, OSError, RecursionError) as exc:
@@ -445,7 +452,7 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload, indent=2) + "\n")
-            os.chmod(tmp, 0o644)
+            os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)
             os.replace(tmp, store_path)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -477,6 +484,10 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     except TrustStoreError as exc:
         sys.stderr.write(f"--store: {exc}\n")
         return 3
+    if store.storage_problem is not None:
+        sys.stderr.write(
+            f"warning: another account could change this store: {store.storage_problem}\n"
+        )
     rows = []
     for key_id, pem in sorted(store.keys.items()):
         entry = store.entry(key_id)
@@ -659,6 +670,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except (TrustStoreError, RuntimeError) as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
+    if config.trust_store is not None and config.trust_store.storage_problem is not None:
+        # Only a development policy gets here: the others refuse this store above.
+        sys.stderr.write(
+            "warning: another account could change which keys this server trusts: "
+            f"{config.trust_store.storage_problem}\n"
+        )
     try:
         assert_safe_bind(
             args.host, dev_mode=config.dev_mode, allow_self_signed=config.allow_self_signed
