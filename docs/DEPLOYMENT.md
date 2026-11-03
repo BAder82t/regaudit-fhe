@@ -132,7 +132,7 @@ report can consume its `audit_run_id` before the intended relying party does.
 `check` mode only looks up and never records. A stateless verification response
 reports `consumption: NOT_CHECKED`. Every replay-checked response also reports
 `replay_durable` (`false` for the in-memory cache, whose records are lost when the
-process exits).
+process exits, and for a sqlite file that fails the storage check below).
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.
@@ -521,7 +521,7 @@ the deployment, not with this binary.
 
 Under `confidential`, `high-assurance` and `secure-v1`, another local account must not be able to change which keys the verifier trusts, so the trust store file has to be one that other accounts cannot change. The file must be a regular file with one name, not a symlink, owned by the account running the verifier or by root, and not writable by group or others. The directories on the way to it have the same rules as below. `0600`, `0640` and `0644` are all fine, and `trust add` writes `0644`. `0660` is refused, because there is no way yet to name a trusted group.
 
-Anything else is refused: `verify` exits 3, the `revocation` commands exit 3 or 2 as they do for any unusable store, `serve` does not start, and in the library a `VerificationPolicy` raises `PolicyError` for a store loaded from such a file. `development` still loads it, with a warning on the command line, and nothing protects it. A file mounted as a symlink, as some container platforms do, is refused, so mount it as a plain file.
+Anything else is refused: `verify` exits 3, the `revocation` commands exit 3 or 2 as they do for any unusable store, `serve` does not start, and in the library a `VerificationPolicy` raises `PolicyError` for a store loaded from such a file. `development` still loads it and nothing protects it. `verify` prints a warning there, but `serve` and `trust list` do not. A file reached through a symlink is refused even on a read-only mount, and some container platforms mount files that way. Use a plain single-file mount owned by the verifier's account or root, in a directory nobody else can write. This has not been tried on a real cluster, and a volume that is group-writable would be refused.
 
 This is about other unprivileged accounts only. A process under the same account, an administrator or someone restoring an older copy can still add a key, and the verifier would not notice. A store built in memory with `TrustStore.from_dict` is your own code's responsibility, and no file is checked for it. A store is read once, so a later change to the file reaches a running server only when it restarts.
 
@@ -529,7 +529,7 @@ This is about other unprivileged accounts only. A process under the same account
 
 Under `confidential`, `high-assurance` and `secure-v1` the replay file has to be one that other accounts cannot change. The file must be a regular file with one name, not a symlink, owned by the account running the verifier and not writable by group or others. Its parent directory must belong to that account or to root and not be writable by group or others, and every directory above it must too, except that a sticky directory like `/tmp` is allowed above the parent. A new file is created `0600` whatever the umask. A good default is `0600` for the file and `0700` for its directory.
 
-Anything else is refused: `verify` exits 3, `serve` does not start, and a verifier already running answers `REPLAY_STATE_UNAVAILABLE`. It also fails closed if the file is replaced, deleted or made writable while a process is using it. Nothing changes an existing file's mode for you. There is no way yet to name a trusted group, so `0660` is refused. `0640` and `0644` are accepted because others can read but not write them, so choose `0600` if the report identifiers in the file should stay private. `development` still accepts these files but reports `replay_durable: false`.
+Anything else is refused: `verify` exits 3, `serve` does not start, and a verifier already running answers `REPLAY_STATE_UNAVAILABLE`. It also fails closed if the file is replaced, deleted or made writable while a process is using it. That only covers a running process. A new `verify`, or a server after a restart, cannot tell a deleted file from a first use, and starts a new empty file. Nothing changes an existing file's mode for you. There is no way yet to name a trusted group, so `0660` is refused. `0640` and `0644` are accepted because others can read but not write them, so choose `0600` if the report identifiers in the file should stay private. `development` still accepts these files but reports `replay_durable: false`.
 
 This keeps out other unprivileged accounts and that is all it does. The records are not authenticated. A process running as the same account, an administrator or someone restoring an older copy can still remove a record, and the verifier would not notice, so a report it refused could then be accepted again. Protecting against that needs an independent store, which this version does not have.
 

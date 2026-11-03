@@ -330,7 +330,8 @@ not notice. A store built in memory is the caller's responsibility. See
 [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
 
 **Replay file custody.** The strict profiles refuse a replay file that another
-unprivileged account could change, by owner and permissions. The records themselves
+unprivileged account could change, by owner, permissions and ACLs where they can be read.
+The records themselves
 are not authenticated. A process under the same account, an administrator or a
 restored backup can change them and the verifier would not notice, and `replay_durable`
 does not say otherwise: it says the file passed these checks and that a record is

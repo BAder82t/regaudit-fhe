@@ -56,7 +56,7 @@ the way back** to an older verifier.
 
 ### Permissions on the trust store
 
-Under `confidential`, `high-assurance` and `secure-v1`, a trust store file that another account owns or can write is refused, directly or through a directory above it, and so is a symlink or a file with a second name. `verify` exits 3 and `serve` does not start. A file owned by root is fine, and so are `0600`, `0640` and `0644`. `0660` is refused. Nothing is changed for you. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
+Under `confidential`, `high-assurance` and `secure-v1`, a trust store file that another account owns or can write is refused, directly or through a directory above it, and so is a symlink or a file with a second name. `verify` exits 3 and `serve` does not start. A file owned by root is fine, and so are `0600`, `0640` and `0644`. `0660` is refused. Verifying never changes a mode, but `trust add` rewrites the file as `0644` whatever it was before, so set a tighter mode again afterwards if you use one. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
 
 ### Names that are refused
 

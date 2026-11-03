@@ -514,8 +514,9 @@ Independent verifiers that do not share a store can each record the same report.
 
 **Durability disclosure.** Every result that performed a replay check reports
 `replay_durable`: `true` only if a recorded identifier survives a process restart
-(the sqlite cache commits before returning), `false` for the in-memory cache, whose
-records are lost when the process exits and which is therefore not crash-durable.
+(the sqlite cache commits before returning) in a file that passes the storage check,
+`false` for the in-memory cache, whose records are lost when the process exits and which
+is therefore not crash-durable, and `false` for a sqlite file that fails that check.
 `replay_durable` is `null` when no replay check ran. Even a durable local record is
 not an exactly-once guarantee for a downstream operation.
 

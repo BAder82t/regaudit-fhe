@@ -91,7 +91,7 @@ This is abridged. The full format is in [Report format and JSON schemas](https:/
 
 ## Limits to know first
 
-Replay detection is local to the verifier's own store. `RECORDED_LOCAL` means that this report was recorded in this store. `replay_durable` would indicate if this record would survive a restart. This is not global single-use protection.
+Replay detection is local to the verifier's own store. `RECORDED_LOCAL` means that this report was recorded in this store. `replay_durable` would indicate if this record would survive a restart in a file that passes the storage check. This is not global single-use protection.
 
 A report signed with a retired or compromised key will be refused by default. Accepting one would need authenticated evidence that the signing time was strictly earlier than the retirement or compromise time. This release cannot authenticate a trust history.
 
