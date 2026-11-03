@@ -211,20 +211,82 @@ def _opened_file_problem(info: os.stat_result, fd: int) -> str | None:
     return file_problem(info, owners=(os.geteuid(), 0)) or acl_problem("the file", fd=fd)
 
 
+def _rewrite_problem(info: os.stat_result, fd: int) -> str | None:
+    """What rewriting the file would silently clear. Its mode is not on the list, because a rewrite keeps that."""
+    if info.st_uid not in (os.geteuid(), 0):
+        return "it belongs to another account"
+    if info.st_nlink != 1:
+        return "it has more than one name"
+    return acl_problem("the file", fd=fd)
+
+
+def _open_without_following(target: str | Path) -> int | None:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        return os.open(target, flags)
+    except FileNotFoundError:
+        return None
+
+
+def _leads_to(target: str, info: os.stat_result) -> bool:
+    """A path like /dev/fd/N opens a file somewhere else, and the walk never saw that file's directories."""
+    try:
+        after = os.lstat(target)
+    except OSError:
+        return False
+    return (after.st_dev, after.st_ino) == (info.st_dev, info.st_ino)
+
+
 def store_storage_problem(path: str | Path) -> str | None:
     """Why another account could change this store file, if it could. A file that is not there yet has no problem."""
     problem, target = _store_location(path)
     if problem is not None:
         return problem
-    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        fd = os.open(target, flags)
-    except FileNotFoundError:
-        return None
+        fd = _open_without_following(target)
     except OSError as exc:
-        return f"cannot open it without following a link: {exc}"
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not _leads_to(target, info):
+            return "the path does not lead to the file that was opened"
+        return _opened_file_problem(info, fd)
+    finally:
+        os.close(fd)
+
+
+def store_file_problem(path: str | Path) -> str | None:
+    """The file itself, not where it is. Nothing is reported on a platform that cannot establish it."""
+    if platform_problem() is not None:
+        return None
+    if os.path.islink(path):
+        return "it is a symbolic link"
+    try:
+        fd = _open_without_following(path)
+    except OSError as exc:
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
     try:
         return _opened_file_problem(os.fstat(fd), fd)
+    finally:
+        os.close(fd)
+
+
+def store_rewrite_problem(path: str | Path) -> str | None:
+    """Why an edit must not go ahead: it would write a new file and clear this, and a strict profile would accept it."""
+    if platform_problem() is not None:
+        return None
+    try:
+        fd = _open_without_following(path)
+    except OSError as exc:
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
+    try:
+        return _rewrite_problem(os.fstat(fd), fd)
     finally:
         os.close(fd)
 
@@ -256,13 +318,10 @@ def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, s
             if private_storage and problem is not None:
                 raise unsafe(problem)
             body = handle.read(MAX_TRUST_STORE_BYTES + 1).decode("utf-8")
-            if problem is None and private_storage:
-                try:
-                    after = os.lstat(target)
-                except OSError as exc:
-                    raise unsafe(f"the file was replaced while it was read: {exc}") from exc
-                if (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
-                    raise unsafe("the file was replaced while it was read")
+            if problem is None and not _leads_to(target, info):
+                problem = "the file was replaced while it was read"
+                if private_storage:
+                    raise unsafe(problem)
     except (OSError, UnicodeDecodeError) as exc:
         raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
     return body, problem

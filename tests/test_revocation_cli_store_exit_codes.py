@@ -682,7 +682,8 @@ def test_enroll_keeps_the_record_when_the_pin_is_already_in_place(world, monkeyp
     with monkeypatch.context() as during:
         _sync_fails_after_the_rename(during)
         assert revocation_cli._cmd_enroll(_enroll_args(cwd, fps)) == 3
-    assert "could not be synced" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "could not be synced" in err and "both in place" in err
     pins = json.loads((cwd / "new-pins.json").read_text())["pins"]
     records = _state_records(cwd / "new-state")
     assert len(records) == 1
@@ -705,7 +706,8 @@ def test_rebaseline_keeps_the_record_when_the_pin_is_already_in_place(world, mon
     with monkeypatch.context() as during:
         _sync_fails_after_the_rename(during)
         assert revocation_cli._cmd_rebaseline(_Args(cwd, fps)) == 3
-    assert "could not be synced" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "could not be synced" in err and "both in place" in err
     pins = json.loads((cwd / "pins.json").read_text())["pins"]
     assert pins["acme"]["enrollment_id"] in _state_record(cwd).read_text()
     assert (
@@ -722,6 +724,55 @@ def test_rebaseline_keeps_the_record_when_the_pin_is_already_in_place(world, mon
         ).returncode
         == 0
     )
+
+
+def test_a_pin_directory_others_can_write_stops_verification_and_status(world):
+    """Only the pins move, so that this is the pin check and not the state check."""
+    cwd, _ = world
+    box = cwd / "box"
+    box.mkdir()
+    (cwd / "pins.json").rename(box / "pins.json")
+    box.chmod(0o777)
+    args = (
+        "revocation",
+        "status",
+        "--pins",
+        "box/pins.json",
+        "--state",
+        "state",
+        "--issuer",
+        "acme",
+    )
+    out = cli(*args, cwd=cwd)
+    assert out.returncode != 0 and "writable by group or others" in out.stderr
+    refused = verify_cli(
+        cwd,
+        "--revocation-mode",
+        "required",
+        "--revocation-pins",
+        "box/pins.json",
+        "--revocation-state",
+        "state",
+        mode=None,
+    )
+    assert refused.returncode == 3, refused.stdout + refused.stderr
+
+
+def test_enroll_refuses_a_new_pin_file_in_a_directory_others_can_write(world):
+    cwd, fps = world
+    box = cwd / "box"
+    box.mkdir()
+    box.chmod(0o777)
+    out = cli(
+        "revocation",
+        "enroll",
+        *_pin_args(fps, "box/pins.json", "new-state"),
+        "--trusted-keys",
+        "t.json",
+        cwd=cwd,
+    )
+    assert out.returncode == 3 and "writable by group or others" in out.stderr
+    assert not list(box.iterdir()) and not (cwd / "new-state").exists()
 
 
 @pytest.mark.parametrize("command", [enroll, rebaseline], ids=["enroll", "rebaseline"])

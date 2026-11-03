@@ -131,7 +131,10 @@ def resolve_directory(directory: str) -> tuple[str | None, str]:
     could create the file first. Returns the problem, if any, and the directory the walk ended in.
     """
     euid = os.geteuid()
-    start = directory if os.path.isabs(directory) else os.path.join(os.getcwd(), directory)
+    try:
+        start = directory if os.path.isabs(directory) else os.path.join(os.getcwd(), directory)
+    except OSError as exc:
+        return f"cannot inspect the working directory: {exc}", directory
     pending = list(reversed(start.split("/")))
     current = "/"
     links = 0

@@ -12,6 +12,7 @@ import errno
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -39,8 +40,6 @@ def world(tmp_path: Path) -> Path:
 
 
 def set_acl(path: Path, entry: str) -> None:
-    import subprocess
-
     subprocess.run(["/bin/chmod", "+a", entry, str(path)], check=True, capture_output=True)  # noqa: S603
 
 
@@ -152,9 +151,18 @@ def test_a_link_owned_by_another_account_is_refused(world, monkeypatch):
 
 
 def test_a_link_loop_is_refused_without_hanging(world):
+    """In its own process with a time limit, so that a loop with no limit fails here instead of hanging the run."""
     (world / "x").symlink_to(world / "y")
     (world / "y").symlink_to(world / "x")
-    assert "too many symbolic links" in policy_module.directory_problem(str(world / "x"))
+    code = "import sys\nfrom regaudit_fhe import _storage_policy as p\nprint(p.directory_problem(sys.argv[1]))\n"
+    out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", code, str(world / "x")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert "too many symbolic links" in out.stdout, out.stderr
 
 
 def test_the_resolved_directory_is_what_gets_opened(world):
@@ -184,12 +192,38 @@ def test_trust_add_will_not_launder_a_store_another_process_changed(world):
     assert verify_cli(world, "outsider.json")[0].returncode == 3
 
 
-def test_trust_add_refuses_a_new_store_in_a_directory_others_can_write(world):
+@pytest.mark.parametrize("dir_mode", [0o777, 0o775, 0o1777], ids=oct)
+def test_trust_add_warns_about_a_directory_others_can_write_and_strict_still_refuses(
+    world, dir_mode
+):
+    """Nothing gets laundered: the file stays where it is, so a strict profile keeps refusing it."""
     box = world / "box"
     box.mkdir()
-    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    os.chmod(box, dir_mode)
     out = _trust_add(world, "box/new.json")
-    assert out.returncode == 3 and not list(box.iterdir())
+    assert out.returncode == 0 and "strict profiles refuse this store" in out.stderr, out.stderr
+    assert verify_cli(world, "outsider.json", store="box/new.json")[0].returncode == 3
+
+
+def test_trust_add_refuses_a_store_with_a_second_name(world):
+    os.link(world / "t.json", world / "other.json")
+    before = (world / "t.json").read_bytes()
+    out = _trust_add(world)
+    assert out.returncode == 3 and "more than one name" in out.stderr
+    assert (world / "t.json").read_bytes() == before
+
+
+def test_trust_add_refuses_a_symlink_rather_than_replace_it_with_a_file(world):
+    (world / "link.json").symlink_to(world / "t.json")
+    out = _trust_add(world, "link.json")
+    assert out.returncode == 3 and "symbolic link" in out.stderr
+    assert (world / "link.json").is_symlink()
+
+
+def test_trust_add_on_a_fifo_is_refused_without_hanging(world):
+    os.mkfifo(world / "fifo.json", 0o600)
+    out = _trust_add(world, "fifo.json")
+    assert out.returncode == 3 and "not a regular file" in out.stderr
 
 
 @pytest.mark.parametrize("file_mode", [0o600, 0o640, 0o644], ids=oct)
@@ -222,8 +256,6 @@ def test_trust_status_warns_about_a_directory_others_can_write(world):
 
 
 def test_serve_under_development_warns(world):
-    import subprocess
-
     os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
     env = dict(os.environ, REGAUDIT_FHE_PROFILE="development", REGAUDIT_FHE_HOST_REFUSE="1")
     process = subprocess.Popen(
@@ -431,3 +463,154 @@ def test_a_replay_cache_built_without_the_flag_is_refused_by_a_strict_policy_for
             replay_cache=cache,
             replay_mode="record",
         )
+
+
+# ----------------------------------------------------------------------------- N1: retire and revoke
+
+
+@pytest.mark.parametrize("command", ["retire", "revoke"])
+def test_a_lifecycle_edit_will_not_clear_a_second_name(world, command):
+    add_outsider(world / "t.json", world)
+    os.link(world / "t.json", world / "other.json")
+    before = (world / "t.json").read_bytes()
+    out = cli("trust", command, "--store", "t.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "more than one name" in out.stdout + out.stderr
+    assert (world / "t.json").read_bytes() == before
+    assert (world / "t.json").stat().st_nlink == 2
+    assert verify_cli(world, "outsider.json")[0].returncode == 3
+
+
+@macos
+@pytest.mark.parametrize("command", ["retire", "revoke"])
+def test_a_lifecycle_edit_will_not_clear_an_acl_and_the_outsider_stays_refused(world, command):
+    add_outsider(world / "t.json", world)
+    set_acl(world / "t.json", "group:everyone allow write")
+    before = (world / "t.json").read_bytes()
+    out = cli("trust", command, "--store", "t.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "ACL" in out.stdout + out.stderr
+    assert (world / "t.json").read_bytes() == before
+    assert verify_cli(world, "outsider.json")[0].returncode == 3
+
+
+def test_a_rewrite_problem_reports_another_owner(world):
+    real = os.geteuid()
+    fd = os.open(world / "t.json", os.O_RDONLY)
+    try:
+        info = list(os.fstat(fd))
+    finally:
+        os.close(fd)
+    info[stat.ST_UID] = real + 1
+    assert "another account" in trust_module._rewrite_problem(os.stat_result(info), -1)
+
+
+def test_a_lifecycle_edit_of_a_safe_store_still_works(world):
+    out = cli("trust", "retire", "--store", "t.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_a_lifecycle_edit_of_a_world_writable_store_keeps_the_mode_so_strict_still_refuses(world):
+    os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
+    out = cli("trust", "retire", "--store", "t.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert mode(world / "t.json") == 0o666
+    assert verify_cli(world, "trusted.json")[0].returncode == 3
+
+
+# ----------------------------------------------------------------------------- N2: the path must lead to the file read
+
+
+@pytest.mark.skipif(not os.path.exists("/dev/fd"), reason="needs /dev/fd")
+def test_a_descriptor_path_is_recorded_and_refused_by_a_strict_policy(world):
+    box = world / "box"
+    box.mkdir()
+    shutil.copy(world / "t.json", box / "t.json")
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    fd = os.open(box / "t.json", os.O_RDONLY)
+    try:
+        path = f"/dev/fd/{fd}"
+        assert trust_module.store_storage_problem(path) is not None
+        store = rf.TrustStore.from_json(path)
+    finally:
+        os.close(fd)
+    assert store.storage_problem is not None
+    with pytest.raises(PolicyError, match="another account could change"):
+        VerificationPolicy(profile="confidential", trust_store=store)
+
+
+def test_what_is_opened_is_the_directory_the_walk_ended_in(world, monkeypatch):
+    """A link flipped after the walk must not change what is read."""
+    safe = world / "safe"
+    safe.mkdir(mode=0o700)
+    shutil.copy(world / "t.json", safe / "t.json")
+    elsewhere = world / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    shutil.copy(world / "t.json", elsewhere / "t.json")
+    add_outsider(elsewhere / "t.json", world)
+    monkeypatch.setattr(trust_module, "resolve_directory", lambda _directory: (None, str(safe)))
+    store = rf.TrustStore.from_json(elsewhere / "t.json", private_storage=True)
+    assert "outsider" not in store.keys
+
+
+def test_the_root_directory_is_checked(world, monkeypatch):
+    """Simulated: a real root directory cannot be loosened here."""
+    real_lstat = os.lstat
+
+    def loose_root(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if str(path) == "/":
+            fields = list(info)
+            fields[stat.ST_MODE] = stat.S_IFDIR | 0o777
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(policy_module.os, "lstat", loose_root)
+    assert "writable by group or others" in policy_module.directory_problem(str(world))
+
+
+# ----------------------------------------------------------------------------- N4: a working directory that is gone
+
+
+def test_a_deleted_working_directory_is_an_unusable_store_not_a_refused_report(world):
+    code = (
+        "import os, sys\n"
+        "from regaudit_fhe.cli import main\n"
+        "os.mkdir(sys.argv[1]); os.chdir(sys.argv[1]); os.rmdir(sys.argv[1])\n"
+        "sys.exit(main(['verify', '-i', sys.argv[2], '--trusted-keys', 't.json', '--profile', 'confidential',\n"
+        "    '--max-age-seconds', '3600', '--replay-mode', 'record', '--replay-db', sys.argv[3], '--verifier-id', 'reg']))\n"
+    )
+    out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", code, str(world / "gone"), str(world / "trusted.json"), str(world / "r.db")],
+        capture_output=True, text=True, timeout=60, check=False,
+    )  # fmt: skip
+    assert out.returncode == 3 and "Traceback" not in out.stderr, out.stderr
+
+
+# ----------------------------------------------------------------------------- N5: replay, the path as written
+
+
+def test_a_replay_path_with_dotdot_checks_and_uses_the_real_directory(world):
+    safe = _evil_layout(world)
+    path = safe / "link" / ".." / "r2.db"
+    cache = SqliteReplayCache(path)
+    assert not cache.durable, "it lives in a directory others can write"
+    assert (world / "evil" / "r2.db").exists() and not (safe / "r2.db").exists()
+
+
+def test_a_replay_path_with_dotdot_in_a_safe_tree_is_durable(world):
+    (world / "plain" / "sub").mkdir(parents=True)
+    cache = SqliteReplayCache(world / "plain" / "sub" / ".." / "r.db", private_storage=True)
+    assert cache.durable and (world / "plain" / "r.db").exists()
+
+
+# ----------------------------------------------------------------------------- N6: other platforms keep working
+
+
+def test_trust_add_does_not_stop_on_a_platform_that_cannot_be_checked(world, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "freebsd14")
+    assert trust_module.store_file_problem(world / "t.json") is None
+    assert "this platform cannot establish" in trust_module.store_storage_problem(world / "t.json")
+
+
+def test_a_rewrite_is_not_stopped_on_a_platform_that_cannot_be_checked(world, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "freebsd14")
+    assert trust_module.store_rewrite_problem(world / "t.json") is None

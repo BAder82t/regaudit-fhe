@@ -58,7 +58,7 @@ from .replay import (
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope_strict
 from .reports import AuditEnvelope, Signer, commitments_for, envelope
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
-from .trust import TrustStore, TrustStoreError, store_storage_problem
+from .trust import TrustStore, TrustStoreError, store_file_problem, store_storage_problem
 from .verification import (
     PROFILES,
     PolicyError,
@@ -412,13 +412,16 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
                 f"refused, nothing enrolled: {why}; a report key must be another key\n"
             )
             return 2
-    problem = store_storage_problem(args.store)
+    problem = store_file_problem(args.store)
     if problem is not None:
         sys.stderr.write(
             f"refused, nothing written: another account could have changed {args.store!r}: {problem}. "
             "Fix that and check what the store holds first, because adding a key would make it look reviewed.\n"
         )
         return 3
+    problem = store_storage_problem(args.store)
+    if problem is not None:
+        sys.stderr.write(f"warning: strict profiles refuse this store: {problem}\n")
     try:
         payload = _load_store_payload(args.store)
     except (TrustStoreError, CanonicalError, OSError, RecursionError) as exc:

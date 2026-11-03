@@ -35,6 +35,7 @@ from .trust import (
     TrustStore,
     TrustStoreError,
     issuer_name_problem,
+    store_rewrite_problem,
     store_storage_problem,
 )
 
@@ -237,6 +238,12 @@ def _mutate(
     if now.tzinfo is None:
         raise LifecycleRefused("the clock must be timezone-aware")
     real, mode, raw, payload = _read(path)
+    problem = store_rewrite_problem(real)
+    if problem is not None:
+        raise LifecycleRefused(
+            f"refused, nothing written: another account could have changed {path!r}: {problem}. Writing a new file "
+            "would clear that and make it look reviewed. Fix that and check what the store holds first"
+        )
     entries = payload["entries"]
     entry = entries.get(key_id)
     if entry is None:

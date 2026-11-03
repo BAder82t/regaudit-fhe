@@ -576,6 +576,14 @@ def migrate_replay_file(
     }
 
 
+def _absolute_as_written(path: str) -> str:
+    """Without collapsing ``..``, which would name a different directory after a link than sqlite opens."""
+    try:
+        return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+    except OSError:  # the working directory is gone: every later step fails on this path
+        return path
+
+
 class SqliteReplayCache:
     """Local replay records in a sqlite file. A new file is created 0600, whatever the umask.
 
@@ -593,7 +601,9 @@ class SqliteReplayCache:
         self, path: str | Path, capacity: int = 1_000_000, *, private_storage: bool = False
     ) -> None:
         self._path = str(path)
-        self._absolute = None if self._path in ("", ":memory:") else os.path.abspath(self._path)
+        self._absolute = (
+            None if self._path in ("", ":memory:") else _absolute_as_written(self._path)
+        )
         self._capacity = capacity
         self._lock = threading.Lock()
         self._lowest: dict[str, int] = {}

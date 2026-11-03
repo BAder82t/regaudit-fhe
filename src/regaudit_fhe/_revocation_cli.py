@@ -131,8 +131,13 @@ def _cmd_enroll(args: argparse.Namespace) -> int:
         written = state.read(pin.issuer)
         try:
             st.save_pin(args.pins, pin)
-        except (st.PinStoreError, OSError):
-            if written is not None and not st.pin_was_saved(args.pins, pin):
+        except (st.PinStoreError, OSError) as exc:
+            if st.pin_was_saved(args.pins, pin):
+                raise st.PinStoreError(
+                    f"{exc}. The new pin and the record are both in place, but they may not survive a power loss: "
+                    "check with 'revocation status'"
+                ) from exc
+            if written is not None:
                 st.undo_ceremony(state, pin.issuer, written, before)
             raise
     except ValueError as exc:
@@ -175,8 +180,13 @@ def _cmd_rebaseline(args: argparse.Namespace) -> int:
         written = state.read(pin.issuer)
         try:
             st.save_pin(args.pins, pin)
-        except (st.PinStoreError, OSError):
-            if written is not None and not st.pin_was_saved(args.pins, pin):
+        except (st.PinStoreError, OSError) as exc:
+            if st.pin_was_saved(args.pins, pin):
+                raise st.PinStoreError(
+                    f"{exc}. The new pin and the record are both in place, but they may not survive a power loss: "
+                    "check with 'revocation status'"
+                ) from exc
+            if written is not None:
                 st.undo_ceremony(state, pin.issuer, written, before)
             raise
     # TrustStoreError is a ValueError, so this comes first

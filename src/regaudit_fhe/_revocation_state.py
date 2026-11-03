@@ -300,7 +300,7 @@ def check_pin(pin: Pin) -> None:
 def load_pins(path: str | Path) -> dict[str, Pin]:
     """Read the pinned-authority file. Refuses one that another local user could write."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    problem = platform_problem() or directory_problem(str(Path(path).absolute().parent))
+    problem = platform_problem() or directory_problem(str(Path(path).parent))
     if problem is not None:
         raise PinStoreError(f"the pin file's directory: {problem}")
     try:
@@ -335,7 +335,7 @@ def check_pin_file_usable(path: str | Path) -> None:
     if target.exists():
         load_pins(target)
     parent = target.parent
-    problem = platform_problem() or directory_problem(str(parent.absolute()))
+    problem = platform_problem() or directory_problem(str(parent))
     if problem is not None:
         raise PinStoreError(f"the pin file's directory: {problem}")
     # Read as well, because the directory is opened to make a save durable.
