@@ -275,6 +275,13 @@ def store_file_problem(path: str | Path) -> str | None:
         os.close(fd)
 
 
+def store_directory_problem(path: str | Path) -> str | None:
+    """The directories on the way to the file as written, for a command that goes through a link to the store."""
+    if platform_problem() is not None:
+        return None
+    return resolve_directory(os.path.dirname(os.fspath(path)) or ".")[0]
+
+
 def store_location_problem(path: str | Path) -> str | None:
     """Where the file is. Nothing is reported on a platform that cannot establish it."""
     return None if platform_problem() is not None else _store_location(path)[0]

@@ -687,6 +687,35 @@ def test_replay_migrate_refuses_a_third_name_even_with_its_own_backup(world):
     assert out.returncode != 0 and "more than one name" in out.stdout + out.stderr
 
 
+@pytest.mark.parametrize("dir_mode", [0o777, 0o775, 0o1777], ids=oct)
+def test_replay_migrate_refuses_a_directory_others_can_write(world, dir_mode):
+    box = world / "box"
+    box.mkdir()
+    db = box / "legacy.db"
+    published_file(db)
+    os.chmod(db, 0o600)
+    before = db.read_bytes()
+    os.chmod(box, dir_mode)
+    out = cli("replay", "migrate", "--db", "box/legacy.db", "--previous-policy-unknown", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert db.read_bytes() == before and sorted(p.name for p in box.iterdir()) == ["legacy.db"]
+
+
+def test_replay_migrate_refuses_a_link_through_a_directory_others_can_write(world):
+    real = world / "real"
+    real.mkdir(mode=0o700)
+    published_file(real / "legacy.db")
+    os.chmod(real / "legacy.db", 0o600)
+    shared = world / "shared"
+    shared.mkdir()
+    (shared / "link").symlink_to(real)
+    os.chmod(shared, 0o777)  # noqa: S103 - the point of the test
+    out = cli(
+        "replay", "migrate", "--db", "shared/link/legacy.db", "--previous-policy-unknown", cwd=world
+    )
+    assert out.returncode != 0 and "shared" in out.stdout + out.stderr
+
+
 def test_replay_migrate_of_a_safe_file_still_works(world):
     _legacy_replay(world)
     out = _migrate(world)
@@ -706,3 +735,19 @@ def test_a_relative_replay_path_with_a_deleted_working_directory_is_unusable(wor
         capture_output=True, text=True, timeout=60, check=False,
     )  # fmt: skip
     assert out.returncode == 3 and "Traceback" not in out.stderr, out.stderr
+
+
+@pytest.mark.parametrize("command", ["retire", "revoke"])
+def test_a_lifecycle_edit_refuses_a_link_through_a_directory_others_can_write(world, command):
+    path, real = _chain(world)
+    shutil.copy(world / "t.json", real / "t.json")
+    before = (real / "t.json").read_bytes()
+    out = cli("trust", command, "--store", str(path / "t.json"), "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "mid" in out.stdout + out.stderr
+    assert (real / "t.json").read_bytes() == before
+
+
+def test_a_lifecycle_edit_through_a_final_link_in_a_safe_directory_still_works(world):
+    (world / "link.json").symlink_to(world / "t.json")
+    out = cli("trust", "retire", "--store", "link.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode == 0 and (world / "link.json").is_symlink(), out.stdout + out.stderr

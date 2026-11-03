@@ -494,6 +494,12 @@ def migrate_replay_file(
 
     tmp: str | None = None
     try:
+        if platform_problem() is None:
+            # As written and as resolved: whoever can change either directory can swap the file during the migration.
+            for directory in (os.path.dirname(os.fspath(path)) or ".", os.path.dirname(real)):
+                problem = directory_problem(directory)
+                if problem is not None:
+                    raise ReplayMigrationRefused(f"{problem}: check the file first")
         info = _check_source_file(real)
         keep = real + ".pre-migration"
         conn = sqlite3.connect(real, timeout=5.0, isolation_level=None)
