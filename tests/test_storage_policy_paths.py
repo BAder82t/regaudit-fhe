@@ -27,6 +27,7 @@ from regaudit_fhe.replay import SqliteReplayCache
 from regaudit_fhe.trust import TrustStoreError
 from regaudit_fhe.verification import PolicyError, VerificationPolicy
 
+from .test_replay_migration import published_file
 from .test_revocation_tooling_and_cli import cli
 from .test_trust_store_storage_policy import add_outsider, make_world, mode, verify_cli
 
@@ -193,16 +194,26 @@ def test_trust_add_will_not_launder_a_store_another_process_changed(world):
 
 
 @pytest.mark.parametrize("dir_mode", [0o777, 0o775, 0o1777], ids=oct)
-def test_trust_add_warns_about_a_directory_others_can_write_and_strict_still_refuses(
-    world, dir_mode
-):
-    """Nothing gets laundered: the file stays where it is, so a strict profile keeps refusing it."""
+def test_trust_add_refuses_a_directory_others_can_write(world, dir_mode):
+    """A key planted there during the add would be kept, and become trusted once the directory was fixed."""
     box = world / "box"
     box.mkdir()
     os.chmod(box, dir_mode)
     out = _trust_add(world, "box/new.json")
-    assert out.returncode == 0 and "strict profiles refuse this store" in out.stderr, out.stderr
-    assert verify_cli(world, "outsider.json", store="box/new.json")[0].returncode == 3
+    assert out.returncode == 3 and "writable by group or others" in out.stderr, out.stderr
+    assert not list(box.iterdir())
+
+
+def test_trust_add_does_not_keep_a_key_planted_while_it_runs(world):
+    """In a directory others can write it never reaches the read, so a planted file has nothing to join."""
+    box = world / "box"
+    box.mkdir()
+    shutil.copy(world / "t.json", box / "t.json")
+    add_outsider(box / "t.json", world)
+    before = (box / "t.json").read_bytes()
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    assert _trust_add(world, "box/t.json").returncode == 3
+    assert (box / "t.json").read_bytes() == before
 
 
 def test_trust_add_refuses_a_store_with_a_second_name(world):
@@ -614,3 +625,84 @@ def test_trust_add_does_not_stop_on_a_platform_that_cannot_be_checked(world, mon
 def test_a_rewrite_is_not_stopped_on_a_platform_that_cannot_be_checked(world, monkeypatch):
     monkeypatch.setattr(sys, "platform", "freebsd14")
     assert trust_module.store_rewrite_problem(world / "t.json") is None
+
+
+@pytest.mark.parametrize("command", ["retire", "revoke"])
+def test_a_lifecycle_edit_refuses_a_directory_others_can_write(world, command):
+    box = world / "box"
+    box.mkdir()
+    shutil.copy(world / "t.json", box / "t.json")
+    before = (box / "t.json").read_bytes()
+    os.chmod(box, 0o777)  # noqa: S103 - the point of the test
+    out = cli("trust", command, "--store", "box/t.json", "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert (box / "t.json").read_bytes() == before
+
+
+def test_a_lifecycle_refusal_does_not_repeat_itself(world):
+    os.link(world / "t.json", world / "other.json")
+    out = cli("trust", "retire", "--store", "t.json", "--key-id", "issuer", cwd=world)
+    text = out.stdout + out.stderr
+    assert text.count("nothing written") == 1, text
+
+
+# ----------------------------------------------------------------------------- R1: replay migrate
+
+
+def _legacy_replay(world: Path) -> Path:
+    db = world / "legacy.db"
+    published_file(db)
+    os.chmod(db, 0o600)
+    return db
+
+
+def _migrate(world: Path):
+    return cli("replay", "migrate", "--db", "legacy.db", "--previous-policy-unknown", cwd=world)
+
+
+def test_replay_migrate_refuses_a_second_name(world):
+    db = _legacy_replay(world)
+    os.link(db, world / "other.db")
+    before = db.read_bytes()
+    out = _migrate(world)
+    assert out.returncode != 0 and "more than one name" in out.stdout + out.stderr
+    assert db.read_bytes() == before and db.stat().st_nlink == 2
+
+
+@macos
+def test_replay_migrate_refuses_an_acl(world):
+    db = _legacy_replay(world)
+    set_acl(db, "group:everyone allow write")
+    before = db.read_bytes()
+    out = _migrate(world)
+    assert out.returncode != 0 and "ACL" in out.stdout + out.stderr
+    assert db.read_bytes() == before
+
+
+def test_replay_migrate_refuses_a_third_name_even_with_its_own_backup(world):
+    db = _legacy_replay(world)
+    os.link(db, world / "legacy.db.pre-migration")
+    os.link(db, world / "other.db")
+    out = _migrate(world)
+    assert out.returncode != 0 and "more than one name" in out.stdout + out.stderr
+
+
+def test_replay_migrate_of_a_safe_file_still_works(world):
+    _legacy_replay(world)
+    out = _migrate(world)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_a_relative_replay_path_with_a_deleted_working_directory_is_unusable(world):
+    code = (
+        "import os, sys\n"
+        "from regaudit_fhe.cli import main\n"
+        "os.mkdir(sys.argv[1]); os.chdir(sys.argv[1]); os.rmdir(sys.argv[1])\n"
+        "sys.exit(main(['verify', '-i', sys.argv[2], '--trusted-keys', sys.argv[3], '--profile', 'confidential',\n"
+        "    '--max-age-seconds', '3600', '--replay-mode', 'record', '--replay-db', 'r.db', '--verifier-id', 'reg']))\n"
+    )
+    out = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", code, str(world / "gone"), str(world / "trusted.json"), str(world / "t.json")],
+        capture_output=True, text=True, timeout=60, check=False,
+    )  # fmt: skip
+    assert out.returncode == 3 and "Traceback" not in out.stderr, out.stderr

@@ -275,10 +275,20 @@ def store_file_problem(path: str | Path) -> str | None:
         os.close(fd)
 
 
+def store_location_problem(path: str | Path) -> str | None:
+    """Where the file is. Nothing is reported on a platform that cannot establish it."""
+    return None if platform_problem() is not None else _store_location(path)[0]
+
+
 def store_rewrite_problem(path: str | Path) -> str | None:
-    """Why an edit must not go ahead: it would write a new file and clear this, and a strict profile would accept it."""
+    """Why an edit must not go ahead. A new file would clear a problem with the old one, and whoever can change the
+    directory could put their own file in its place during the edit. Either way, a strict profile would then accept it.
+    """
     if platform_problem() is not None:
         return None
+    problem = _store_location(path)[0]
+    if problem is not None:
+        return problem
     try:
         fd = _open_without_following(path)
     except OSError as exc:

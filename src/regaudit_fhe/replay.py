@@ -306,6 +306,14 @@ def replay_file_status(path: str | Path) -> dict[str, Any]:
         raise ReplayStateError(f"cannot read replay store {str(path)!r}: {exc}") from exc
 
 
+def _is_only_our_backup(real: str, info: os.stat_result) -> bool:
+    """A migration killed before its swap leaves the original with one more name: the backup it had just made."""
+    try:
+        return info.st_nlink == 2 and os.path.samestat(os.lstat(real + ".pre-migration"), info)
+    except OSError:
+        return False
+
+
 def _check_source_file(real: str) -> os.stat_result:
     """Before sqlite opens anything: a regular file, ours, in rollback-journal mode, with no sibling state."""
     info = os.stat(real)
@@ -321,6 +329,13 @@ def _check_source_file(real: str) -> os.stat_result:
             )
     with open(real, "rb") as handle:
         header = handle.read(100)
+        # The migrated file is new, so it would clear these, and a strict profile would then accept its rows as genuine.
+        if platform_problem() is None:
+            if info.st_nlink != 1 and not _is_only_our_backup(real, info):
+                raise ReplayMigrationRefused(f"{real!r} has more than one name: check it first")
+            problem = acl_problem("the file", fd=handle.fileno())
+            if problem is not None:
+                raise ReplayMigrationRefused(f"{real!r}: {problem}: check it first")
     if not header:
         raise ReplayMigrationRefused("the file is empty: not a published replay file")
     if not header.startswith(_SQLITE_HEADER) or len(header) < 100:

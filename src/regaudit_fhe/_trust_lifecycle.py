@@ -241,7 +241,7 @@ def _mutate(
     problem = store_rewrite_problem(real)
     if problem is not None:
         raise LifecycleRefused(
-            f"refused, nothing written: another account could have changed {path!r}: {problem}. Writing a new file "
+            f"another account could have changed {path!r}: {problem}. Writing a new file "
             "would clear that and make it look reviewed. Fix that and check what the store holds first"
         )
     entries = payload["entries"]
