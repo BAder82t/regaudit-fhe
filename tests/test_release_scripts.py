@@ -235,9 +235,44 @@ def test_an_sdist_with_a_symlink_member_is_refused(tmp_path):
     assert _run(_root(tmp_path), _dist(tmp_path, sdist={"extra": evil})) == 1
 
 
-def test_the_real_repository_sources_agree_on_one_version():
-    root = SCRIPT.parents[1]
-    assert len(set(M.source_versions(root).values())) == 1
+def test_the_real_repository_is_a_consistent_development_build():
+    versions = M.source_versions(SCRIPT.parents[1])
+    assert versions["pyproject.toml"] == versions["regaudit_fhe/__init__.py"]
+    assert M.DEV_VERSION.match(versions["pyproject.toml"])
+    assert M.STRICT_TAG.match("v" + versions["regaudit_fhe/reports.py"])
+
+
+DEV_WHEEL = {"version": "0.1.1.dev0", "init": "0.1.1.dev0", "lib": "0.1.0"}
+DEV_SDIST = {"version": "0.1.1.dev0"}
+
+
+def _dev_root(tmp_path, **over):
+    return _root(
+        tmp_path, **{"pyproject": "0.1.1.dev0", "init": "0.1.1.dev0", "lib": "0.1.0", **over}
+    )
+
+
+def test_a_development_build_may_keep_the_last_release_in_lib_version(tmp_path):
+    dist = _dist(tmp_path, wheel=DEV_WHEEL, sdist=DEV_SDIST)
+    assert _run(_dev_root(tmp_path), dist, tag="") == 0
+
+
+@pytest.mark.parametrize("tag", ["v0.1.0", "v0.1.1"])
+def test_a_development_build_cannot_be_released_from_a_tag(tmp_path, capsys, tag):
+    dist = _dist(tmp_path, wheel=DEV_WHEEL, sdist=DEV_SDIST)
+    assert _run(_dev_root(tmp_path), dist, tag=tag) == 1
+    captured = capsys.readouterr()
+    assert "development version" in captured.out + captured.err
+
+
+def test_a_development_build_whose_package_versions_disagree_is_refused(tmp_path):
+    root = _dev_root(tmp_path, init="0.1.0")
+    assert _run(root, _dist(tmp_path, wheel=DEV_WHEEL, sdist=DEV_SDIST), tag="") == 1
+
+
+def test_a_release_still_needs_all_three_source_versions_equal(tmp_path):
+    root = _root(tmp_path, pyproject="0.1.1", init="0.1.1", lib="0.1.0")
+    assert _run(root, _dist(tmp_path), tag="v0.1.1") == 1
 
 
 @pytest.mark.parametrize(

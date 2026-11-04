@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from regaudit_fhe import __version__
 from regaudit_fhe.schemas import DIRECTIONS, PRIMITIVES, list_schemas
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -381,7 +382,7 @@ def _smoke(
     tmp_path,
     *,
     folder="site-packages",
-    version="0.2.1",
+    version=__version__,
     forbid=(),
     schemas_in_cwd=False,
     strip=False,

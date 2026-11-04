@@ -73,6 +73,8 @@ from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
+# The report line, not the package version. It is signed and feeds parameter_set_hash, and the schemas allow no
+# ".devN". A development build keeps the last release here, and a release sets it equal to __version__.
 LIB_VERSION: str = "0.2.1"
 SIGNATURE_ALG: str = "Ed25519"
 
