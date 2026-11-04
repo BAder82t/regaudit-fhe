@@ -106,7 +106,9 @@ def _macos_acl_problem(what: str, fd: int | None, path: str | None) -> str | Non
 
 def acl_problem(what: str, *, fd: int | None = None, path: str | None = None) -> str | None:
     """On Linux a POSIX ACL entry that grants write shows in the group bits, so the mode check already refuses it."""
-    if sys.platform != "darwin":
+    # Not compared directly, or a type check on Linux calls the macOS branch unreachable.
+    platform: str = sys.platform
+    if platform != "darwin":
         return None
     return _macos_acl_problem(what, fd, path)
 

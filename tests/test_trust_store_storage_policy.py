@@ -331,6 +331,7 @@ def test_a_later_change_to_the_file_does_not_reach_a_store_already_loaded(world)
 def _load_config(
     world: Path, store: Path, profile: str = "confidential"
 ) -> subprocess.CompletedProcess[str]:
+    pytest.importorskip("fastapi")
     env = dict(
         os.environ,
         **SERVER_ENV,
@@ -366,6 +367,7 @@ def test_the_server_configuration_accepts_a_safe_store(world):
 
 
 def test_the_server_command_exits_2_on_a_store_others_can_write(world):
+    pytest.importorskip("uvicorn")
     os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
     env = dict(
         os.environ,

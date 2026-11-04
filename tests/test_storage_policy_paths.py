@@ -268,6 +268,7 @@ def test_trust_status_warns_about_a_directory_others_can_write(world):
 
 
 def test_serve_under_development_warns(world):
+    pytest.importorskip("uvicorn")
     os.chmod(world / "t.json", 0o666)  # noqa: S103 - the point of the test
     env = dict(os.environ, REGAUDIT_FHE_PROFILE="development", REGAUDIT_FHE_HOST_REFUSE="1")
     process = subprocess.Popen(
@@ -902,3 +903,25 @@ def test_resolve_file_ends_at_the_real_file_or_where_a_missing_one_would_be(worl
     assert policy_module.resolve_file(str(world / "link.json")) == (None, str(world / "t.json"))
     assert policy_module.resolve_file(str(world / "t.json")) == (None, str(world / "t.json"))
     assert policy_module.resolve_file(str(world / "missing")) == (None, str(world / "missing"))
+
+
+# ----------------------------------------------------------------------------- which platform reads an ACL
+
+
+def test_only_macos_reads_an_acl_and_it_decides(monkeypatch):
+    monkeypatch.setattr(
+        policy_module, "_macos_acl_problem", lambda what, fd, path: f"refused {what}"
+    )
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert policy_module.acl_problem("the file", fd=1) == "refused the file"
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert policy_module.acl_problem("the file", fd=1) is None
+
+
+def test_a_failure_to_read_a_macos_acl_is_a_problem_through_the_public_check(monkeypatch):
+    def unreadable(what, fd, path):
+        return f"the ACL on {what} cannot be read reliably"
+
+    monkeypatch.setattr(policy_module, "_macos_acl_problem", unreadable)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert "cannot be read" in policy_module.acl_problem("the file", path="/x")

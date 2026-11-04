@@ -445,6 +445,7 @@ def test_the_refusal_is_a_replay_state_error():
 
 
 def serve(cwd: Path, db: Path, profile: str = "confidential") -> subprocess.CompletedProcess[str]:
+    pytest.importorskip("fastapi")
     env = dict(
         os.environ,
         REGAUDIT_FHE_REPLAY_DB=str(db),
@@ -495,6 +496,7 @@ def test_the_server_starts_on_a_safe_file(world):
 
 
 def test_the_server_command_exits_2_on_an_unsafe_file(world):
+    pytest.importorskip("uvicorn")
     seeded(world / "replay.db", 0o666)
     env = dict(
         os.environ,
