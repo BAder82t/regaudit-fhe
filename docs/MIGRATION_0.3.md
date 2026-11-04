@@ -56,7 +56,7 @@ the way back** to an older verifier.
 
 ### Permissions on the trust store
 
-Under `confidential`, `high-assurance` and `secure-v1`, a trust store file that another account owns or can write is refused, directly or through a directory above it, and so is a symlink or a file with a second name. `verify` exits 3 and `serve` does not start. A file owned by root is fine, and so are `0600`, `0640` and `0644`. `0660` is refused. Nothing changes a mode for you: `trust add`, `trust retire` and `trust revoke` keep the mode of a store, and refuse a file that another account could have changed. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
+Under `confidential`, `high-assurance`, and `secure-v1` a trust store file that another account owns or can write is refused, directly or through a directory above it. A symlink or a file with a second name is also refused. `verify` will exit with 3 and `serve` will not start. A file that is owned by root is fine as well as `0600`, `0640`, and `0644`. `0660` is refused. Nothing changes the mode for you. `trust add`, `trust retire`, and `trust revoke` keep the mode of a store file. A file that another account could have changed is refused. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
 
 ### Names that are refused
 
@@ -83,7 +83,7 @@ Full details are in [DEPLOYMENT.md](DEPLOYMENT.md#upgrading-with-an-existing-rep
 
 ### Permissions on the replay file
 
-Under `confidential`, `high-assurance` and `secure-v1`, a replay file that other accounts can change is refused, and so is one owned by another account, a symlink, a file with a second name, or a file in a directory that group or others can write. `verify` exits 3 and `serve` does not start. Nothing is changed for you, so fix the mode or move the file yourself. This includes a file that keeps a group-writable mode through `replay migrate`, which only warns about it. New files are now `0600` in every profile, where they were `0644`, so a second account can no longer read a new file. A read-only verifier running under a different account from the one that writes the file is refused under the strict profiles. `development` accepts all of these, but `replay_durable` is `false` for an unsafe file. Details and limits are in [DEPLOYMENT.md](DEPLOYMENT.md#where-the-replay-file-can-live).
+Under `confidential`, `high-assurance`, and `secure-v1`, a replay file that another account can change will be refused. Also, one that belongs to another account will be refused. A symlink will be refused. A file with a second name will be refused. A file in a directory where group or others can write will be refused. `verify` will exit 3 and `serve` will not start. Nothing will be changed for you. Fix the mode or move the file yourself. This includes a file that keeps a group-writable mode through `replay migrate`, which only warns about it. New files are now `0600` in all profiles where they were `0644`. A second account can no longer read a new file. A read-only verifier running under a different account than the one that writes the file is refused in strict profiles. `development` will accept all these but `replay_durable` would be `false` for an unsafe file. More details and limits are in [DEPLOYMENT.md](DEPLOYMENT.md#where-the-replay-file-can-live).
 
 ## 3. Optional: the `secure-v1` profile
 
