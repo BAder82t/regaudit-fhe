@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import dataclasses
 import errno
+import json
 import os
 import shutil
 import stat
@@ -23,7 +24,7 @@ import pytest
 import regaudit_fhe as rf
 from regaudit_fhe import _storage_policy as policy_module
 from regaudit_fhe import trust as trust_module
-from regaudit_fhe.replay import SqliteReplayCache
+from regaudit_fhe.replay import ReplayStorageUnsafe, SqliteReplayCache
 from regaudit_fhe.trust import TrustStoreError
 from regaudit_fhe.verification import PolicyError, VerificationPolicy
 
@@ -751,3 +752,153 @@ def test_a_lifecycle_edit_through_a_final_link_in_a_safe_directory_still_works(w
     (world / "link.json").symlink_to(world / "t.json")
     out = cli("trust", "retire", "--store", "link.json", "--key-id", "issuer", cwd=world)
     assert out.returncode == 0 and (world / "link.json").is_symlink(), out.stdout + out.stderr
+
+
+# ----------------------------------------------------------------------------- a chain of final links
+
+
+def _link_chain(
+    world: Path, name: str, *, through_a_directory_link: bool = False
+) -> tuple[Path, Path]:
+    """safe/link -> ../shared/... -> ../real/name. Neither the path as written nor the real path shows ``shared``."""
+    safe, shared, real = world / "safe", world / "shared", world / "real"
+    for directory in (safe, shared, real):
+        directory.mkdir(mode=0o700)
+    if through_a_directory_link:
+        (shared / "hop").symlink_to("../real")
+        (safe / "link").symlink_to(f"../shared/hop/{name}")
+    else:
+        (shared / "hop").symlink_to(f"../real/{name}")
+        (safe / "link").symlink_to("../shared/hop")
+    os.chmod(shared, 0o777)  # noqa: S103 - the point of the test
+    return safe / "link", real / name
+
+
+@pytest.mark.parametrize(
+    "through_a_directory_link", [False, True], ids=["file-hop", "directory-hop"]
+)
+@pytest.mark.parametrize("command", ["retire", "revoke"])
+def test_a_lifecycle_edit_refuses_a_chain_of_links_through_a_directory_others_can_write(
+    world, command, through_a_directory_link
+):
+    link, store = _link_chain(world, "t.json", through_a_directory_link=through_a_directory_link)
+    shutil.copy(world / "t.json", store)
+    before = store.read_bytes()
+    out = cli("trust", command, "--store", str(link), "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert store.read_bytes() == before and sorted(p.name for p in store.parent.iterdir()) == [
+        "t.json"
+    ]
+
+
+def test_a_revocation_cannot_be_diverted_to_another_file_through_a_chain_of_links(world):
+    """Whoever can write the hop's directory could send the revocation to an old copy and leave the key trusted."""
+    link, store = _link_chain(world, "t.json")
+    shutil.copy(world / "t.json", store)
+    copy = store.with_name("t.json.prev")
+    shutil.copy(store, copy)
+    hop = world / "shared" / "hop"
+    hop.unlink()
+    hop.symlink_to("../real/t.json.prev")
+    before = copy.read_bytes()
+    out = cli("trust", "revoke", "--store", str(link), "--key-id", "issuer", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert copy.read_bytes() == before
+
+
+def test_a_lifecycle_edit_through_a_chain_of_links_in_safe_directories_still_works(world):
+    link, store = _link_chain(world, "t.json")
+    os.chmod(world / "shared", 0o700)
+    shutil.copy(world / "t.json", store)
+    out = cli("trust", "retire", "--store", str(link), "--key-id", "issuer", cwd=world)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert link.is_symlink() and (world / "shared" / "hop").is_symlink() and not store.is_symlink()
+    assert json.loads(store.read_text())["entries"]["issuer"]["status"] == "retired"
+
+
+@pytest.mark.parametrize(
+    "through_a_directory_link", [False, True], ids=["file-hop", "directory-hop"]
+)
+def test_replay_migrate_refuses_a_chain_of_links_through_a_directory_others_can_write(
+    world, through_a_directory_link
+):
+    link, db = _link_chain(world, "legacy.db", through_a_directory_link=through_a_directory_link)
+    published_file(db)
+    os.chmod(db, 0o600)
+    before = db.read_bytes()
+    out = cli("replay", "migrate", "--db", str(link), "--previous-policy-unknown", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert db.read_bytes() == before and sorted(p.name for p in db.parent.iterdir()) == [
+        "legacy.db"
+    ]
+
+
+def test_replay_migrate_refuses_a_file_in_a_directory_others_can_write_reached_from_a_safe_link(
+    world,
+):
+    safe, unsafe = world / "safe", world / "unsafe"
+    safe.mkdir(mode=0o700)
+    unsafe.mkdir(mode=0o700)
+    published_file(unsafe / "legacy.db")
+    os.chmod(unsafe / "legacy.db", 0o600)
+    (safe / "link").symlink_to("../unsafe/legacy.db")
+    os.chmod(unsafe, 0o777)  # noqa: S103 - the point of the test
+    before = (unsafe / "legacy.db").read_bytes()
+    out = cli("replay", "migrate", "--db", "safe/link", "--previous-policy-unknown", cwd=world)
+    assert out.returncode != 0 and "writable by group or others" in out.stdout + out.stderr
+    assert (unsafe / "legacy.db").read_bytes() == before
+
+
+def test_replay_migrate_through_a_chain_of_links_in_safe_directories_still_works(world):
+    link, db = _link_chain(world, "legacy.db")
+    os.chmod(world / "shared", 0o700)
+    published_file(db)
+    os.chmod(db, 0o600)
+    out = cli("replay", "migrate", "--db", str(link), "--previous-policy-unknown", cwd=world)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert link.is_symlink() and db.with_name("legacy.db.pre-migration").exists()
+
+
+def test_replay_migrate_keeps_a_mode_others_can_write_so_a_strict_profile_keeps_refusing(world):
+    box = world / "box"
+    box.mkdir(mode=0o700)
+    db = box / "legacy.db"
+    published_file(db)
+    os.chmod(db, 0o666)  # noqa: S103 - the point of the test
+    out = cli("replay", "migrate", "--db", "box/legacy.db", "--previous-policy-unknown", cwd=world)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert mode(db) == 0o666
+    with pytest.raises(ReplayStorageUnsafe, match="group or others"):
+        SqliteReplayCache(db, private_storage=True)
+
+
+def test_a_final_link_owned_by_another_account_is_refused(world, monkeypatch):
+    """Ownership is simulated, since a test run has one account."""
+    (world / "link.json").symlink_to(world / "t.json")
+    real_lstat = os.lstat
+
+    def as_another_account(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if str(path).endswith("link.json"):
+            fields = list(info)
+            fields[stat.ST_UID] = os.geteuid() + 1
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(policy_module.os, "lstat", as_another_account)
+    problem, _ = policy_module.resolve_file(str(world / "link.json"))
+    assert "belongs to another account" in problem
+
+
+def test_a_loop_of_final_links_is_refused(world):
+    (world / "a").symlink_to("b")
+    (world / "b").symlink_to("a")
+    problem, _ = policy_module.resolve_file(str(world / "a"))
+    assert "too many symbolic links" in problem
+
+
+def test_resolve_file_ends_at_the_real_file_or_where_a_missing_one_would_be(world):
+    (world / "link.json").symlink_to("t.json")
+    assert policy_module.resolve_file(str(world / "link.json")) == (None, str(world / "t.json"))
+    assert policy_module.resolve_file(str(world / "t.json")) == (None, str(world / "t.json"))
+    assert policy_module.resolve_file(str(world / "missing")) == (None, str(world / "missing"))

@@ -181,6 +181,35 @@ def directory_problem(directory: str) -> str | None:
     return resolve_directory(directory)[0]
 
 
+def resolve_file(path: str) -> tuple[str | None, str]:
+    """Follow a final symbolic link one hop at a time, and check every directory and link on the way.
+
+    A chain of links can pass through a directory that neither the path as written nor the file's real location shows,
+    and whoever can write there can point the chain at another file. Returns the problem, if any, and where the chain
+    ended, which need not exist.
+    """
+    euid = os.geteuid()
+    current = path
+    for _ in range(_MAX_LINKS + 1):
+        head, tail = os.path.split(current)
+        problem, directory = resolve_directory(head or ".")
+        if problem is not None:
+            return problem, current
+        target = os.path.join(directory, tail)
+        try:
+            info = os.lstat(target)
+            if not stat.S_ISLNK(info.st_mode):
+                return None, target
+            if info.st_uid not in (euid, 0):
+                return f"{target!r} belongs to another account", target
+            current = os.path.join(directory, os.readlink(target))
+        except FileNotFoundError:
+            return None, target
+        except OSError as exc:
+            return f"cannot inspect {target!r}: {exc}", target
+    return f"too many symbolic links on the way to {path!r}", current
+
+
 def file_problem(info: os.stat_result, *, owners: Collection[int] | None = None) -> str | None:
     """``info`` comes from the opened file. By default only we may own it."""
     if not stat.S_ISREG(info.st_mode):

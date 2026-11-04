@@ -59,7 +59,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from ._storage_policy import acl_problem, directory_problem, file_problem, platform_problem
+from ._storage_policy import (
+    acl_problem,
+    directory_problem,
+    file_problem,
+    platform_problem,
+    resolve_file,
+)
 
 SCOPE_LOCAL_PROCESS = "LOCAL_PROCESS"
 SCOPE_LOCAL_PERSISTENT = "LOCAL_PERSISTENT"
@@ -495,11 +501,10 @@ def migrate_replay_file(
     tmp: str | None = None
     try:
         if platform_problem() is None:
-            # As written and as resolved: whoever can change either directory can swap the file during the migration.
-            for directory in (os.path.dirname(os.fspath(path)) or ".", os.path.dirname(real)):
-                problem = directory_problem(directory)
-                if problem is not None:
-                    raise ReplayMigrationRefused(f"{problem}: check the file first")
+            # Every directory and link on the way: whoever can change one can swap the file during the migration.
+            problem = resolve_file(os.fspath(path))[0]
+            if problem is not None:
+                raise ReplayMigrationRefused(f"{problem}: check the file first")
         info = _check_source_file(real)
         keep = real + ".pre-migration"
         conn = sqlite3.connect(real, timeout=5.0, isolation_level=None)

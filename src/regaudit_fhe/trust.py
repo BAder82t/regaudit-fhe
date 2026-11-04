@@ -26,7 +26,13 @@ from types import MappingProxyType
 from typing import Any
 
 from ._keys import spki_fingerprint
-from ._storage_policy import acl_problem, file_problem, platform_problem, resolve_directory
+from ._storage_policy import (
+    acl_problem,
+    file_problem,
+    platform_problem,
+    resolve_directory,
+    resolve_file,
+)
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 
@@ -276,10 +282,10 @@ def store_file_problem(path: str | Path) -> str | None:
 
 
 def store_directory_problem(path: str | Path) -> str | None:
-    """The directories on the way to the file as written, for a command that goes through a link to the store."""
+    """Every directory and link on the way to the file, for a command that goes through a link to the store."""
     if platform_problem() is not None:
         return None
-    return resolve_directory(os.path.dirname(os.fspath(path)) or ".")[0]
+    return resolve_file(os.fspath(path))[0]
 
 
 def store_location_problem(path: str | Path) -> str | None:
