@@ -20,6 +20,14 @@ The issuer attribution limitation in v0.2.1 is described in
 Replay protection limitations in v0.2.1 are described in
 [docs/advisories/replay-limitations-0.2.1.md](docs/advisories/replay-limitations-0.2.1.md).
 
+Trust store file permissions up to v0.2.1 are described in
+[docs/advisories/trust-store-permissions-0.2.1.md](docs/advisories/trust-store-permissions-0.2.1.md).
+
+Replay file permissions up to v0.2.1 are described in
+[docs/advisories/replay-file-permissions-0.2.1.md](docs/advisories/replay-file-permissions-0.2.1.md).
+
+These two storage permission issues have mitigations in their advisories. No patch release for 0.2.x is planned for them.
+
 ## Reporting a vulnerability
 
 Email **b@vaultbytes.com** with the subject line `regaudit-fhe security`.
