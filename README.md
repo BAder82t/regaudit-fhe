@@ -97,7 +97,7 @@ A report signed with a retired or compromised key will be refused by default. Ac
 
 `report.v1` is still verified but the `confidential` and `high-assurance` profiles refuse it due to the lack of a signed run id. Use `report.v2` for new work.
 
-Two limitations of version 0.2.1 have their own advisory. One is on [issuer attribution](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/issuer-attribution-0.2.1.md) and the other on [replay protection](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-limitations-0.2.1.md).
+Four limitations of version 0.2.1 have their own advisory: [issuer attribution](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/issuer-attribution-0.2.1.md), [replay protection](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-limitations-0.2.1.md), [trust store file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/trust-store-permissions-0.2.1.md) and [replay file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-file-permissions-0.2.1.md).
 
 ## Documentation
 
