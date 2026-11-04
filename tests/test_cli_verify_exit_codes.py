@@ -12,7 +12,6 @@ stderr. Exit 2 and 3 print nothing on stdout.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -211,9 +210,12 @@ def test_exit_2_strict_without_trust_material(tmp_path, signer):
 
 def test_strict_changes_nothing_and_selects_no_profile(tmp_path, signer):
     report, store = _v2_file(tmp_path, signer), _store_file(tmp_path, signer)
-    os.chmod(store, 0o666)  # noqa: S103 - a strict profile would refuse this file
-    without = run("-i", report, "--trusted-keys", store)
-    strict = run("-i", report, "--trusted-keys", store, "--strict")
+    link = tmp_path / "link.json"
+    link.symlink_to(
+        store
+    )  # a strict profile refuses a link to the store, and development only warns
+    without = run("-i", report, "--trusted-keys", str(link))
+    strict = run("-i", report, "--trusted-keys", str(link), "--strict")
     assert without.returncode == strict.returncode == 0
     assert without.stdout == strict.stdout and without.stderr == strict.stderr
 
