@@ -4,13 +4,16 @@
 
 AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
 canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with the authorized exceptions under
-Changed, below. Release scope is undecided, and this section describes a local experimental branch.
+Changed, below. Release scope is undecided.
+
+**Published v0.2.1 has none of these changes, including the storage refusals below, so do not assume it is protected.** See the advisories in [docs/advisories/](docs/advisories/). This section describes the experimental code from pull request #65, which is not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
 
 **Before upgrading, read [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md). Under `confidential` and `high-assurance`, a trust store without issuers is refused and `trust migrate` does not satisfy them: build a new
 store with `trust add`. Any replay file written by a published version is refused until you migrate it.**
 
 ### Changed
 
+- **`verify --strict` is documented as having no effect.** It has done nothing since at least 0.1.0 and it selects no assurance profile, so use `--profile`. Verdicts and exit codes are unchanged. A later version will warn about it, and a later breaking change will remove it or make it a usage error. It will not become an alias for a profile.
 - **Trust store storage under the strict profiles.** `confidential`, `high-assurance` and `secure-v1` refuse a trust store file owned by another account except root. They also refuse it if another account is able to write this file directly or through a directory above it. They also refuse symlinks. This is for `verify`, `serve`, the `revocation` commands and `VerificationPolicy` with a store from `TrustStore.from_json`. This does not protect against the same account, an administrator or a restored copy. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#where-the-trust-store-can-live).
 - **macOS ACLs are checked** for the trust store, the replay file, and the directories above them, under the strict profiles, and one that cannot be read fails closed. The `revocation` state and pin files have the same ACL and directory checks in all profiles.
 - **`trust add`, `trust retire` and `trust revoke` refuse a store file another account could have changed, or a directory where others can write**, in all profiles. These commands will keep the mode of a store file they edit. `trust add` used to reset the mode to `0644`. `replay migrate` refuses a file with a second name or write ACL. It also refuses a file in a directory where others can write. For all of these this includes a directory that only a chain of symlinks goes through.

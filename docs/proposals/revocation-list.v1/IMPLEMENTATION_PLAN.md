@@ -3,7 +3,7 @@
 Companion to [the frozen proposal](../../TRUST_REVOCATION_PROTOCOL_PROPOSAL.md) and [the test matrix](TEST_MATRIX.md). A plan only:
 nothing below had been done when it was written. AI-assisted engineering work; not an audit and no production assurance.
 
-**Status on `impl/0.3-protocol-v2`:** phases 1 to 4 and 6 exist in product code, off by default, without schema registration, on a local branch.
+**Status on `impl/0.3-protocol-v2`:** phases 1 to 4 and 6 exist in product code, off by default, without schema registration, in the code from pull request #65.
 Phase 5 (server) is not built. What differs from this plan is in [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md). Release scope is undecided.
 
 ## Starting point

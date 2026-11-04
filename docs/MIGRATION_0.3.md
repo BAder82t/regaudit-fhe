@@ -1,6 +1,6 @@
 # Upgrading to the next security release
 
-Unreleased, on a local candidate branch. AI-assisted engineering notes.
+AI-assisted engineering notes. **Published v0.2.1 does not have these changes, including the storage refusals, so do not assume it is protected.** No patch for 0.2.x is planned, and the mitigations are in [the advisories](advisories/). This describes the experimental code from pull request #65, which is not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
 
 **Two things stop working until you act, and both fail loudly, before any report is read.**
 

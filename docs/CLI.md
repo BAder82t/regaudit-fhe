@@ -45,7 +45,7 @@ report chose them, so treat them as untrusted text in logs and as possibly sensi
 | `--replay-db FILE`, `--replay-mode {off,check,record}` | Local persistent replay detection. |
 | `--refuse-legacy-v1` | Refuse `report.v1` envelopes. |
 | `--allow-self-signed` | Development-only integrity check; never accepts a report. |
-| `--strict` | Kept for compatibility; trust material is always required. |
+| `--strict` | **Has no effect, and selects no assurance profile.** Use `--profile`. It is kept for compatibility, and trust material is required with or without it. |
 
 `regaudit-fhe verify` exits **0 only when the report is accepted** under the
 configured policy:

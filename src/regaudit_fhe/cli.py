@@ -1014,7 +1014,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--strict",
         action="store_true",
-        help="Kept for compatibility: trust material is always required (see "
+        help="Has no effect and selects no assurance profile: use --profile. Kept for "
+        "compatibility; trust material is required with or without it (see "
         "--allow-self-signed for the development-only alternative).",
     )
     verify_p.add_argument(

@@ -1,7 +1,7 @@
 # 0.3.0 trust protocol: implementation notes
 
 Records how the implementation on `impl/0.3-protocol-v2` differs from [the frozen proposal](../../TRUST_REVOCATION_PROTOCOL_PROPOSAL.md),
-which stays pinned as written, and how the owner's rulings were applied. EXPERIMENTAL, off by default, on a local branch.
+which stays pinned as written, and how the owner's rulings were applied. EXPERIMENTAL, off by default, in the code from pull request #65.
 AI-assisted engineering work; not an audit and no production assurance. The API for a challenger is in
 [CHALLENGER_API.md](CHALLENGER_API.md).
 

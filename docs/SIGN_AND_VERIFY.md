@@ -173,7 +173,7 @@ persistent replay cache, and refuse development-only options.
 * **Replay detection is local.** `consumption` is `NOT_CHECKED`,
   `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL`. `RECORDED_LOCAL` means "recorded in this
   verifier's own store at verification time"; it does not prove the authorised operation
-  completed. `replay_durable` says whether that record survives a restart in a file that passes the storage check. It is never
+  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the experimental code from pull request #65 and not in published v0.2.1. It is never
   global single-use protection or an exactly-once guarantee. Changing freshness settings on an
   existing store has its own limits: see the [replay advisory](advisories/replay-limitations-0.2.1.md).
 * **Retired or compromised keys.** They are accepted for historical reports only with
