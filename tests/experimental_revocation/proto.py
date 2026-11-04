@@ -25,13 +25,11 @@ from regaudit_fhe._revocation import (
     _refuse,
     _sig_doc,  # noqa: F401
     _without,  # noqa: F401
-    _z,  # noqa: F401
     apply_to_store,
     commit,
     verify_list,
 )
 from regaudit_fhe._revocation import RevocationState as _ProductState
-from regaudit_fhe._revocation import enroll as _product_enroll  # noqa: F401
 from regaudit_fhe._time import parse_rfc3339
 from regaudit_fhe.canonical import canonical_bytes as canonical_bytes
 from regaudit_fhe.canonical import loads_strict

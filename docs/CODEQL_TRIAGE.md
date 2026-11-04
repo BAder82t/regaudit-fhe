@@ -77,23 +77,29 @@ older open alerts above and in the historical table remain in the backlog.
 The identifiers `verify` prints (`issuer`, `key_id`, `deployment_id`, ...) are chosen by the report's producer and may be
 sensitive in some deployments; see the 0.2.0 known limitations in `CHANGELOG.md`.
 
-## Draft PR #65 at `13437c9`: 32 alerts
+## Draft PR #65: 32 alerts
 
-CodeQL reported 32 alerts on this draft: 12 high and 20 notes. Each was read at its source line. None is dismissed here, and all stay open until the owner decides. PR results only cover changed lines, so this is not a count for the whole repository.
+CodeQL reported 32 alerts on this draft at `13437c9`: 12 high and 20 notes. Each was read at its source line. On 2026-11-04, 30 were dismissed one at a time, each with its own reason, and 2 were not, because they were real findings. No rule was suppressed. PR results only cover changed lines, so this is not a count for the whole repository.
 
-| # | Rule | Location | Classification | Evidence |
-|---|---|---|---|---|
-| 95 | `py/overly-permissive-file` | `cli.py:464`, `trust add` | **Benign, with one limit** | See below. |
-| 72, 73 | `py/ineffectual-statement` | `_revocation_state.py:77`, `:79` | False positive | The `...` bodies of methods on `class StateStore(Protocol)`. They never run. |
-| 63, 64 | `py/overly-permissive-file` | `tests/test_replay_migration.py:550`, `:557` | Test only | The `db` fixture is under `tmp_path`. These tests set `0640` and `0660` to show the mode is kept or reported. |
-| 96 to 104 | `py/overly-permissive-file` | `tests/test_replay_storage_policy.py:72`, `:137`, `:194`, `:203`, `:232`, `:377`, `:406`, `:484`, `:542` | Test only | Each target is under `tmp_path` or the `world` fixture, which is `0700`. The loose modes are what these tests refuse. `:137` shows a sticky directory above a private parent is accepted. |
-| 74 to 80, 105 | `py/import-and-import-from` | 8 test modules | Style | `import regaudit_fhe as rf` next to `from regaudit_fhe import ...`. No effect on behaviour. |
-| 86 to 88, 90 to 94 | `py/unused-import`, `py/polluting-import` | `tests/experimental_revocation/proto.py`, `trust_gate.py` | Deliberate | These modules re-export product names for the experimental tests. Not shipped. |
-| 68, 69 | `py/unnecessary-lambda` | `tests/experimental_revocation/corpus.py:153`, `:188` | Style | Entries in a test table. |
+| # | Rule | Location | Classification | Evidence | Disposition |
+|---|---|---|---|---|---|
+| 95 | `py/overly-permissive-file` | `cli.py:464`, `trust add` | **Benign on Linux and macOS, with one limit** | See below. | Dismissed, won't fix |
+| 72, 73 | `py/ineffectual-statement` | `_revocation_state.py:77`, `:79` | False positive | The `...` bodies of methods on `class StateStore(Protocol)`. They never run. | Dismissed, false positive |
+| 63, 64 | `py/overly-permissive-file` | `tests/test_replay_migration.py:550`, `:557` | Intentional test behaviour | The `db` fixture is under `tmp_path`. These tests set `0640` and `0660` to show the mode is kept or reported. The modes are not themselves safe. | Dismissed, used in tests |
+| 96 to 104 | `py/overly-permissive-file` | `tests/test_replay_storage_policy.py:72`, `:137`, `:194`, `:203`, `:232`, `:377`, `:406`, `:485`, `:544` | Intentional test behaviour | Each target is under `tmp_path` or the `world` fixture, which is `0700`. The loose modes are what these tests refuse. `:137` shows a sticky directory above a private parent is accepted. The modes are not themselves safe. | Dismissed, used in tests |
+| 74 to 80, 105 | `py/import-and-import-from` | 8 test modules | Style | `import regaudit_fhe as rf` next to imports of private submodules. No effect on behaviour. | Dismissed, used in tests |
+| 88, 90, 91 | `py/unused-import` | `tests/experimental_revocation/proto.py`, `trust_gate.py` | Re-export | Other tests read `proto.canonical_bytes`, `MigrationRefused` and `migrate_store` through these modules. | Dismissed, used in tests |
+| 92 to 94 | `py/polluting-import` | `tests/experimental_revocation/proto.py`, `trust_gate.py` | Deliberate star import | Other tests reach 32 names through `proto` and 19 through `trust_gate` that only these imports provide. | Dismissed, used in tests |
+| 68, 69 | `py/unnecessary-lambda` | `tests/experimental_revocation/corpus.py:153`, `:188` | Style | Rows of a test table. | Dismissed, used in tests |
+| 86 | `py/unused-import` | `tests/experimental_revocation/proto.py:21` | **Real for `_z`** | It names three imports. `_z` was used nowhere and is removed. `_sig_doc` and `_without` are read through `proto` by other tests and stay. | Not dismissed |
+| 87 | `py/unused-import` | `tests/experimental_revocation/proto.py:34` | **Real** | `_product_enroll` was used nowhere and is removed. | Not dismissed |
 
-**#95.** The line is `os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)`. This is not the line alert #53 was dismissed on, which always set `0o644`, so that dismissal does not carry over, and its reason that verifiers need `0644` no longer describes all of this line.
+An earlier version of this record called #86 and #87 deliberate re-exports. That was wrong for `_z` and `_product_enroll`. Parsing the test files showed nothing used them.
+
+**#95.** The line is `os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)`. This is not the line alert #53 was dismissed on, which always set `0o644`, so that dismissal does not carry over.
 
 We checked what can reach it by running `trust add`. A new store is `0644` under umask `000`, `002`, `022` and `077`. An existing `0600`, `0640`, `0644` or `0444` store keeps its mode. `0664`, `0646`, `0666` and `0660` are refused with exit 3 before this line, and the file is unchanged. The file holds `issuer`, `public_key_pem` and `status`, and no private key.
 
-The limit is a platform that cannot establish the owner and permissions, tried by setting `sys.platform` to `freebsd14`. There the check does not refuse, so a `0666` store stays `0666` and the command warns. The command does not loosen the mode, but before this change it would have reset it to `0644`.
+The limit is a platform that cannot establish the owner and permissions. There the check does not refuse, so a `0666` store stays `0666` and the command warns. The command does not loosen the mode, but before this change it would have reset it to `0644`. So this dismissal does not say the command is safe on every platform.
 
+We also checked that this limit cannot reach strict verification, with the platform simulated as `freebsd14` and `win32` on macOS. No real Windows or BSD host was run. `confidential`, `high-assurance` and `secure-v1` refuse with exit 3, even for a safe store and for a key enrolled through `trust add`. `VerificationPolicy` and the server configuration refuse as well. `development` gives `TRUSTED` with a warning and `TRUST_STORE_STORAGE_UNSAFE`.
