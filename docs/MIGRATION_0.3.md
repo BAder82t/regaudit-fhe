@@ -93,6 +93,38 @@ profile. It changes nothing about the existing profiles.
 
 A subclass of `TrustStore` is refused under `confidential`, `high-assurance` and `secure-v1`.
 
+## 4. Signing a parameter set for the encrypted path (B-12)
+
+Only for producers that sign an encrypted-path `parameter_set` with the `[fhe]` extra. The CLI, the server and the default
+`envelope(...)` path sign `plaintext` and are not affected. A verifier is not affected either: no verdict reads `security_bits`.
+
+0.3.0 signs only what the backend can show, so these now fail, loudly, before anything is signed:
+
+| What you did | What happens in 0.3.0 | What to do |
+| --- | --- | --- |
+| `CKKSParams(security_level="HEStd_192_classic")` or `"HEStd_256_classic"` | `ParameterValidationError`. TenSEAL builds every context at SEAL's default 128-bit level, so the claim could not be enforced | Use `HEStd_128_classic` |
+| `CKKSParams(ring_dim=65536)` or larger | `ParameterValidationError`. SEAL has no table entry there and refuses to build the context | Use 16384 or 32768 |
+| A chain with a prime of more than 60 bits, or too many primes of a size the ring cannot supply | `ParameterValidationError`. SEAL refuses these | Use sizes SEAL accepts |
+| `CKKSParams(...).to_envelope_parameter_set()` where TenSEAL is not installed, or the backend cannot be shown to enforce the level | `regaudit_fhe.fhe.BackendUnverified`, nothing is signed | Sign on a host with `regaudit-fhe[fhe]` installed |
+| `parameter_set_from_ckks_context(ctx, security_bits=192)` or `256` | `ValueError`. The backend enforces 128 | Leave `security_bits` out, or pass 128 |
+| `parameter_set_from_ckks_context(obj)` where `obj` is not a TenSEAL CKKS context, or `multiplicative_depth` is more than the chain carries | `BackendUnverified` or `ValueError` | Pass the context itself, or the `CKKSContext` from `build_d6_context` |
+| `parameter_set_from_openfhe_context(ctx)` where `ctx.cc` has no `GetRingDimension()` | `BackendUnverified` | See below |
+
+**What stays the same.** `ParameterSet()`, `CKKSParams().to_envelope_parameter_set()` and the default `build_d6_context()` signed through
+`parameter_set_from_ckks_context` produce the same fields and the same `parameter_set_hash` as before.
+
+**What changes in a signed value.** A context built with a chain other than the default used to be signed with the default chain. It now
+signs its real chain, so its `parameter_set_hash` changes. `CKKSParams()` built through `build_d6_context_from_params` is one of these: it
+signed a 9-prime chain for an 8-prime context. If a verifier pins that hash (`parameter_set_pin`), reports from the same configuration are
+`PIN_MISMATCH` until you read the new `parameter_set` and pin the new hash. A pin on the old hash was pinning a value that was not true.
+
+**OpenFHE.** `parameter_set_from_openfhe_context` now reads the ring dimension from the context where it used to sign twice the batch size, and
+refuses any level but the 128 the builder requests. This has **not** been run against a real OpenFHE: the call name and OpenFHE's enforcement of
+the level are only exercised against stand-ins here. The chain is still signed empty.
+
+**Reports already signed.** They verify as before. A `192`, a `256`, a fixed-default chain or a doubled batch size in an old report cannot be told
+from a correct value by looking at it. Treat `security_bits` as a declaration ([REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean)).
+
 ## `verify_receipt`
 
 It returns a bare bool, and that bool is not an issuer-attribution or revocation result. When tenant identity matters, use `verify_trusted` with an `entries` store
