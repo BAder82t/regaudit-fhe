@@ -63,18 +63,19 @@ does not read `security_bits`.
 
 **`security_bits` is not a measured cryptographic security level.** A valid signature does not substantiate it. It comes
 from one of three places: the default of `128`, when no `parameter_set` is passed; the number behind the
-`security_level` name given to `CKKSParams` (`HEStd_128_classic`, `HEStd_192_classic` and `HEStd_256_classic` become
-128, 192 and 256); or an argument passed to `parameter_set_from_ckks_context` or `parameter_set_from_openfhe_context`.
+`security_level` name given to `CKKSParams`; or, in versions before 0.3.0, an argument passed to
+`parameter_set_from_ckks_context` or `parameter_set_from_openfhe_context`.
 
 | Where the report came from | What it signs | How to read it |
 |---|---|---|
 | `regaudit-fhe audit`, the HTTP server, `envelope(...)` or `envelope_v2(...)` without a `parameter_set` | `backend: "plaintext"`, `poly_modulus_degree: 0`, an empty chain and `security_bits: 128` | **No encrypted computation took place.** The `128` is a field default, and both schemas require at least 128, so the field cannot say anything else. It is not 128-bit cryptographic protection. |
-| `CKKSParams` with `HEStd_128_classic` | `128` | The chain was compared with the 128-bit limit for `N` in a table recorded in the library, and the TenSEAL backend builds its context at SEAL's default 128-bit level. The report still cannot show that the producer used that context. |
-| `CKKSParams` with `HEStd_192_classic` or `HEStd_256_classic` | `192` or `256` | **May exceed what the parameters support.** TenSEAL gives no way to ask for these levels, and at `N = 2^14` the default 360-bit chain is above the SEAL limits for them (305 and 237 bits). Do not rely on the number. |
-| A level passed to `parameter_set_from_ckks_context` or `parameter_set_from_openfhe_context` | Whatever the caller passed | Not checked. |
+| `CKKSParams` with `HEStd_128_classic` | `128` | The chain was compared with the 128-bit limit for `N`, and in 0.3.0 and later a real context was built and the ring dimension and chain were read back from it. The TenSEAL backend builds its context at SEAL's default 128-bit level and is shown to refuse above that limit. The report still cannot show that the producer used that context. |
+| `CKKSParams` with `HEStd_192_classic` or `HEStd_256_classic`, before 0.3.0 | `192` or `256` | **May exceed what the parameters support.** TenSEAL gives no way to ask for these levels, and at `N = 2^14` the default 360-bit chain is above the SEAL limits for them (305 and 237 bits). Do not rely on the number. From 0.3.0 `CKKSParams` refuses these levels. |
+| `parameter_set_from_ckks_context`, before 0.3.0 | The caller's level, a fixed default chain, and `poly_modulus_degree` from the wrapper object | Not read from the context. From 0.3.0 the ring dimension, chain and scale are read from the context, and the level must be the one the backend is shown to enforce. |
+| `parameter_set_from_openfhe_context`, before 0.3.0 | The caller's level, twice the batch size as `poly_modulus_degree`, and an empty chain | Not read from the context. From 0.3.0 the ring dimension is read from the context and the chain is still signed empty. The level is the 128 the builder requests. **Not run against a real OpenFHE.** |
 
-In the same two functions the signed coefficient chain is not read from the context either. The TenSEAL one signs a
-fixed default chain, and the OpenFHE one signs an empty chain and twice the batch size as `poly_modulus_degree`.
+Reports signed before 0.3.0 with a `192` or `256`, or by the two functions above, cannot be told from correct ones by
+looking at the report. The signed numbers are whatever the producer's code wrote.
 
 Verifying a report does not show that FHE execution occurred. `backend` is also a declaration. See
 [SIGN_AND_VERIFY.md](SIGN_AND_VERIFY.md) for what a `TRUSTED` verdict does and does not say.

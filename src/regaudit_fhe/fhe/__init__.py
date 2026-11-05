@@ -31,6 +31,7 @@ def _require_tenseal() -> None:
         raise RuntimeError("TenSEAL is not installed. Run `pip install regaudit-fhe[fhe]`.")
 
 
+from .. import _backend_facts  # noqa: E402
 from . import primitives  # noqa: E402
 from .backends import (  # noqa: E402
     BackendError,
@@ -54,6 +55,8 @@ from .params import (  # noqa: E402
 )
 from .slot_vec import EncryptedSlotVec  # noqa: E402
 
+BackendUnverified = _backend_facts.BackendUnverified
+
 
 def _register_openfhe() -> None:
     # OpenFHE registers itself from its own module, which imports .backends, so .backends must not
@@ -72,6 +75,7 @@ __all__ = [
     "SEAL_MAX_LOG_Q_128",
     "SECURITY_LEVELS",
     "BackendError",
+    "BackendUnverified",
     "CKKSContext",
     "CKKSParams",
     "EncryptedSlotVec",

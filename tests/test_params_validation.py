@@ -106,6 +106,7 @@ def test_precision_loss_bound_outside_unit_interval_rejected():
 
 
 def test_to_envelope_parameter_set_round_trip():
+    pytest.importorskip("tenseal")
     p = CKKSParams()
     eps = p.to_envelope_parameter_set()
     assert eps.poly_modulus_degree == p.ring_dim
@@ -118,7 +119,7 @@ def test_hash_is_deterministic_and_changes_with_params():
     a = CKKSParams()
     b = CKKSParams()
     assert a.hash() == b.hash()
-    c = CKKSParams(ring_dim=1 << 16)
+    c = CKKSParams(ring_dim=1 << 14)
     assert c.hash() != a.hash()
 
 
