@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evidence Verification Portal</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>Evidence Verification Portal</h1>
+    <p>Check a signed report against your organization's trust rules.</p>
+  </header>
+
+  <main>
+    <div id="limitation" class="notice-line">
+      <p><strong>Security limitation.</strong> Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
+      <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
+    </div>
+
+    <section id="unavailable" class="panel notice" role="alert" hidden>
+      <h2>Verification unavailable</h2>
+      <p>The verification engine could not be loaded or its installation could not be validated.</p>
+      <p>No verification was performed.</p>
+      <p>Contact your administrator or follow the installation instructions. No uploaded report has been accepted or verified.</p>
+    </section>
+
+    <section id="not-ready" class="panel notice" hidden>
+      <h2>Not ready</h2>
+      <p id="not-ready-message"></p>
+    </section>
+
+    <section id="upload" class="panel" hidden>
+      <h2><span class="step">1</span> Choose a signed report</h2>
+      <label id="drop" for="file">
+        <span id="drop-text">Drop a report file (.json) here, or click to choose one</span>
+        <input id="file" type="file" accept=".json,application/json">
+      </label>
+      <p id="record-notice" class="notice-line" hidden>Checking records this report as used. A second check of the same report is refused as a repeat.</p>
+      <button id="verify" type="button" disabled>Verify report</button>
+      <p class="fine">The report is checked and not kept. It stays on this computer.</p>
+    </section>
+
+    <section id="failure" class="panel notice" role="alert" hidden>
+      <h2>No verdict</h2>
+      <p id="failure-message"></p>
+    </section>
+
+    <section id="result" class="panel" aria-live="polite" hidden>
+      <h2><span class="step">2</span> Result</h2>
+      <p id="result-file" class="fine"></p>
+      <p id="verdict" class="verdict"></p>
+      <p id="verdict-meaning"></p>
+      <p id="verdict-means"></p>
+      <p id="fhe-notice" class="statement">Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
+
+      <div id="reasons-box" hidden>
+        <h3>Why</h3>
+        <table>
+          <thead><tr><th>What it means</th><th>Effect</th><th>Reason code</th></tr></thead>
+          <tbody id="reasons"></tbody>
+        </table>
+      </div>
+
+      <div id="warnings-box" hidden>
+        <h3>Limits of this result</h3>
+        <ul id="warnings"></ul>
+      </div>
+
+      <h3>Encryption claims in this report</h3>
+      <p id="enc-statement" class="statement"></p>
+      <dl class="checks">
+        <dt>Backend named in the report</dt><dd id="enc-backend"></dd>
+        <dt>security_bits field</dt><dd id="enc-bits"></dd>
+      </dl>
+      <p id="enc-note" class="fine"></p>
+
+      <h3>What was checked</h3>
+      <dl class="checks">
+        <dt>Signature and contents</dt><dd id="check-integrity"></dd>
+        <dt>Issuer</dt><dd id="check-issuer"></dd>
+        <dt>Issuer named in report</dt><dd><bdi id="check-issuer-name"></bdi> <span id="check-issuer-note"></span></dd>
+        <dt>Issued at</dt><dd id="check-issued"></dd>
+      </dl>
+
+      <h3>Verification engine</h3>
+      <p id="engine-summary"></p>
+      <p id="engine-scope" class="fine"></p>
+      <p class="fine" id="engine-limitation"><strong>Security limitation.</strong> Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
+
+      <h2><span class="step">3</span> Save the result</h2>
+      <button id="download" type="button">Download result</button>
+      <button id="again" type="button" class="quiet">Check another report</button>
+      <p id="saved" class="fine" role="status" hidden></p>
+
+      <details>
+        <summary>Technical details</summary>
+        <p class="fine">Exactly what the verifier returned. Key status: <span id="check-key"></span>.</p>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <p id="claim"></p>
+    <p id="policy" class="fine"></p>
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

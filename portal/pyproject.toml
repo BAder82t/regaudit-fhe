@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regaudit-portal"
+version = "0.0.1"
+description = "A local browser interface for checking signed regaudit-fhe reports"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  # Exactly the supported release: this reads two of its internal helpers, and its verdicts are shown as they are.
+  "regaudit-fhe[server]==0.2.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=9", "httpx>=0.27"]
+
+[project.scripts]
+regaudit-portal = "regaudit_portal.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["regaudit_portal*"]
+
+[tool.setuptools.package-data]
+regaudit_portal = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
