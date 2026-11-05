@@ -29,7 +29,7 @@ from regaudit_fhe.verification import PolicyError, VerificationPolicy, verify
 from .experimental_revocation.gen_fixtures import NOW, dump, make_world
 from .test_revocation_tooling_and_cli import cli as run_cli
 from .test_revocation_tooling_and_cli import ingest as cli_ingest
-from .test_revocation_tooling_and_cli import op, sign_list  # noqa: F401
+from .test_revocation_tooling_and_cli import op  # noqa: F401
 
 W = make_world()
 STORE = W.store(W.old, W.new, W.third)
