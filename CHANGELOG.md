@@ -74,6 +74,17 @@ store with `trust add`. Any replay file written by a published version is refuse
   independent. The pin and recovery anchor are the root and the signer a delegate, with no independent approver and no quorum.
   See `docs/proposals/revocation-list.v1/IMPLEMENTATION_NOTES.md`.
 
+### Documentation
+
+- **`parameter_set.security_bits` is documented as a producer declaration that nothing checks.** It is not a measured
+  security level, a valid signature does not substantiate it, and `verify` never reads it. The CLI, the server and the
+  default library path sign `backend: "plaintext"`, `poly_modulus_degree: 0` and `security_bits: 128` for a run that
+  performed no encryption, in every published version from 0.0.2 to 0.2.1. A `192` or `256` from `CKKSParams` can be
+  higher than the parameters support, because TenSEAL builds its context at SEAL's default 128-bit level. Verifying a
+  report does not show that FHE execution occurred. This changes text only: no signed field, hash, schema or verdict
+  changed. See `docs/REPORT_FORMAT.md`. The wording of `THREAT_MODEL.md`, `SECURITY.md` and `COMPLIANCE.md` that implied
+  a verified 128-bit level was corrected.
+
 ## [0.2.1] - 2026-11-01
 
 Availability hardening of the HTTP server (`regaudit-fhe[server]`). AI-assisted engineering work; not an audit and

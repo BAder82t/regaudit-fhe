@@ -158,7 +158,9 @@ same process sees both the inputs and the result: it demonstrates that the encry
 matches the plaintext one, not a deployment where the data holder and the evaluator differ.
 `rf.envelope(...)` records `backend: "plaintext"` unless you pass a `parameter_set=`
 (see `examples/signed_envelope.py`), so describe the backend in the parameter set when you
-sign an encrypted-path result.
+sign an encrypted-path result. In that default case it also signs `security_bits: 128`, which is a field default
+and not a security level, because no encryption took place. The number is never measured or checked in any case:
+see [REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean).
 
 ## Real CKKS benchmarks
 

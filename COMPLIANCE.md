@@ -77,8 +77,6 @@ contracts, prefer language that makes the scope explicit:
    bias-audit workflow using `regaudit-fhe`."
 - ✓ "We submit cryptographically signed drift-monitoring envelopes
    monthly under our FDA SaMD predetermined-change-control plan."
-- ✓ "All disparity primitives run end-to-end under CKKS encryption with
-   128-bit IND-CPA security; per-row labels are never decrypted."
 - ✗ "Our system is NYC LL144 / EU AI Act / FDA SaMD compliant."
 - ✗ "We are certified under EU AI Act Article 17."
 - ✗ "Our audit is a regulator-recognised conformity assessment."
@@ -86,6 +84,14 @@ contracts, prefer language that makes the scope explicit:
 The first set is defensible. The second set isn't, regardless of what
 the library outputs — only the regulator or accredited body can grant
 those statuses.
+
+This list used to include "All disparity primitives run end-to-end under CKKS
+encryption with 128-bit IND-CPA security; per-row labels are never decrypted."
+That wording is withdrawn. The CLI, the server and the default path run on
+plaintext and sign `security_bits: 128`, which is a field default and not a
+security level. The encrypted functions decrypt in the same process, and a
+report's `security_bits` is a declaration that nothing measures. See
+`docs/REPORT_FORMAT.md`.
 
 ---
 

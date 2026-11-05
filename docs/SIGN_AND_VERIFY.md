@@ -66,7 +66,7 @@ its scope, with every policy rule met"; it does not say the audit is correct or 
 is compliant. [`examples/strict_verification_quickstart.py`](../examples/strict_verification_quickstart.py)
 runs each of these cases.
 
-## Four different questions (and what answers each)
+## Five different questions (and what answers each)
 
 A `TRUSTED` verdict answers the first two only.
 
@@ -79,6 +79,10 @@ A `TRUSTED` verdict answers the first two only.
 4. **Did the computation really run under FHE?** **Not provided.** `backend` is what the signer asserted, and a
    default library call signs `plaintext` even on the encrypted path. Signed provenance gives authenticated claims:
    the signature shows who made the claim, and it does not independently verify that an encrypted computation ran.
+5. **Does `parameter_set.security_bits` state a security level that was reached?** **Not provided.** The number is a
+   declaration that nothing measures and `verify` never reads, so a valid signature does not substantiate it. The CLI
+   and the server sign `128` for a plaintext run that performed no encryption, and a `192` or `256` can be higher than
+   the parameters support. See [REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean).
 
 A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](WALKTHROUGH.md).
 

@@ -80,11 +80,20 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
 
 ### CKKS scheme
 
-- IND-CPA secure at 128-bit security under the Ring-LWE assumption.
-- Default parameter set: `poly_modulus_degree = 2^15`, `coeff_modulus`
-  chain `[60, 40, 40, 40, 40, 40, 40, 60]` (360 bits), hybrid key
-  switching with `dnum = 3`, scaling factor `2^40`. These match the
-  values published in the audit envelope's `parameter_set` block.
+- The parameter checks target 128-bit security under the Ring-LWE
+  assumption, by comparing the chain with a table of 128-bit limits. No
+  separate security estimate is recorded in this repository. The
+  `security_bits` in a signed report is a declaration that nothing
+  measures or verifies, and a valid signature does not substantiate it
+  (see `docs/REPORT_FORMAT.md`).
+- Default parameter set of `CKKSParams`: `poly_modulus_degree = 2^15`,
+  `coeff_modulus` chain `[60, 40, 40, 40, 40, 40, 40, 60]` (360 bits),
+  hybrid key switching with `dnum = 3`, scaling factor `2^40`. The
+  envelope's `parameter_set` block records these values only when the
+  producer passes a parameter set built for the encrypted path. The CLI
+  and the server sign `plaintext`, `poly_modulus_degree = 0` and
+  `security_bits = 128`, a field default for a run that performed no
+  encryption.
 - No bootstrapping is invoked; depth budgets are enforced by
   `regaudit_fhe._slot.SlotVec` and asserted by the equivalence-test
   matrix.
@@ -238,7 +247,8 @@ The library does not defend against:
   decrypted aggregates beyond the leakage explicitly accepted in the
   per-primitive tables above.
 - **Long-term cryptanalytic advances.** Parameters target 128-bit
-  IND-CPA under current Ring-LWE estimates (2026 Lattice Estimator).
+  security using a table of limits, and no estimator run is recorded in
+  this repository.
   Quantum resistance in the strong adversarial sense is not claimed;
   CKKS is post-quantum-relevant under known reductions but a formal
   PQC certification is not part of this release.
