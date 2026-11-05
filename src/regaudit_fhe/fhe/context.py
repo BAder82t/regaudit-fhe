@@ -15,6 +15,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .. import _backend_facts as _bf
+
 if TYPE_CHECKING:
     from .params import CKKSParams
 
@@ -45,12 +47,14 @@ def build_d6_context_from_params(params: CKKSParams) -> CKKSContext:
 
     The CKKSParams constructor has already run every validation rule
     the library promises to enforce; this function only translates the
-    validated record into an active TenSEAL context.
+    validated record into an active TenSEAL context. It first asks the installed backend whether it enforces the
+    claimed level and builds exactly these parameters (``CKKSParams.check_backend_support``).
     """
     from .params import CKKSParams as _CKKSParams
 
     if not isinstance(params, _CKKSParams):
         raise TypeError("build_d6_context_from_params requires CKKSParams")
+    params.check_backend_support()
     return build_d6_context(
         poly_modulus_degree=params.ring_dim,
         scale_bits=params.scaling_mod_size,
@@ -87,6 +91,15 @@ def build_d6_context(
     """
     import tenseal as ts
 
+    # The backend must be shown to enforce a level, and SEAL must have a table for this ring dimension.
+    # Otherwise it could build a context at a size it never checked.
+    _bf.require_level(128)
+    if _bf.installed_max_log_q_128(poly_modulus_degree) <= 0:
+        raise _bf.BackendUnverified(
+            f"the installed SEAL has no entry for ring dimension {poly_modulus_degree}, "
+            "so the backend cannot enforce a security level there and no context is built"
+        )
+
     if coeff_mod_bit_sizes is None:
         coeff_mod_bit_sizes = [60, 40, 40, 40, 40, 40, 40, 40, 60]
 
@@ -105,6 +118,12 @@ def build_d6_context(
         poly_modulus_degree=poly_modulus_degree,
         coeff_mod_bit_sizes=list(coeff_mod_bit_sizes),
     )
+    back = _bf.read_back(ctx)
+    if back.ring_dim != poly_modulus_degree or back.chain != tuple(coeff_mod_bit_sizes):
+        raise _bf.BackendUnverified(
+            f"the backend built ring dimension {back.ring_dim} with chain {back.chain}, which is different from "
+            f"the {poly_modulus_degree} and {tuple(coeff_mod_bit_sizes)} that were asked for"
+        )
     ctx.global_scale = float(2**scale_bits)
     ctx.generate_galois_keys()
     ctx.generate_relin_keys()

@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
+
+from .. import _backend_facts as _bf
 
 SECURITY_LEVELS = {
     "HEStd_128_classic": 128,
@@ -38,9 +41,10 @@ SECURITY_LEVELS = {
 }
 
 
-# SEAL-validated upper bounds on `log Q` (sum of coeff_mod_bit_sizes)
-# for each ring dimension at 128-bit IND-CPA security. Below these
-# bounds the parameter set is accepted; at or above, SEAL refuses.
+# Upper bounds on `log Q` (sum of coeff_mod_bit_sizes) for each ring dimension at the 128-bit level, from the
+# HomomorphicEncryption.org standard as SEAL ships it. Below these bounds the parameter set is accepted; above,
+# SEAL refuses to build a context. SEAL has no entry for 65536 or above, so the library has none either: the
+# backend cannot build a context there. `check_backend_support` compares this table with the installed SEAL.
 SEAL_MAX_LOG_Q_128: dict[int, int] = {
     1024: 27,
     2048: 54,
@@ -48,12 +52,60 @@ SEAL_MAX_LOG_Q_128: dict[int, int] = {
     8192: 218,
     16384: 438,
     32768: 881,
-    65536: 1762,
 }
+
+# The levels the TenSEAL backend is shown to enforce when it builds a context. TenSEAL builds every context at
+# SEAL's default 128-bit level and offers no way to request or read back another, so a signed claim of 192 or
+# 256 bits cannot be enforced. Extend this only with a backend that is shown to refuse above the higher level.
+BACKEND_ENFORCED_LEVELS = frozenset({"HEStd_128_classic"})
+
+# SEAL refuses any coefficient prime above this many bits.
+MAX_PRIME_BITS = _bf.MAX_PRIME_BITS
 
 
 class ParameterValidationError(ValueError):
     """Raised when a CKKSParams instance fails a validation rule."""
+
+
+def _is_prime(n: int) -> bool:
+    """Deterministic Miller-Rabin, exact below 3.3e24, so exact for every coefficient prime SEAL can use."""
+    if n < 2:
+        return False
+    small = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
+    for p in small:
+        if n % p == 0:
+            return n == p
+    d, r = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for a in small:
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = x * x % n
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _enough_primes(bit_size: int, factor: int, count: int) -> bool:
+    """Whether at least ``count`` primes of exactly ``bit_size`` bits are 1 modulo ``factor`` (= 2N).
+
+    SEAL builds a chain by taking, for each bit size, the largest such primes first, and refuses the chain
+    when it runs out before the lower bound ``2**(bit_size - 1)``.
+    """
+    value = (1 << bit_size) - factor + 1
+    lower = 1 << (bit_size - 1)
+    found = 0
+    while value > lower and found < count:
+        if _is_prime(value):
+            found += 1
+        value -= factor
+    return found >= count
 
 
 @dataclass(frozen=True)
@@ -109,6 +161,7 @@ class CKKSParams:
         self._check_no_bootstrap_required()
         self._check_rotation_key_minimality()
         self._check_precision_loss_bound()
+        self._check_chain_is_buildable()
 
     def _check_ring_dim(self) -> None:
         if self.ring_dim < 4096 or self.ring_dim & (self.ring_dim - 1) != 0:
@@ -132,6 +185,12 @@ class CKKSParams:
             raise ParameterValidationError(
                 "regaudit-fhe requires at least 128-bit IND-CPA security; "
                 f"got {self.security_level}"
+            )
+        if self.security_level not in BACKEND_ENFORCED_LEVELS:
+            raise ParameterValidationError(
+                f"{self.security_level} is refused: the TenSEAL backend cannot enforce it. It builds its context at "
+                "SEAL's default 128-bit level and offers no way to request or read back another, so a signed claim "
+                f"of {SECURITY_LEVELS[self.security_level]} bits would be unsupported. Use HEStd_128_classic"
             )
 
     def _check_depth_supports_chain(self) -> None:
@@ -243,6 +302,42 @@ class CKKSParams:
                 f"{self.precision_loss_bound:g}."
             )
 
+    def _check_chain_is_buildable(self) -> None:
+        chain = self.coeff_mod_bit_sizes
+        if any(isinstance(p, bool) or not isinstance(p, int) for p in chain):
+            raise ParameterValidationError(
+                f"every coefficient prime size must be an int; got {chain}"
+            )
+        if any(p < 2 or p > MAX_PRIME_BITS for p in chain):
+            raise ParameterValidationError(
+                f"every coefficient prime size must be at least 2 and at most {MAX_PRIME_BITS} bits "
+                f"(SEAL refuses a larger prime); got {chain}"
+            )
+        for bits, count in sorted(Counter(chain).items()):
+            if not _enough_primes(bits, 2 * self.ring_dim, count):
+                raise ParameterValidationError(
+                    f"ring_dim {self.ring_dim} has too few distinct primes of {bits} bits for this chain "
+                    f"(it needs {count}); SEAL would refuse to build it"
+                )
+
+    def check_backend_support(self) -> _bf.ReadBack:
+        """Refuse unless the installed backend builds exactly these parameters and enforces the claimed level.
+
+        Builds one real context (no Galois keys) and reads the ring dimension and chain back from it. Raises
+        :class:`regaudit_fhe.fhe.BackendUnverified` when TenSEAL is missing, when the level cannot be shown
+        to be enforced, when the recorded table differs from the installed SEAL, or when the backend refuses
+        or changes the parameters.
+        """
+        _bf.require_level(SECURITY_LEVELS[self.security_level])
+        installed = _bf.installed_max_log_q_128(self.ring_dim)
+        recorded = SEAL_MAX_LOG_Q_128.get(self.ring_dim)
+        if installed <= 0 or recorded != installed:
+            raise _bf.BackendUnverified(
+                f"the recorded 128-bit limit for ring dimension {self.ring_dim} ({recorded}) is not the installed "
+                f"SEAL's ({installed or 'no entry'}); it has to be revalidated before a parameter set is signed"
+            )
+        return _bf.constructed(self.ring_dim, tuple(self.coeff_mod_bit_sizes))
+
     # ------------------------------------------------------------------
     # Serialisation
     # ------------------------------------------------------------------
@@ -267,23 +362,21 @@ class CKKSParams:
         return hashlib.sha256(body).hexdigest()
 
     def to_envelope_parameter_set(self):
-        """Convert to the :class:`regaudit_fhe.ParameterSet` shape used
-        by the audit envelope."""
-        import contextlib
+        """Convert to the :class:`regaudit_fhe.ParameterSet` shape used by the audit envelope.
 
+        The ring dimension and chain are read back from a context the installed backend constructed, and the
+        level is signed only when the backend is shown to enforce it. Without TenSEAL, or when either cannot
+        be shown, this raises :class:`regaudit_fhe.fhe.BackendUnverified` and nothing is signed.
+        """
         from ..reports import ParameterSet
 
-        backend_version = ""
-        with contextlib.suppress(Exception):
-            import tenseal as _ts
-
-            backend_version = getattr(_ts, "__version__", "")
+        back = self.check_backend_support()
         return ParameterSet(
             backend="tenseal-ckks",
-            poly_modulus_degree=self.ring_dim,
+            poly_modulus_degree=back.ring_dim,
             security_bits=SECURITY_LEVELS[self.security_level],
             multiplicative_depth=self.multiplicative_depth,
-            coeff_mod_bit_sizes=tuple(self.coeff_mod_bit_sizes),
+            coeff_mod_bit_sizes=back.chain,
             scaling_factor_bits=self.scaling_mod_size,
-            backend_version=backend_version,
+            backend_version=_bf.facts().tenseal_version,
         )

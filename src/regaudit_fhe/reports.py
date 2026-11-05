@@ -214,45 +214,88 @@ class ParameterSet:
 def parameter_set_from_ckks_context(
     ctx: Any,
     *,
-    security_bits: int = 128,
+    security_bits: int | None = None,
     multiplicative_depth: int = 6,
 ) -> ParameterSet:
-    """Introspect a CKKSContext into a ParameterSet.
+    """Describe a TenSEAL CKKS context the backend actually constructed.
 
-    ``security_bits`` and ``multiplicative_depth`` are passed through
-    explicitly because they are not derivable from the underlying
-    SEAL context object — they reflect the validated CKKSParams or
-    deployment policy under which the context was built. Callers with
-    a :class:`regaudit_fhe.fhe.CKKSParams` should use
-    :meth:`CKKSParams.to_envelope_parameter_set` instead, which carries
-    the validated values directly.
+    The ring dimension, the coefficient chain and the scale are read back from the context itself, and the
+    security level is the one the installed backend is shown to enforce (see ``regaudit_fhe._backend_facts``).
+    ``security_bits`` may be left out. If it is given it must equal that level: a claim of 192 or 256 is
+    refused, because TenSEAL builds every context at SEAL's default 128-bit level. An object that is not a
+    real TenSEAL context, or a build whose level cannot be shown, raises
+    :class:`regaudit_fhe.fhe.BackendUnverified`: no default is signed in its place.
+
+    ``multiplicative_depth`` is the declared depth budget. It must fit the chain (two primes are kept back).
+    Callers with a :class:`regaudit_fhe.fhe.CKKSParams` can use
+    :meth:`CKKSParams.to_envelope_parameter_set`, which builds and reads back a context itself.
     """
-    backend = "tenseal-ckks"
-    backend_version = ""
-    with contextlib.suppress(Exception):
-        import tenseal as _ts
+    from . import _backend_facts as bf
 
-        backend_version = getattr(_ts, "__version__", "")
-
-    poly = int(getattr(ctx, "poly_modulus_degree", 0))
+    facts = bf.require_level(128)
+    back = bf.read_back(getattr(ctx, "context", ctx))
+    stated = getattr(ctx, "poly_modulus_degree", None)
+    if stated is not None and int(stated) != back.ring_dim:
+        raise ValueError(
+            f"poly_modulus_degree {stated} disagrees with the context, which has ring dimension {back.ring_dim}"
+        )
+    if security_bits is not None and int(security_bits) != facts.enforced_security_bits:
+        raise ValueError(
+            f"cannot sign {security_bits} bits: the installed backend enforces "
+            f"{facts.enforced_security_bits} bits and offers no way to request another level"
+        )
+    if not 0 <= int(multiplicative_depth) <= len(back.chain) - 2:
+        raise ValueError(
+            f"multiplicative_depth {multiplicative_depth} does not fit a chain of {len(back.chain)} primes "
+            f"(it can carry at most {max(len(back.chain) - 2, 0)})"
+        )
+    if back.scale is None:
+        raise bf.BackendUnverified(
+            "the context has no global scale set, so its scaling factor cannot be read"
+        )
     return ParameterSet(
-        backend=backend,
-        poly_modulus_degree=poly,
-        security_bits=int(security_bits),
+        backend="tenseal-ckks",
+        poly_modulus_degree=back.ring_dim,
+        security_bits=facts.enforced_security_bits,
         multiplicative_depth=int(multiplicative_depth),
-        coeff_mod_bit_sizes=tuple(
-            getattr(ctx, "coeff_mod_bit_sizes", (60, 40, 40, 40, 40, 40, 40, 40, 60))
-        ),
-        scaling_factor_bits=int(np.log2(getattr(ctx, "scale", 1 << 40))),
+        coeff_mod_bit_sizes=back.chain,
+        scaling_factor_bits=int(np.log2(back.scale)),
         library_version=LIB_VERSION,
-        backend_version=backend_version,
+        backend_version=facts.tenseal_version,
     )
+
+
+# The level the OpenFHE builder asks for (``SetSecurityLevel(HEStd_128_classic)``). Whether OpenFHE enforces
+# it has not been shown against a real OpenFHE, so no other level is ever signed.
+OPENFHE_REQUESTED_BITS = 128
+
+
+def _openfhe_ring_dimension(ctx: Any) -> int:
+    """The ring dimension of an OpenFHE context, read from the context. Never derived from the batch size."""
+    from . import _backend_facts as bf
+
+    getter = getattr(getattr(ctx, "cc", None), "GetRingDimension", None)
+    if getter is None:
+        raise bf.BackendUnverified(
+            "this OpenFHE context does not expose its ring dimension, so none is signed in place of it"
+        )
+    try:
+        ring = int(getter())
+    except Exception as exc:
+        raise bf.BackendUnverified(f"cannot read the OpenFHE ring dimension ({exc})") from exc
+    if ring < 1024 or ring & (ring - 1):
+        raise bf.BackendUnverified(
+            f"the OpenFHE ring dimension {ring} is not a power of two of at least 1024"
+        )
+    if int(getattr(ctx, "n_slots", 0)) > ring // 2:
+        raise bf.BackendUnverified(f"{ctx.n_slots} slots do not fit a ring of dimension {ring}")
+    return ring
 
 
 def parameter_set_from_openfhe_context(
     ctx: Any,
     *,
-    security_bits: int = 128,
+    security_bits: int | None = None,
     multiplicative_depth: int = 6,
 ) -> ParameterSet:
     """Introspect an :class:`regaudit_fhe.fhe.openfhe.OpenFHEContext` into a
@@ -260,21 +303,33 @@ def parameter_set_from_openfhe_context(
 
     The envelope's ``parameter_set_hash`` therefore pins the OpenFHE
     backend distinctly from TenSEAL, so a verifier can require a specific
-    implementation. ``scaling_factor_bits`` is read from the context's
-    ``scale_bits``; the multiplicative depth reflects the audit budget,
-    not the larger modulus chain the context provisions for headroom.
+    implementation. The ring dimension is read from the context
+    (``GetRingDimension``), and a context that cannot show one is refused.
+    ``scaling_factor_bits`` is read from the context's ``scale_bits``; the
+    multiplicative depth reflects the audit budget, not the larger modulus
+    chain the context provisions for headroom.
+
+    **Not verified against a real OpenFHE.** The builder asks OpenFHE for 128 bits and the value signed is
+    that request. Whether OpenFHE enforces it, and the name of the ring-dimension call, have only been
+    exercised against stand-ins. ``security_bits`` may be left out, and any value other than 128 is refused.
+    The coefficient chain is not read, so it is signed empty.
     """
+    if security_bits is not None and int(security_bits) != OPENFHE_REQUESTED_BITS:
+        raise ValueError(
+            f"cannot sign {security_bits} bits: the OpenFHE builder requests {OPENFHE_REQUESTED_BITS} "
+            "and no other level"
+        )
+    ring = _openfhe_ring_dimension(ctx)
     backend_version = ""
     with contextlib.suppress(Exception):
         import openfhe as _openfhe
 
         backend_version = getattr(_openfhe, "__version__", "")
 
-    n_slots = int(getattr(ctx, "n_slots", 0))
     return ParameterSet(
         backend="openfhe-ckks",
-        poly_modulus_degree=n_slots * 2,
-        security_bits=int(security_bits),
+        poly_modulus_degree=ring,
+        security_bits=OPENFHE_REQUESTED_BITS,
         multiplicative_depth=int(multiplicative_depth),
         coeff_mod_bit_sizes=(),
         scaling_factor_bits=int(getattr(ctx, "scale_bits", 40)),
