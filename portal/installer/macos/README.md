@@ -4,6 +4,10 @@ This builds the Evidence Verification Portal as a double-clickable macOS applica
 
 It is a **local evaluation build**. It is signed ad hoc, which is enough to run on the Mac that built it. It is not signed with a Developer ID certificate and not notarized, so macOS will warn about it on any other computer. It is not for public distribution.
 
+## First launch
+
+Opening the application for the first time, with nothing configured, shows the portal's welcome screen: try a synthetic sample (a demonstration with made-up data and a demonstration trust list), verify your own report (not available until an administrator has set up trust, and the portal says so), or read the administrator setup page. The application creates nothing on the computer. An administrator's configuration, when there is one, is read from `~/Library/Application Support/Evidence Verification Portal/portal-config.json`. Setting up trust still needs the existing `regaudit-fhe trust add` commands and a configuration file written by hand. Guided setup in the browser is not built.
+
 ## What is inside
 
 Everything the application runs is inside the bundle:
@@ -22,7 +26,7 @@ On an Apple silicon Mac with Xcode or the command line tools (for `swiftc`), `co
 
     python3 build_app.py --out /path/to/empty/folder
 
-It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS` and `BUILD_MANIFEST.json`. Add `--no-dmg` to skip the disk image. Then check the result without a browser:
+It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS` and `BUILD_MANIFEST.json`. Add `--no-dmg` to skip the disk image. Then check the result without a browser (first run in an empty account, then a configured run):
 
     python3 smoke_test.py "/path/to/Evidence Verification Portal.app"
 
