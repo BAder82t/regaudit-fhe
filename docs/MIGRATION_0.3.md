@@ -115,8 +115,40 @@ Only for producers that sign an encrypted-path `parameter_set` with the `[fhe]` 
 
 **What changes in a signed value.** A context built with a chain other than the default used to be signed with the default chain. It now
 signs its real chain, so its `parameter_set_hash` changes. `CKKSParams()` built through `build_d6_context_from_params` is one of these: it
-signed a 9-prime chain for an 8-prime context. If a verifier pins that hash (`parameter_set_pin`), reports from the same configuration are
-`PIN_MISMATCH` until you read the new `parameter_set` and pin the new hash. A pin on the old hash was pinning a value that was not true.
+signed a 9-prime chain for an 8-prime context. A `parameter_set_pin` on the old hash was pinning a value that was not true, and **the verifier
+never accepts it after a mismatch**: a report with the new hash is `INVALID` with `PIN_MISMATCH`, exit 1, until the pin is re-established as below.
+
+### Re-establishing a `parameter_set_pin` (verifier side)
+
+A pin is one SHA-256 hash per key. There is no command to set one: it is the `parameter_set_pin` member of an entry in an `entries` trust store
+(or the `parameter_set_pins` mapping of the legacy form, which the strict profiles refuse). Nothing re-pins by itself, and nothing falls back to the old value.
+
+1. **List the pins you have.** For an `entries` store:
+   `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print({k: v['parameter_set_pin'] for k, v in d.get('entries', {}).items() if v.get('parameter_set_pin')}, d.get('parameter_set_pins', {}))" TRUST.json`
+   Only keys listed here can be affected. A key with no pin accepts any parameter set from that signer, which is the reason not to remove a pin (step 5).
+2. **Find the affected ones.** After a producer upgrades, verify one of its new reports with the current store:
+   `regaudit-fhe verify --input NEW_REPORT.json --trusted-keys TRUST.json`.
+   `INVALID` with the reason `PIN_MISMATCH` marks that key's pin as affected. The output's `parameter_set_hash` is the hash the report carries.
+   A producer is affected if it signs through `parameter_set_from_ckks_context` with a chain other than the default, through `CKKSParams`
+   and `build_d6_context_from_params`, or through `parameter_set_from_openfhe_context`. The hash also contains `backend_version` (the TenSEAL version
+   on the producer host), so it changes with that version too.
+3. **Validate the parameters before you trust the hash.** Do not copy a hash from a report just because it arrived. Read that report's
+   `parameter_set` block and check each field against what the producer is supposed to run: `backend`, `poly_modulus_degree`, `coeff_mod_bit_sizes`
+   (the real chain), `security_bits` (a declaration, 128 at most for the TenSEAL backend), `multiplicative_depth`, `scaling_factor_bits`,
+   `backend_version` and `library_version`. Better, have the producer's administrator compute the hash on the producer host from the intended
+   parameters (`CKKSParams(...).to_envelope_parameter_set().hash()`, or `parameter_set_from_ckks_context(ctx).hash()` for the context in use) and
+   confirm it equals the report's `parameter_set_hash`, through a channel that is not the report.
+4. **Re-pin on a copy, then swap.** Copy the store. In the copy, set that entry's `parameter_set_pin` to the validated hash and change nothing else. Check
+   it loads (`regaudit-fhe trust status --store COPY.json`). Verify one report with the new hash (it must be `TRUSTED`) and one with any other hash
+   (it must be `PIN_MISMATCH`). Then replace the store with the copy and keep the old file. Keep the owner and permissions of the store:
+   the strict profiles refuse a store that another account can write.
+5. **Never clear the pin to make the mismatch go away.** Without a pin the key is accepted for any parameter set, so the check is gone and nothing says so.
+6. **A pin holds one hash.** Reports signed before the producer upgraded carry the old hash and are `PIN_MISMATCH` against the new pin, and the reverse. If both
+   must be accepted for a while, enrol the upgraded producer under a new `key_id` with its own pin and leave the old key and its pin alone.
+
+Demonstrated with the CLI on TenSEAL 0.3.18 (`CKKSParams()` through `build_d6_context_from_params`): old pin and an old-hash report is `TRUSTED`; old pin and a new-hash report is
+`INVALID` with `PIN_MISMATCH`; no pin accepts it, which is why step 5; the new pin and a new-hash report is `TRUSTED`; the new pin and an old-hash report is `PIN_MISMATCH`.
+`tests/test_ckks_producer_claims.py` pins the same behaviour.
 
 **OpenFHE.** `parameter_set_from_openfhe_context` now reads the ring dimension from the context where it used to sign twice the batch size, and
 refuses any level but the 128 the builder requests. This has **not** been run against a real OpenFHE: the call name and OpenFHE's enforcement of
