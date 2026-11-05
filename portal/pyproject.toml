@@ -24,7 +24,7 @@ regaudit-portal = "regaudit_portal.__main__:main"
 include = ["regaudit_portal*"]
 
 [tool.setuptools.package-data]
-regaudit_portal = ["static/*"]
+regaudit_portal = ["static/*", "samples/*", "samples/reports/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

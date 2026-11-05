@@ -1,0 +1,37 @@
+{
+  "issuer": "DEMO-ONLY synthetic issuer",
+  "verifier_id": "demo-verifier",
+  "trust_list": "demo-trust-list.json",
+  "samples": [
+    {
+      "id": "trusted",
+      "file": "reports/trusted.json",
+      "title": "A report from the demonstration issuer",
+      "description": "Signed by the demonstration issuer, whose key is in the demonstration trust list. It shows what an accepted report looks like."
+    },
+    {
+      "id": "untrusted-signer",
+      "file": "reports/untrusted-signer.json",
+      "title": "A report signed by a key nobody enrolled",
+      "description": "Signed with a different throwaway key that is not in the demonstration trust list. It shows that a valid signature alone does not make a signer trusted."
+    },
+    {
+      "id": "modified",
+      "file": "reports/modified.json",
+      "title": "A report changed after it was signed",
+      "description": "The trusted report with one field changed after it was signed. It shows how a changed report is caught."
+    },
+    {
+      "id": "plaintext-backend",
+      "file": "reports/plaintext-backend.json",
+      "title": "A report that says it was computed on plaintext",
+      "description": "The report states that no encryption was used. It shows the wording for a plaintext report."
+    },
+    {
+      "id": "declares-encrypted-backend",
+      "file": "reports/declares-encrypted-backend.json",
+      "title": "A report that names an encrypted backend",
+      "description": "The report names an encrypted backend, but nothing was encrypted: the file only says so. It shows that the portal cannot verify such a statement."
+    }
+  ]
+}
