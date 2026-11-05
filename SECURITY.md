@@ -50,9 +50,12 @@ days and provide a remediation timeline within ten business days.
 - Auditor-public quantities are the regulation citations, the audit
   envelope schema, and a set of public group-cardinality scalars
   documented in each primitive's specification under `docs/specs/`.
-- IND-CPA security at 128 bits is inherited from the underlying CKKS
-  parameter set (`N = 2^15`, `log Q ~ 240`, hybrid key switching
-  `dnum = 3`).
+- The parameter checks target 128-bit security by comparing the chain
+  with a table of 128-bit limits for `N`. This is not an IND-CPA claim for a
+  deployment, and a report's `security_bits` is a declaration that is never
+  measured or verified. The CLI and the server sign `128` for a plaintext run
+  that performed no encryption. See
+  [docs/REPORT_FORMAT.md](docs/REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean).
 
 Findings outside that model — for example, side-channel timing on the
 audit operator's host — should be reported through the same channel.

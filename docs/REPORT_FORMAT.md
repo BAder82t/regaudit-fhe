@@ -55,6 +55,35 @@ deployment or run identity. It remains verifiable, with weaker historical guaran
 documented in [docs/TRUST_SPEC.md](TRUST_SPEC.md) (Appendix C). Unsigned
 SHA-256 receipts are useful for tamper evidence only.
 
+## What `parameter_set` and `security_bits` mean
+
+`parameter_set` is what the producer declared about the encryption parameters. It is signed, and a valid signature
+only shows that the issuer's key signed those bytes. Nothing in the library checks the declaration, and `verify`
+does not read `security_bits`.
+
+**`security_bits` is not a measured cryptographic security level.** A valid signature does not substantiate it. It comes
+from one of three places: the default of `128`, when no `parameter_set` is passed; the number behind the
+`security_level` name given to `CKKSParams` (`HEStd_128_classic`, `HEStd_192_classic` and `HEStd_256_classic` become
+128, 192 and 256); or an argument passed to `parameter_set_from_ckks_context` or `parameter_set_from_openfhe_context`.
+
+| Where the report came from | What it signs | How to read it |
+|---|---|---|
+| `regaudit-fhe audit`, the HTTP server, `envelope(...)` or `envelope_v2(...)` without a `parameter_set` | `backend: "plaintext"`, `poly_modulus_degree: 0`, an empty chain and `security_bits: 128` | **No encrypted computation took place.** The `128` is a field default, and both schemas require at least 128, so the field cannot say anything else. It is not 128-bit cryptographic protection. |
+| `CKKSParams` with `HEStd_128_classic` | `128` | The chain was compared with the 128-bit limit for `N` in a table recorded in the library, and the TenSEAL backend builds its context at SEAL's default 128-bit level. The report still cannot show that the producer used that context. |
+| `CKKSParams` with `HEStd_192_classic` or `HEStd_256_classic` | `192` or `256` | **May exceed what the parameters support.** TenSEAL gives no way to ask for these levels, and at `N = 2^14` the default 360-bit chain is above the SEAL limits for them (305 and 237 bits). Do not rely on the number. |
+| A level passed to `parameter_set_from_ckks_context` or `parameter_set_from_openfhe_context` | Whatever the caller passed | Not checked. |
+
+In the same two functions the signed coefficient chain is not read from the context either. The TenSEAL one signs a
+fixed default chain, and the OpenFHE one signs an empty chain and twice the batch size as `poly_modulus_degree`.
+
+Verifying a report does not show that FHE execution occurred. `backend` is also a declaration. See
+[SIGN_AND_VERIFY.md](SIGN_AND_VERIFY.md) for what a `TRUSTED` verdict does and does not say.
+
+**Reading existing reports.** A report that signs `backend: "plaintext"` with `security_bits: 128` was produced
+without encryption, whatever the number says. Every published version from 0.0.2 to 0.2.1 signs it this way
+by default, so show such a report as "no encryption", and never as "128-bit". The published schemas are not
+changed by this note, and correcting the field itself would need a new schema version.
+
 ## JSON schemas
 
 Every primitive input, primitive output, and the audit envelope itself
