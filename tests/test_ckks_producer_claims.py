@@ -19,6 +19,8 @@ from regaudit_fhe.fhe import params as params_mod
 from regaudit_fhe.fhe.params import CKKSParams, ParameterValidationError
 from regaudit_fhe.reports import ParameterSet
 
+from .test_verification_engine import _policy, _reasons, _signer, _store, _v2
+
 CHAIN_8 = (60, 40, 40, 40, 40, 40, 40, 60)
 
 
@@ -157,6 +159,35 @@ def test_a_recorded_table_that_differs_from_the_installed_seal_is_not_signed_fro
     monkeypatch.setattr(bf, "installed_max_log_q_128", lambda ring: installed)
     with pytest.raises(bf.BackendUnverified, match="revalidated"):
         CKKSParams().to_envelope_parameter_set()
+
+
+def test_an_old_pin_is_not_matched_by_the_corrected_parameter_set_and_is_never_bypassed(
+    monkeypatch,
+):
+    fake, _ = fake_tenseal(enforce=128)
+    use(monkeypatch, fake)
+    old = ParameterSet(  # what a context built from CKKSParams() used to be signed as: a 9-prime chain for an 8-prime context
+        backend="tenseal-ckks", poly_modulus_degree=32768, security_bits=128, multiplicative_depth=6,
+        coeff_mod_bit_sizes=(60,) + (40,) * 7 + (60,), scaling_factor_bits=40, backend_version="0.0.0-fake",
+    )  # fmt: skip
+    new = CKKSParams().to_envelope_parameter_set()
+    assert old.hash() != new.hash()
+    s = _signer()
+    assert verify_with_pin(s, old, old.hash()).accepted  # control: how it verified before
+    refused = verify_with_pin(s, new, old.hash())
+    assert not refused.accepted and refused.trust_status == "INVALID"
+    assert _reasons(refused) == {"PIN_MISMATCH"} and refused.issuer_trusted is False
+    assert refused.parameter_set_hash == new.hash()  # the verdict names the hash the report carries
+    assert verify_with_pin(s, new, new.hash()).accepted  # re-pinned from the validated hash
+    assert not verify_with_pin(s, old, new.hash()).accepted  # and the old hash no longer passes
+
+
+def verify_with_pin(signer, parameter_set, pin):
+    from regaudit_fhe.verification import verify
+
+    return verify(
+        _v2(signer, parameter_set=parameter_set), _policy(_store(signer, parameter_set_pin=pin))
+    )
 
 
 def test_a_backend_that_builds_a_different_chain_than_asked_is_refused(monkeypatch):
