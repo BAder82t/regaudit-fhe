@@ -1,8 +1,9 @@
 """TenSEAL CKKS context factory targeting the d=6 audit budget.
 
-Default parameters yield 128-bit IND-CPA security for ``poly_modulus_degree
+Default parameters stay within SEAL's 128-bit limit for ``poly_modulus_degree
 = 2^14`` with a ``coeff_modulus`` chain that supports six multiplicative
-levels. Production deployments should select ``poly_modulus_degree =
+levels. TenSEAL builds every context at SEAL's default 128-bit level and the
+builders here check that the installed backend is shown to enforce it. Production deployments should select ``poly_modulus_degree =
 2^15`` for higher precision and longer rotation-key sets.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd

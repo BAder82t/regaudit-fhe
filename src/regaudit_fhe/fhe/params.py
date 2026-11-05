@@ -3,7 +3,9 @@
 Constructing a :class:`CKKSParams` runs every validation rule the
 library promises to enforce at runtime:
 
-  - 128-bit IND-CPA security at the chosen ``ring_dim``.
+  - The 128-bit level only: the chain must stay within SEAL's 128-bit limit
+    for ``ring_dim``, and 192 or 256 are refused because the TenSEAL backend
+    cannot enforce them. This is a table check, not a security estimate.
   - Modulus-chain depth large enough to evaluate the declared
     ``multiplicative_depth`` without bootstrapping.
   - Total ``log Q`` does not exceed the SEAL-validated bound for the
@@ -18,7 +20,8 @@ library promises to enforce at runtime:
 A ``CKKSParams`` is a frozen, hashable record. Pass one to
 :func:`regaudit_fhe.fhe.build_d6_context_from_params` to obtain a
 working CKKS context whose hash matches the envelope's
-``parameter_set_hash``.
+``parameter_set_hash``. Signing it (``to_envelope_parameter_set``) builds a
+real context and reads the ring dimension and chain back from it.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
