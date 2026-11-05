@@ -25,9 +25,36 @@
       <p>Contact your administrator or follow the installation instructions. No uploaded report has been accepted or verified.</p>
     </section>
 
+    <section id="welcome" class="panel" hidden>
+      <h2>What would you like to do?</h2>
+      <div class="choices">
+        <button id="choose-samples" type="button" class="choice">
+          <strong>Try a sample report</strong>
+          <span>See how a result looks, using made-up demonstration reports. Nothing needs to be set up.</span>
+        </button>
+        <button id="choose-own" type="button" class="choice">
+          <strong>Verify your own report</strong>
+          <span>Check a signed report against your organization's trust rules.</span>
+        </button>
+        <a id="choose-setup" href="/setup" class="choice">
+          <strong>Administrator setup</strong>
+          <span>Instructions, and a read-only look at what is set up, for the person who sets up trust.</span>
+        </a>
+      </div>
+    </section>
+
+    <section id="samples" class="panel" hidden>
+      <h2>Try a sample report</h2>
+      <p class="notice-line">These are synthetic demonstration reports, made with made-up data. They are checked against a demonstration trust list, not against anyone's real trust rules. Nothing is uploaded: pick one from the list.</p>
+      <ul id="sample-list" class="sample-list"></ul>
+      <button type="button" class="back quiet">Back to the start</button>
+    </section>
+
     <section id="not-ready" class="panel notice" hidden>
-      <h2>Not ready</h2>
+      <h2>Your own reports</h2>
       <p id="not-ready-message"></p>
+      <p><a href="/setup">Administrator setup</a></p>
+      <button type="button" class="back quiet">Back to the start</button>
     </section>
 
     <section id="upload" class="panel" hidden>
@@ -39,6 +66,7 @@
       <p id="record-notice" class="notice-line" hidden>Checking records this report as used. A second check of the same report is refused as a repeat.</p>
       <button id="verify" type="button" disabled>Verify report</button>
       <p class="fine">The report is checked and not kept. It stays on this computer.</p>
+      <button type="button" class="back quiet">Back to the start</button>
     </section>
 
     <section id="failure" class="panel notice" role="alert" hidden>
@@ -48,6 +76,7 @@
 
     <section id="result" class="panel" aria-live="polite" hidden>
       <h2><span class="step">2</span> Result</h2>
+      <p id="demo-banner" class="demo-banner" role="note" hidden></p>
       <p id="result-file" class="fine"></p>
       <p id="verdict" class="verdict"></p>
       <p id="verdict-meaning"></p>

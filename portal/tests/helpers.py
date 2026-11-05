@@ -24,7 +24,7 @@ PORT = 8765
 JSON_HEADERS = {"content-type": "application/json"}
 
 
-def client_for(config: Path, port: int = PORT) -> TestClient:
+def client_for(config: Path | None, port: int = PORT) -> TestClient:
     return TestClient(build_app(config, port=port), base_url=f"http://127.0.0.1:{port}")
 
 
@@ -115,3 +115,33 @@ def signed_report(
 
 def post_bytes(client: TestClient, content: bytes):
     return client.post("/api/verify", content=content, headers=JSON_HEADERS)
+
+
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty home folder for this test, so nothing real is read, and what is created there can be seen."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def snapshot(root: Path) -> dict[str, tuple]:
+    """Everything under ``root``, with enough about each entry to notice any change: kind, size, mode and times."""
+    found: dict[str, tuple] = {}
+    for path in sorted([root, *root.rglob("*")]):
+        info = path.lstat()
+        kind = "link" if path.is_symlink() else "dir" if path.is_dir() else "file"
+        found[str(path.relative_to(root))] = (kind, info.st_size, info.st_mode, info.st_mtime_ns)
+    return found
+
+
+def install_configuration(demo: Path, folder: Path, *, mode: int = 0o700) -> Path:
+    """Put a demonstration's configuration and trust list into ``folder``, the way an administrator would."""
+    import shutil
+
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(folder, mode)
+    for name in ("portal-config.json", "trust-store.json"):
+        shutil.copy(demo / name, folder / name)
+        os.chmod(folder / name, 0o600)
+    return folder / "portal-config.json"

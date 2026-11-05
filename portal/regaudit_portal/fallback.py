@@ -61,8 +61,10 @@ _HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
-# Paths that would verify or export. Any method on them gets the same refusal, and no body is read.
+# Paths that would verify or export, a bundled sample included. Any method on them gets the same refusal, and no body
+# is read.
 _REFUSED_PATHS = frozenset({"/api/verify", "/api/export"})
+_REFUSED_PREFIX = "/api/samples/"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -114,7 +116,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(400)
         elif not self._allowed_host():
             self._send(403, _BAD_HOST, "application/json", head=head)
-        elif path in _REFUSED_PATHS:
+        elif path in _REFUSED_PATHS or path.startswith(_REFUSED_PREFIX):
             self._send(503, _UNAVAILABLE, "application/json", head=head)
         elif path in ("/", "/api/status"):
             if method not in ("GET", "HEAD"):

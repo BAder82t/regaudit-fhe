@@ -35,11 +35,22 @@ _PROFILES = ("confidential", "high-assurance", "development")
 
 
 class ConfigProblem(Exception):
-    """The portal must not give verdicts until the administrator fixes this."""
+    """The portal must not give verdicts until the administrator fixes this.
+
+    ``kind`` says what sort of trouble it is, for the read-only setup page: ``missing`` (a file is not there),
+    ``unsafe`` (who owns it or who can change it is wrong) or ``invalid`` (what it says is wrong).
+    """
+
+    def __init__(self, message: str, kind: str = "invalid") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 class EngineProblem(ConfigProblem):
     """The installed engine is not the recognised release. The text is for the administrator's terminal only."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, "engine")
 
 
 @dataclass(frozen=True)
@@ -51,28 +62,47 @@ class Portal:
     engine: dict[str, Any]
 
 
-def _directory_problem(directory: Path, what: str) -> str | None:
+@dataclass(frozen=True)
+class Settings:
+    """What the configuration file says, once it has been read and found sound. Nothing here touches a trust list."""
+
+    path: Path
+    profile: str
+    verifier_id: str
+    max_age_days: int
+    replay_mode: str
+    allow_self_signed: bool
+    store_path: Path
+    replay_path: Path
+
+
+def _directory_problem(directory: Path, what: str) -> ConfigProblem | None:
     """The administrator's files must be theirs, and no other account may be able to change them."""
     if os.name != "posix" or not hasattr(os, "geteuid"):
-        return f"{what}: this platform cannot establish who can change the file"
+        return ConfigProblem(
+            f"{what}: this platform cannot establish who can change the file", "unsafe"
+        )
     return _item_problem(directory, stat.S_ISDIR, "directory", what)
 
 
-def _item_problem(path: Path, right_type: Any, kind: str, what: str) -> str | None:
+def _item_problem(path: Path, right_type: Any, kind: str, what: str) -> ConfigProblem | None:
     try:
         info = os.lstat(path)
     except OSError as exc:
-        return f"{what}: cannot read {path}: {exc.strerror}"
+        missing = isinstance(exc, FileNotFoundError)
+        return ConfigProblem(
+            f"{what}: cannot read {path}: {exc.strerror}", "missing" if missing else "unsafe"
+        )
     if not right_type(info.st_mode):
-        return f"{what}: {path} is not a {kind}"
+        return ConfigProblem(f"{what}: {path} is not a {kind}", "unsafe")
     if info.st_uid not in (os.geteuid(), 0):
-        return f"{what}: {path} belongs to another account"
+        return ConfigProblem(f"{what}: {path} belongs to another account", "unsafe")
     if stat.S_IMODE(info.st_mode) & 0o022:
-        return f"{what}: {path} can be changed by group or others"
+        return ConfigProblem(f"{what}: {path} can be changed by group or others", "unsafe")
     return None
 
 
-def _owned_and_private_problem(path: Path, what: str) -> str | None:
+def _owned_and_private_problem(path: Path, what: str) -> ConfigProblem | None:
     return _directory_problem(path.parent, what) or _item_problem(
         path, stat.S_ISREG, "regular file", what
     )
@@ -100,21 +130,15 @@ def _create_replay_file(path: Path) -> None:
     except FileExistsError:
         return
     except OSError as exc:
-        raise ConfigProblem(f"replay_db: cannot create {path}: {exc.strerror}") from exc
+        raise ConfigProblem(f"replay_db: cannot create {path}: {exc.strerror}", "unsafe") from exc
 
 
-def load_portal(config_path: str | Path) -> Portal:
-    """Everything is checked before anything is accepted. Any doubt raises :class:`ConfigProblem`."""
-    identity = check_engine()
-    if not identity.ok or identity.engine is None:
-        raise EngineProblem(
-            f"engine: {identity.reason}: {identity.detail}. Reinstall with: {REINSTALL}"
-        )
-    engine = identity.engine
+def read_settings(config_path: str | Path) -> Settings:
+    """Read and check the configuration file. Read-only: it creates nothing and changes nothing."""
     path = Path(config_path).absolute()
     problem = _owned_and_private_problem(path, "configuration")
     if problem is not None:
-        raise ConfigProblem(problem)
+        raise problem
     try:
         raw = loads_strict(path.read_bytes(), max_bytes=MAX_CONFIG_BYTES)
     except (OSError, CanonicalError, RecursionError, UnicodeDecodeError) as exc:
@@ -139,13 +163,20 @@ def load_portal(config_path: str | Path) -> Portal:
     if replay_mode not in ("check", "record"):
         raise ConfigProblem("replay_mode must be 'check' or 'record'")
     allow_self_signed = _member(raw, "allow_self_signed", bool, False)
-
     store_path = path.parent / _member(raw, "trust_store", str)
-    problem = _owned_and_private_problem(store_path, "trust_store")
+    replay_path = path.parent / _member(raw, "replay_db", str, "replay.db")
+    return Settings(
+        path, profile, verifier_id, days, replay_mode, allow_self_signed, store_path, replay_path
+    )
+
+
+def read_trust_store(settings: Settings) -> TrustStore:
+    """Read and check the trust list the configuration names. Read-only."""
+    problem = _owned_and_private_problem(settings.store_path, "trust_store")
     if problem is not None:
-        raise ConfigProblem(problem)
+        raise problem
     try:
-        store = TrustStore.from_json(store_path)
+        store = TrustStore.from_json(settings.store_path)
     except TrustStoreError as exc:
         raise ConfigProblem(f"trust_store: {exc}") from exc
     if not store.keys or set(store.keys) != set(store.entries):
@@ -153,27 +184,51 @@ def load_portal(config_path: str | Path) -> Portal:
             "trust_store: it must use the 'entries' form, which states the issuer of each key. "
             "Build it with 'regaudit-fhe trust add'"
         )
+    return store
 
-    replay_path = path.parent / _member(raw, "replay_db", str, "replay.db")
-    problem = _directory_problem(replay_path.parent, "replay_db")
+
+def check_replay_location(settings: Settings) -> ConfigProblem | None:
+    """Is the replay file's folder, and the file if it is already there, the administrator's own? Read-only.
+
+    A file that is not there yet is not a problem: it is created, private, when the portal starts.
+    """
+    problem = _directory_problem(settings.replay_path.parent, "replay_db")
     if problem is not None:
-        raise ConfigProblem(problem)
-    _create_replay_file(replay_path)
-    problem = _owned_and_private_problem(replay_path, "replay_db")
+        return problem
+    if os.path.lexists(settings.replay_path):
+        return _owned_and_private_problem(settings.replay_path, "replay_db")
+    return None
+
+
+def load_portal(config_path: str | Path) -> Portal:
+    """Everything is checked before anything is accepted. Any doubt raises :class:`ConfigProblem`."""
+    identity = check_engine()
+    if not identity.ok or identity.engine is None:
+        raise EngineProblem(
+            f"engine: {identity.reason}: {identity.detail}. Reinstall with: {REINSTALL}"
+        )
+    engine = identity.engine
+    settings = read_settings(config_path)
+    store = read_trust_store(settings)
+    problem = _directory_problem(settings.replay_path.parent, "replay_db")
     if problem is not None:
-        raise ConfigProblem(problem)
+        raise problem
+    _create_replay_file(settings.replay_path)
+    problem = _owned_and_private_problem(settings.replay_path, "replay_db")
+    if problem is not None:
+        raise problem
     try:
-        cache = SqliteReplayCache(replay_path)
+        cache = SqliteReplayCache(settings.replay_path)
         policy = VerificationPolicy(
-            profile=profile,
+            profile=settings.profile,
             trust_store=store,
-            allow_self_signed=allow_self_signed,
-            verifier_id=verifier_id,
-            max_age=timedelta(days=days),
+            allow_self_signed=settings.allow_self_signed,
+            verifier_id=settings.verifier_id,
+            max_age=timedelta(days=settings.max_age_days),
             replay_cache=cache,
-            replay_mode=replay_mode,
+            replay_mode=settings.replay_mode,
             check_provenance=True,
         )
     except (ReplayStateError, PolicyError) as exc:
         raise ConfigProblem(f"policy: {exc}") from exc
-    return Portal(policy, profile, replay_mode, len(store.keys), engine)
+    return Portal(policy, settings.profile, settings.replay_mode, len(store.keys), engine)
