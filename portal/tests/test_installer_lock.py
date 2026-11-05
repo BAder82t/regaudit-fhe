@@ -44,3 +44,8 @@ def test_the_build_script_refuses_what_the_portal_would_refuse():
     text = (HERE / "build_app.py").read_text()
     assert "--require-hashes" in text and "--only-binary=:all:" in text and "--no-deps" in text
     assert "check_engine" in text and "not the recognised release" in text
+
+
+def test_the_build_ships_no_compiled_files_for_the_installed_packages():
+    text = (HERE / "build_app.py").read_text()
+    assert "--no-compile" in text and '"__pycache__"' in text

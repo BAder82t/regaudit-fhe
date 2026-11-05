@@ -165,7 +165,7 @@ def main(app_path: str) -> int:
     work, home, tmp, env = fresh("portal-smoke-config-")
     demo = work / "demo"
     r = subprocess.run(
-        [str(py), "-I", "-m", "regaudit_portal", "demo-setup", str(demo)],
+        [str(py), "-I", "-B", "-m", "regaudit_portal", "demo-setup", str(demo)],
         env=env,
         capture_output=True,
         text=True,
@@ -189,6 +189,20 @@ def main(app_path: str) -> int:
             str((result.get("verification") or {}).get("trust_status")),
         )
     stop(p, port, tmp)
+    sealed = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True
+    )
+    check(
+        "the bundle's signature still verifies after running it",
+        sealed.returncode == 0,
+        sealed.stderr.strip()[-100:],
+    )
+    stray = [
+        str(x)
+        for x in (app / "Contents" / "Resources" / "python" / "lib").rglob("__pycache__")
+        if "site-packages" in str(x)
+    ]
+    check("running added no bytecode folder inside the bundle", stray == [], str(stray[:2]))
     print("RESULT", "PASS" if OK else "FAIL")
     return 0 if OK else 1
 

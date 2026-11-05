@@ -109,7 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: python)
         // -I: ignore PYTHON* variables and the user site, and do not put the working directory on the path.
-        p.arguments = ["-I", "-m", "regaudit_portal", "serve", "--port", String(port)] + options.extra
+        // -B: write no bytecode. The portal compiles its own package before it redirects the bytecode cache, and
+        // anything written inside the bundle would break its signature.
+        p.arguments = ["-I", "-B", "-m", "regaudit_portal", "serve", "--port", String(port)] + options.extra
         let env = ProcessInfo.processInfo.environment
         var childEnv: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": env["LANG"] ?? "en_US.UTF-8"]
         for key in ["HOME", "USER", "TMPDIR"] { if let v = env[key] { childEnv[key] = v } }

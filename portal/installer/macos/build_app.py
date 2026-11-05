@@ -133,6 +133,7 @@ def main() -> int:
             "--require-hashes",
             "--only-binary=:all:",
             "--no-cache-dir",
+            "--no-compile",
             "--disable-pip-version-check",
             "-r",
             str(HERE / "requirements.lock"),
@@ -143,6 +144,12 @@ def main() -> int:
     ):  # scripts pip wrote carry the build path
         if p.name not in before:
             p.unlink()
+    # The portal never loads bytecode from inside the bundle (it points Python's cache at a private folder), and
+    # compiled files record the build machine's paths, so none are shipped for the installed packages.
+    for cache in list(
+        next((resources / "python" / "lib").glob("python3*/site-packages")).rglob("__pycache__")
+    ):
+        shutil.rmtree(cache)
 
     # 3. The portal's own source (pure Python), file by file so every file can be listed
     site = next((resources / "python" / "lib").glob("python3*/site-packages"))
@@ -157,7 +164,9 @@ def main() -> int:
         "import json,regaudit_portal.engine as e; i=e.check_engine(); "
         "print(json.dumps({'ok':i.ok,'reason':i.reason,'engine':i.engine}))"
     )
-    res = subprocess.run([str(py), "-I", "-c", probe], capture_output=True, text=True, cwd="/")
+    res = subprocess.run(
+        [str(py), "-I", "-B", "-c", probe], capture_output=True, text=True, cwd="/"
+    )
     print(res.stdout.strip(), res.stderr.strip()[-300:])
     identity = json.loads(res.stdout.strip().splitlines()[-1]) if res.stdout.strip() else {}
     if not identity.get("ok"):
