@@ -1,0 +1,9 @@
+{
+  "name": "cpython-3.12.16+20261026-aarch64-apple-darwin-install_only.tar.gz",
+  "python": "3.12.16",
+  "release": "python-build-standalone 20261026",
+  "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-apple-darwin-install_only.tar.gz",
+  "sha256": "fbf4afef53c2a6b72bb741bc06d5671a9dfaf87bd84e5aa73ac9b3d0d589f14e",
+  "sums_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/SHA256SUMS",
+  "minimum_macos": "14.0"
+}

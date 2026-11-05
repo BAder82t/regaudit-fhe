@@ -1,0 +1,39 @@
+# macOS application (local evaluation build)
+
+This builds the Evidence Verification Portal as a double-clickable macOS application for Apple silicon Macs running macOS 14 or newer. Opening it starts the portal on this computer only, opens the default browser at it, and stops the portal when the application quits. A person using it needs no Python installation and no terminal.
+
+It is a **local evaluation build**. It is signed ad hoc, which is enough to run on the Mac that built it. It is not signed with a Developer ID certificate and not notarized, so macOS will warn about it on any other computer. It is not for public distribution.
+
+## What is inside
+
+Everything the application runs is inside the bundle:
+
+- A relocatable CPython 3.12 (`runtime.json` pins the build and its SHA-256, which is also checked against the release's own `SHA256SUMS`).
+- The exact wheels in `requirements.lock`, installed with `--no-deps --require-hashes --only-binary=:all:`, so nothing outside that list can be installed. They include the published regaudit-fhe 0.2.1 verification engine, installed the ordinary way as source files.
+- The portal's own source.
+- A small native launcher (`launcher/main.swift`). It picks a free port, starts the bundled Python with `-I` (no user site, no `PYTHON*` variables), waits until the portal answers, opens the browser, and stops the portal when the application quits or receives SIGTERM, SIGINT or SIGHUP. It has no window, reads and writes no reports, keys or settings, and keeps no log.
+- `Contents/Resources/BUILD_MANIFEST.json`: the portal commit and tree, the engine identity, the runtime and lock hashes, the launcher hash, the build time and the signing status.
+
+The portal's own engine check is unchanged and runs inside the bundle. The build refuses to finish unless that check passes there. A packaged engine that is modified, missing or not exactly the published 0.2.1 gives the "Verification unavailable" page, as it does in a normal install. Nothing in the launcher can override that.
+
+## Build
+
+On an Apple silicon Mac with Xcode or the command line tools (for `swiftc`), `codesign` and `hdiutil`, and network access while building:
+
+    python3 build_app.py --out /path/to/empty/folder
+
+It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS` and `BUILD_MANIFEST.json`. Add `--no-dmg` to skip the disk image. Then check the result without a browser:
+
+    python3 smoke_test.py "/path/to/Evidence Verification Portal.app"
+
+## Updating the pinned wheels
+
+Resolve with the bundled runtime's pip (`pip install --dry-run --ignore-installed --only-binary=:all: --report report.json 'regaudit-fhe[server]==0.2.1'`), write each name, version and `sha256` into `requirements.lock`, and review the diff. The engine line must stay at 0.2.1.
+
+## Limits
+
+- Apple silicon only, and macOS 14 or newer (the pinned numpy wheel needs it). No Intel build, no Linux, no Windows.
+- No Developer ID signature and no notarization. Both are needed before the application can go to anyone else, and the hardened runtime then needs the library-validation entitlement for the bundled compiled libraries.
+- If the launcher is killed with SIGKILL it cannot stop the portal, which keeps running until it is stopped.
+- A launcher that opens a browser is still a local web page. Another account on the same Mac can reach it on `127.0.0.1`.
+- The application has no update mechanism. A new version is a new download.
