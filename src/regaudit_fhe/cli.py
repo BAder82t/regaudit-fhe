@@ -23,7 +23,8 @@ import os
 import stat
 import sys
 import tempfile
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,12 +42,29 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
+from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, status_rows
+from ._trust_lifecycle import migrate as migrate_store_file
+from ._trust_lifecycle import retire as retire_key
+from ._trust_lifecycle import revoke as revoke_key
+from ._verification_response import response_v2
 from .canonical import MAX_INPUT_BYTES, CanonicalError, loads_strict
-from .replay import ReplayStateError, SqliteReplayCache
+from .replay import (
+    ReplayMigrationRefused,
+    ReplayStateError,
+    SqliteReplayCache,
+    migrate_replay_file,
+    replay_file_status,
+)
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, envelope_v2, parse_envelope_strict
 from .reports import AuditEnvelope, Signer, commitments_for, envelope
 from .schemas import SchemaError, list_schemas, load_schema, validate_input
-from .trust import TrustStore, TrustStoreError
+from .trust import (
+    TrustStore,
+    TrustStoreError,
+    store_file_problem,
+    store_location_problem,
+    store_storage_problem,
+)
 from .verification import (
     PROFILES,
     PolicyError,
@@ -386,6 +404,30 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
     if not args.key_id or len(args.key_id) > 256 or not args.issuer or len(args.issuer) > 256:
         sys.stderr.write("--key-id and --issuer must be 1..256 characters\n")
         return 2
+    if args.revocation_pins:
+        from ._revocation_cli import refuses_trust_add
+        from ._revocation_state import PinStoreError
+
+        try:
+            why = refuses_trust_add(args.revocation_pins, actual)
+        except PinStoreError as exc:
+            sys.stderr.write(f"--revocation-pins: {exc}\n")
+            return 3
+        if why:
+            sys.stderr.write(
+                f"refused, nothing enrolled: {why}; a report key must be another key\n"
+            )
+            return 2
+    problem = store_file_problem(args.store) or store_location_problem(args.store)
+    if problem is not None:
+        sys.stderr.write(
+            f"refused, nothing written: another account could have changed {args.store!r}: {problem}. "
+            "Fix that and check what the store holds first, because adding a key would make it look reviewed.\n"
+        )
+        return 3
+    problem = store_storage_problem(args.store)
+    if problem is not None:  # a platform that cannot establish this
+        sys.stderr.write(f"warning: strict profiles refuse this store: {problem}\n")
     try:
         payload = _load_store_payload(args.store)
     except (TrustStoreError, CanonicalError, OSError, RecursionError) as exc:
@@ -419,7 +461,7 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload, indent=2) + "\n")
-            os.chmod(tmp, 0o644)
+            os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)
             os.replace(tmp, store_path)
         except BaseException:
             with contextlib.suppress(OSError):
@@ -433,6 +475,8 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
             {
                 "enrolled": args.key_id,
                 "issuer": args.issuer,
+                "issuer_binding": "store_entry",
+                "authenticated_binding": False,
                 "fingerprint_sha256": actual,
                 "store": args.store,
                 "entries": len(entries),
@@ -449,6 +493,10 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     except TrustStoreError as exc:
         sys.stderr.write(f"--store: {exc}\n")
         return 3
+    if store.storage_problem is not None:
+        sys.stderr.write(
+            f"warning: another account could change this store: {store.storage_problem}\n"
+        )
     rows = []
     for key_id, pem in sorted(store.keys.items()):
         entry = store.entry(key_id)
@@ -458,9 +506,129 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
                 "issuer": entry.issuer if entry else None,
                 "status": entry.status if entry else None,
                 "fingerprint_sha256": spki_fingerprint(pem),
+                **(
+                    {"issuer_source": "operator-declared"}
+                    if key_id in store.issuer_declared
+                    else {}
+                ),
             }
         )
     print(json.dumps(rows, indent=2))
+    return 0
+
+
+def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> int:
+    """Run one lifecycle action. Exit 0 done | 2 refused | 3 store unusable."""
+    try:
+        print(json.dumps(action(), indent=2))
+        if edits:
+            sys.stderr.write(LOCAL_NOTICE + "\n")
+    except LifecycleRefused as exc:
+        sys.stderr.write(f"refused, nothing written: {exc}\n")
+        return 2
+    except TrustStoreError as exc:
+        sys.stderr.write(f"--store: {exc}\n")
+        return 3
+    except OSError as exc:
+        sys.stderr.write(f"cannot write the trust store: {exc}\n")
+        return 3
+    return 0
+
+
+def _cmd_trust_status(args: argparse.Namespace) -> int:
+    return _lifecycle(lambda: status_rows(args.store, args.key_id))
+
+
+def _cmd_trust_retire(args: argparse.Namespace) -> int:
+    return _lifecycle(
+        lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc)),
+        edits=True,
+    )
+
+
+def _cmd_trust_revoke(args: argparse.Namespace) -> int:
+    return _lifecycle(
+        lambda: revoke_key(
+            args.store,
+            args.key_id,
+            compromised_from=args.compromised_from,
+            now=datetime.now(timezone.utc),
+        ),
+        edits=True,
+    )
+
+
+def _cmd_trust_migrate(args: argparse.Namespace) -> int:
+    """Write an entries store from a legacy one. Exit 0 written or dry run | 2 refused | 3 source unusable."""
+    issuers: dict[str, str] = {}
+    for item in args.issuer or []:
+        key_id, _, issuer = item.partition("=")
+        if not key_id or not issuer or key_id in issuers:
+            sys.stderr.write(f"--issuer must be KEY_ID=ISSUER, once per key: {item!r}\n")
+            return 2
+        issuers[key_id] = issuer
+    try:
+        print(
+            json.dumps(
+                migrate_store_file(
+                    args.source,
+                    args.target,
+                    issuers,
+                    now=datetime.now(timezone.utc),
+                    dry_run=args.dry_run,
+                ),
+                indent=2,
+            )
+        )
+    except MigrationRefused as exc:
+        sys.stderr.write(f"refused, nothing written: {exc}\n")
+        return 2
+    except (TrustStoreError, OSError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    return 0
+
+
+def _seconds(value: float | None, flag: str) -> timedelta | None:
+    if value is None:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        raise ReplayMigrationRefused(f"{flag} must be positive and finite")
+    try:
+        return timedelta(seconds=value)
+    except OverflowError as exc:
+        raise ReplayMigrationRefused(f"{flag} is out of range") from exc
+
+
+def _cmd_replay_migrate(args: argparse.Namespace) -> int:
+    """Exit 0 migrated | 2 refused, the file is as it was | 3 the file could not be used."""
+    try:
+        history = _seconds(
+            args.previous_trust_history_max_age_seconds, "--previous-trust-history-max-age-seconds"
+        )
+        report = migrate_replay_file(
+            args.db,
+            now=datetime.now(timezone.utc),
+            previous_max_age=_seconds(args.previous_max_age_seconds, "--previous-max-age-seconds"),
+            previous_policy_unknown=args.previous_policy_unknown,
+            previous_trust_history_max_age=history,
+        )
+    except ReplayMigrationRefused as exc:
+        sys.stderr.write(f"refused, the file is as it was: {exc}\n")
+        return 2
+    except ReplayStateError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def _cmd_replay_status(args: argparse.Namespace) -> int:
+    try:
+        print(json.dumps(replay_file_status(args.db), indent=2))
+    except ReplayStateError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 3
     return 0
 
 
@@ -511,6 +679,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except (TrustStoreError, RuntimeError) as exc:
         sys.stderr.write(f"refusing to start: {exc}\n")
         return 2
+    if config.trust_store is not None and config.trust_store.storage_problem is not None:
+        # Only a development policy gets here: the others refuse this store above.
+        sys.stderr.write(
+            "warning: another account could change which keys this server trusts: "
+            f"{config.trust_store.storage_problem}\n"
+        )
     try:
         assert_safe_bind(
             args.host, dev_mode=config.dev_mode, allow_self_signed=config.allow_self_signed
@@ -568,6 +742,10 @@ def _refusal_hint(trust_status: str, reason: str | None) -> str:
     )
 
 
+def _versioned_payload(result: Any, decision: Any) -> dict[str, Any]:
+    return response_v2(result.to_dict(), None if decision is None else decision.revocation)
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Exit 0 only if the report is accepted under the selected policy.
 
@@ -589,10 +767,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     trust_store: TrustStore | None = None
     if args.trusted_keys is not None:  # supplied (even if empty) => it must be usable
         try:
-            trust_store = TrustStore.from_json(args.trusted_keys.strip())
+            trust_store = TrustStore.from_json(
+                args.trusted_keys.strip(), private_storage=args.profile != "development"
+            )
         except TrustStoreError as exc:
             sys.stderr.write(f"--trusted-keys: {exc}\n")
             return 3
+        if trust_store.storage_problem is not None:  # only a development policy gets here
+            sys.stderr.write(
+                f"warning: another account could change which keys --trusted-keys trusts: {trust_store.storage_problem}\n"
+            )
     if trust_store is None and not args.allow_self_signed:
         sys.stderr.write(
             "no trust material: pass --trusted-keys to authenticate the issuer, or "
@@ -607,7 +791,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             sys.stderr.write("--replay-mode requires --replay-db\n")
             return 2
         try:
-            replay_cache = SqliteReplayCache(args.replay_db)
+            replay_cache = SqliteReplayCache(
+                args.replay_db, private_storage=args.profile != "development"
+            )
         except ReplayStateError as exc:
             sys.stderr.write(f"--replay-db: {exc}\n")
             return 3
@@ -629,18 +815,62 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # configuration error (2), not a failure of verification infrastructure.
         sys.stderr.write(f"invalid configuration: {exc}\n")
         return 2
+    if trust_store is not None and not trust_store.binds_issuers:
+        # Only a development policy gets here: the others refuse this store above.
+        sys.stderr.write(
+            "warning: --trusted-keys states no issuer for its keys, so nothing compared the report's issuer name with "
+            "the one enrolled for its key. To use a store under a strict profile, build one with 'regaudit-fhe trust add': "
+            "see docs/MIGRATION_0.3.md.\n"
+        )
+    if trust_store is not None and trust_store.issuer_declared:
+        sys.stderr.write(
+            "note: this store's issuers were stated by a local operator with 'trust migrate'. The report's issuer name was "
+            "compared with that statement, which is not an authenticated binding. confidential, high-assurance and "
+            "secure-v1 refuse this store.\n"
+        )
+    decision = None
     try:
-        result = verify(env, policy)
+        if args.revocation_mode == "off":
+            result = verify(env, policy)
+        else:
+            # The default path above calls the engine directly and touches no revocation state.
+            from ._revocation_cli import build_context
+            from ._revocation_gate import verify_with_revocation
+            from ._revocation_state import PinStoreError
+
+            try:
+                decision = verify_with_revocation(env, policy, build_context(args))
+            except PinStoreError as exc:
+                sys.stderr.write(f"--revocation-pins: {exc}\n")
+                return 3
+            result = decision.result
+    except PolicyError as exc:
+        sys.stderr.write(f"invalid configuration: {exc}\n")
+        return 2
     except VerificationUnavailable as exc:
         sys.stderr.write(f"verification not possible: {exc}\n")
         return 3
 
+    versioned = (
+        args.response_format == "v2" or args.policy_evidence or args.revocation_mode != "off"
+    )
+    down: list[str] = []
     if "REPLAY_STATE_UNAVAILABLE" in result.blocking_reasons:
         # The replay store could not be used while verifying. That is an
         # infrastructure failure, not a verdict on the report (exit 3, not 1).
-        sys.stderr.write("verification not possible: the replay store was unavailable\n")
+        down.append("the replay store was unavailable")
+    if args.revocation_mode != "off":
+        from ._revocation_gate import INFRASTRUCTURE_CODES
+
+        down.extend(sorted(INFRASTRUCTURE_CODES.intersection(result.blocking_reasons)))
+    if down:
+        sys.stderr.write(f"verification not possible: {down[0]}\n")
+        if (
+            versioned
+        ):  # an opted-in client still sees the status; the exit code says no verdict was possible
+            print(json.dumps(_versioned_payload(result, decision), indent=2))
         return 3
-    payload = result.to_dict()
+    payload = _versioned_payload(result, decision) if versioned else result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
     if not result.accepted:
         payload["reason"] = (
@@ -653,6 +883,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from ._revocation_cli import add_parsers as add_revocation_parsers
+    from ._revocation_cli import add_verify_options as add_revocation_verify_options
+
     p = argparse.ArgumentParser(
         prog="regaudit-fhe",
         description="Encrypted regulatory audit primitives at CKKS depth six.",
@@ -709,10 +942,61 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expected SHA-256 fingerprint of the key, received out of band. Enrolment is "
         "refused if the file does not match.",
     )
+    t_add.add_argument(
+        "--revocation-pins",
+        help="EXPERIMENTAL. Pinned-authority file: refuse a key enrolled there as an authority or anchor.",
+    )
     t_add.set_defaults(func=_cmd_trust_add)
     t_list = trust_sub.add_parser("list", help="List the enrolled keys and their fingerprints.")
     t_list.add_argument("--store", required=True)
     t_list.set_defaults(func=_cmd_trust_list)
+    t_status = trust_sub.add_parser(
+        "status",
+        help="Read-only lifecycle view of a local trust store (unauthenticated file).",
+    )
+    t_status.add_argument("--store", required=True)
+    t_status.add_argument("--key-id", help="Show only this key_id.")
+    t_status.set_defaults(func=_cmd_trust_status)
+    t_retire = trust_sub.add_parser(
+        "retire",
+        description="LOCAL VERIFIER POLICY CHANGE: edits only this verifier's trust-store file; not "
+        "evidence of issuer-authorised revocation; not distributed; reversible by anyone who can "
+        "write the file.",
+        help="LOCAL VERIFIER POLICY CHANGE: mark an active key retired in this trust-store file "
+        "(planned rotation). One-way; not evidence of issuer-authorised revocation.",
+    )
+    t_retire.add_argument("--store", required=True)
+    t_retire.add_argument("--key-id", required=True)
+    t_retire.add_argument(
+        "--at", help="RFC 3339 retirement time (default: now; not in the future)."
+    )
+    t_retire.set_defaults(func=_cmd_trust_retire)
+    t_revoke = trust_sub.add_parser(
+        "revoke",
+        description="LOCAL VERIFIER POLICY CHANGE: edits only this verifier's trust-store file; not "
+        "evidence of issuer-authorised revocation; not distributed; reversible by anyone who can "
+        "write the file.",
+        help="LOCAL VERIFIER POLICY CHANGE: mark a key compromised in this trust-store file. "
+        "One-way; not evidence of issuer-authorised revocation. Without --compromised-from the "
+        "boundary is unknown and everything the key signed is refused.",
+    )
+    t_revoke.add_argument("--store", required=True)
+    t_revoke.add_argument("--key-id", required=True)
+    t_revoke.add_argument("--compromised-from", help="RFC 3339 earliest possible exposure time.")
+    t_revoke.set_defaults(func=_cmd_trust_revoke)
+    t_migrate = trust_sub.add_parser(
+        "migrate",
+        help="Write a new entries store from a bare or legacy one, for development and the lenient paths: its issuers "
+        "are your statement, and confidential, high-assurance and secure-v1 refuse it. The source is left unchanged; "
+        "a legacy revoked key becomes compromised with an unknown boundary.",
+    )
+    t_migrate.add_argument("--source", required=True)
+    t_migrate.add_argument("--target", required=True, help="Must not exist.")
+    t_migrate.add_argument(
+        "--issuer", action="append", help="KEY_ID=ISSUER for every key; never inferred."
+    )
+    t_migrate.add_argument("--dry-run", action="store_true")
+    t_migrate.set_defaults(func=_cmd_trust_migrate)
 
     verify_p = sub.add_parser(
         "verify",
@@ -730,7 +1014,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--strict",
         action="store_true",
-        help="Kept for compatibility: trust material is always required (see "
+        help="Has no effect and selects no assurance profile: use --profile. Kept for "
+        "compatibility; trust material is required with or without it (see "
         "--allow-self-signed for the development-only alternative).",
     )
     verify_p.add_argument(
@@ -758,7 +1043,38 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--refuse-legacy-v1", action="store_true", help="Refuse report.v1 envelopes."
     )
+    add_revocation_verify_options(verify_p)
     verify_p.set_defaults(func=_cmd_verify)
+    add_revocation_parsers(sub)
+    replay = sub.add_parser("replay", help="Inspect or migrate a replay store file.")
+    replay_sub = replay.add_subparsers(dest="replay_command", required=True)
+    r_status = replay_sub.add_parser("status", help="Read-only description of a replay file.")
+    r_status.add_argument("--db", required=True)
+    r_status.set_defaults(func=_cmd_replay_status)
+    r_migrate = replay_sub.add_parser(
+        "migrate",
+        help="Build a clean current file from a file written by a published version, and swap it in. Stop every "
+        "verifier first. The original is kept as FILE.pre-migration. Anything but the exact published shape is "
+        "refused. Its policy was never recorded, so you state it.",
+    )
+    r_migrate.add_argument("--db", required=True)
+    r_migrate.add_argument(
+        "--previous-max-age-seconds",
+        type=float,
+        help="The largest max_age this file ever served: your statement, which becomes the floor.",
+    )
+    r_migrate.add_argument(
+        "--previous-policy-unknown",
+        action="store_true",
+        help="You do not know. Every report issued up to now is then refused (REPLAY_HISTORY_UNKNOWN).",
+    )
+    r_migrate.add_argument(
+        "--previous-trust-history-max-age-seconds",
+        type=float,
+        help="The largest trust_history_max_age this file ever served, at most 86400: your statement. Without it, "
+        "a trust history as of the migration or earlier is not fresh.",
+    )
+    r_migrate.set_defaults(func=_cmd_replay_migrate)
 
     serve = sub.add_parser("serve", help="Run the HTTP audit server (requires [server]).")
     serve.add_argument("--host", default="127.0.0.1")

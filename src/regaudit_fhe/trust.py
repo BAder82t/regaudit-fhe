@@ -14,6 +14,10 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import errno
+import os
+import stat
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +26,13 @@ from types import MappingProxyType
 from typing import Any
 
 from ._keys import spki_fingerprint
+from ._storage_policy import (
+    acl_problem,
+    file_problem,
+    platform_problem,
+    resolve_directory,
+    resolve_file,
+)
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 
@@ -83,6 +94,10 @@ def _normalise_pem(pem: str) -> str:
 
 
 MAX_TRUST_STORE_BYTES = 4 * 1024 * 1024
+# Written by a pre-release candidate beside a migrated store. The record is in the store now: see _refuse_old_record.
+ISSUER_PROVENANCE_SUFFIX = ".issuer-provenance.json"
+# An entry's issuer was stated by a local operator with ``trust migrate``. Not an authenticated enrollment.
+OPERATOR_DECLARED = "operator-declared"
 _STATUSES = ("active", "retired", "compromised")
 _PRIMITIVE_NAMES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
 _ENTRY_KEYS = frozenset(
@@ -96,8 +111,60 @@ _ENTRY_KEYS = frozenset(
         "deployments",
         "primitives",
         "parameter_set_pin",
+        "issuer_source",
     }
 )
+
+
+# Blank or invisible, and not in a category that says so. The rest of what renders as nothing is category C or Z, or a
+# mark with nothing to sit on, which the base check below refuses.
+_BLANK_CODE_POINTS = frozenset(
+    {
+        0x034F,
+        0x115F,
+        0x1160,
+        0x17B4,
+        0x17B5,
+        0x2800,
+        0x303F,
+        0x3164,
+        0xFFA0,
+        0xFFFC,
+        0x13441,
+        0x13442,
+        0x16FE4,
+        0x1D159,
+    }
+    | set(range(0x180B, 0x1810))
+    | set(range(0xFE00, 0xFE10))
+    | set(range(0xE0100, 0xE01F0))
+)
+
+
+def issuer_name_problem(name: Any) -> str | None:
+    """Why ``name`` cannot identify an issuer, or ``None``. The one rule for enrollment, trust-store parsing and migration.
+
+    A name that reads as empty, or that renders the same as another one, is ambiguous, and a comparison is byte for byte. So it
+    is refused, and never normalised into another issuer: empty, leading or trailing whitespace, whitespace other than U+0020,
+    control, format (zero-width, bidi), unassigned, private-use or blank characters anywhere, and a name with no letter,
+    number, punctuation or symbol, so only marks. It says nothing about look-alike letters, double spaces, a mark with no
+    base before it in an otherwise visible name, or Unicode normalisation form: those remain different names.
+    """
+    if type(name) is not str or not name:
+        return "must be a non-empty string"
+    if name != name.strip():
+        return "must not have leading or trailing whitespace"
+    for char in name:
+        category = unicodedata.category(char)
+        if category[0] == "C" or ord(char) in _BLANK_CODE_POINTS:
+            return f"must not contain the invisible or control character U+{ord(char):04X}"
+        if category[0] == "Z" and char != " ":
+            return f"must not contain whitespace other than U+0020 (found U+{ord(char):04X})"
+    if not any(unicodedata.category(char)[0] in "LNPS" for char in name):
+        return (
+            "must contain a letter, number, punctuation mark or symbol: it would render as nothing"
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -110,7 +177,9 @@ class KeyEntry:
     signatures by this key are untrusted") or ``revoked`` (the legacy flat
     revocation set, equivalent to ``compromised`` with an unknown boundary).
     ``issuer`` is ``None`` only for entries synthesised from the legacy
-    ``key_id`` -> PEM mapping.
+    ``key_id`` -> PEM mapping. ``issuer_source`` is ``operator-declared`` when
+    ``trust migrate`` wrote the entry: a record, in the store, of how the name
+    got there, and not authentication.
     """
 
     key_id: str
@@ -123,6 +192,195 @@ class KeyEntry:
     deployments: frozenset[str] | None = None
     primitives: frozenset[str] | None = None
     parameter_set_pin: str | None = None
+    issuer_source: str | None = None
+
+
+def _store_location(path: str | Path) -> tuple[str | None, str]:
+    """Why the file's location is unsafe, if it is, and the real path to open."""
+    raw = os.fspath(path)
+    problem = platform_problem()
+    if problem is not None:
+        return problem, raw
+    head, tail = os.path.split(raw)
+    if tail in ("", ".", ".."):
+        return "it is not a file", raw
+    problem, directory = resolve_directory(head or ".")
+    if problem is not None:
+        return problem, raw
+    target = os.path.join(directory, tail)
+    if os.path.islink(target):
+        return "it is a symbolic link", target
+    return None, target
+
+
+def _opened_file_problem(info: os.stat_result, fd: int) -> str | None:
+    return file_problem(info, owners=(os.geteuid(), 0)) or acl_problem("the file", fd=fd)
+
+
+def _rewrite_problem(info: os.stat_result, fd: int) -> str | None:
+    """What rewriting the file would silently clear. Its mode is not on the list, because a rewrite keeps that."""
+    if info.st_uid not in (os.geteuid(), 0):
+        return "it belongs to another account"
+    if info.st_nlink != 1:
+        return "it has more than one name"
+    return acl_problem("the file", fd=fd)
+
+
+def _open_without_following(target: str | Path) -> int | None:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        return os.open(target, flags)
+    except FileNotFoundError:
+        return None
+
+
+def _leads_to(target: str, info: os.stat_result) -> bool:
+    """A path like /dev/fd/N opens a file somewhere else, and the walk never saw that file's directories."""
+    try:
+        after = os.lstat(target)
+    except OSError:
+        return False
+    return (after.st_dev, after.st_ino) == (info.st_dev, info.st_ino)
+
+
+def store_storage_problem(path: str | Path) -> str | None:
+    """Why another account could change this store file, if it could. A file that is not there yet has no problem."""
+    problem, target = _store_location(path)
+    if problem is not None:
+        return problem
+    try:
+        fd = _open_without_following(target)
+    except OSError as exc:
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not _leads_to(target, info):
+            return "the path does not lead to the file that was opened"
+        return _opened_file_problem(info, fd)
+    finally:
+        os.close(fd)
+
+
+def store_file_problem(path: str | Path) -> str | None:
+    """The file itself, not where it is. Nothing is reported on a platform that cannot establish it."""
+    if platform_problem() is not None:
+        return None
+    if os.path.islink(path):
+        return "it is a symbolic link"
+    try:
+        fd = _open_without_following(path)
+    except OSError as exc:
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
+    try:
+        return _opened_file_problem(os.fstat(fd), fd)
+    finally:
+        os.close(fd)
+
+
+def store_directory_problem(path: str | Path) -> str | None:
+    """Every directory and link on the way to the file, for a command that goes through a link to the store."""
+    if platform_problem() is not None:
+        return None
+    return resolve_file(os.fspath(path))[0]
+
+
+def store_location_problem(path: str | Path) -> str | None:
+    """Where the file is. Nothing is reported on a platform that cannot establish it."""
+    return None if platform_problem() is not None else _store_location(path)[0]
+
+
+def store_rewrite_problem(path: str | Path) -> str | None:
+    """Why an edit must not go ahead. A new file would clear a problem with the old one, and whoever can change the
+    directory could put their own file in its place during the edit. Either way, a strict profile would then accept it.
+    """
+    if platform_problem() is not None:
+        return None
+    problem = _store_location(path)[0]
+    if problem is not None:
+        return problem
+    try:
+        fd = _open_without_following(path)
+    except OSError as exc:
+        return f"cannot open it safely: {exc}"
+    if fd is None:
+        return None
+    try:
+        return _rewrite_problem(os.fstat(fd), fd)
+    finally:
+        os.close(fd)
+
+
+def _read_store_file(path: str | Path, *, private_storage: bool) -> tuple[str, str | None]:
+    """The text, and why another account could have changed it, if it could. Refuses that with ``private_storage``."""
+
+    def unsafe(reason: str) -> TrustStoreError:
+        return TrustStoreError(f"trust-store {str(path)!r} is not safe to use: {reason}")
+
+    problem, target = _store_location(path)
+    if private_storage and problem is not None:
+        raise unsafe(problem)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if private_storage:
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(target, flags)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if stat.S_ISDIR(info.st_mode):
+                raise IsADirectoryError(errno.EISDIR, "Is a directory", str(path))
+            if info.st_size > MAX_TRUST_STORE_BYTES:
+                raise TrustStoreError(
+                    f"trust-store {str(path)!r} size {info.st_size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
+                )
+            if problem is None and platform_problem() is None:
+                problem = _opened_file_problem(info, handle.fileno())
+            if private_storage and problem is not None:
+                raise unsafe(problem)
+            body = handle.read(MAX_TRUST_STORE_BYTES + 1).decode("utf-8")
+            if problem is None and not _leads_to(target, info):
+                problem = "the file was replaced while it was read"
+                if private_storage:
+                    raise unsafe(problem)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
+    return body, problem
+
+
+def _refuse_old_record(path: str | Path) -> None:
+    """A pre-release candidate kept the record of a migration in a file beside the store, so a store with such a file may hold
+    issuers that nothing in it marks as a statement. It is refused until migrated again: ignoring it would weaken the refusal.
+    """
+    side = os.path.realpath(path) + ISSUER_PROVENANCE_SUFFIX
+    if os.path.lexists(side):
+        raise TrustStoreError(
+            f"{side!r} is beside this store: it records a migration by a pre-release version. Run trust migrate again "
+            "from the source store, or build a new store with trust add, and remove that file"
+        )
+
+
+def _is_validated_record(key_id: Any, entry: Any, pem: Any) -> bool:
+    """A record of exactly the types the parser builds. Nothing here can answer a comparison in its own way."""
+    if not (type(key_id) is str and type(entry) is KeyEntry and type(pem) is str):
+        return False
+    return (
+        all(
+            type(v) is str for v in (entry.key_id, entry.public_key_pem, entry.status, entry.issuer)
+        )
+        and (entry.parameter_set_pin is None or type(entry.parameter_set_pin) is str)
+        and (entry.issuer_source is None or type(entry.issuer_source) is str)
+        and all(
+            v is None or type(v) is datetime
+            for v in (entry.not_before, entry.retired_at, entry.compromised_from)
+        )
+        and all(
+            v is None or (type(v) is frozenset and all(type(item) is str for item in v))
+            for v in (entry.deployments, entry.primitives)
+        )
+    )
 
 
 def _checked_pem(key_id: str, pem: Any) -> str:
@@ -193,6 +451,9 @@ def _parse_entry(key_id: str, entry: Any) -> KeyEntry:
     issuer = entry.get("issuer")
     if not isinstance(issuer, str) or not issuer:
         raise TrustStoreError(f"trust-store entry {key_id!r}: issuer is required")
+    problem = issuer_name_problem(issuer)
+    if problem is not None:
+        raise TrustStoreError(f"trust-store entry {key_id!r}: issuer {problem}")
     pem = _checked_pem(key_id, entry.get("public_key_pem"))
     status = entry.get("status")
     if status not in _STATUSES:
@@ -206,6 +467,11 @@ def _parse_entry(key_id: str, entry: Any) -> KeyEntry:
     if status != "compromised" and compromised_from is not None:
         raise TrustStoreError(
             f"trust-store entry {key_id!r}: compromised_from needs status 'compromised'"
+        )
+    source = entry.get("issuer_source")
+    if "issuer_source" in entry and source != OPERATOR_DECLARED:
+        raise TrustStoreError(
+            f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}"
         )
     pin = entry.get("parameter_set_pin")
     if pin is not None and (
@@ -223,6 +489,7 @@ def _parse_entry(key_id: str, entry: Any) -> KeyEntry:
         deployments=_entry_set(key_id, entry, "deployments", None),
         primitives=_entry_set(key_id, entry, "primitives", _PRIMITIVE_NAMES),
         parameter_set_pin=pin,
+        issuer_source=source,
     )
 
 
@@ -242,6 +509,13 @@ class TrustStore:
     # Operator-asserted snapshot time. In Phase 3A the store is a local file
     # with no authenticated provenance, so this is informational only.
     as_of: datetime | None = None
+    # Keys whose entry records an operator's statement (OPERATOR_DECLARED). Worked out from the entries. Deleting the member
+    # from the file is an edit of local state, and nothing here can detect it.
+    issuer_declared: frozenset[str] = field(init=False, repr=False, compare=False)
+    # Why another account could have changed the file this was loaded from, if it could. Strict profiles refuse such
+    # a store. ``None`` also for a store built in memory: that is the caller's trust boundary, and no file was checked.
+    # A keyword field, so that dataclasses.replace carries it to a copy.
+    storage_problem: str | None = field(default=None, repr=False, compare=False, kw_only=True)
 
     def __post_init__(self) -> None:
         # Copy and freeze: a caller must not be able to change trust material
@@ -252,6 +526,16 @@ class TrustStore:
             self, "parameter_set_pins", MappingProxyType(dict(self.parameter_set_pins))
         )
         object.__setattr__(self, "entries", MappingProxyType(dict(self.entries)))
+        declared = set()
+        for key_id, entry in self.entries.items():
+            if entry.issuer_source is None:
+                continue
+            if entry.issuer_source != OPERATOR_DECLARED:
+                raise TrustStoreError(
+                    f"trust-store entry {key_id!r}: issuer_source must be {OPERATOR_DECLARED!r}"
+                )
+            declared.add(key_id)
+        object.__setattr__(self, "issuer_declared", frozenset(declared))
         # Direct construction is held to the same rules as the loaders: every key
         # must be a real Ed25519 public key, and no key may sit under two ids (a
         # revoked or compromised key must not be re-labelled to regain trust).
@@ -263,6 +547,9 @@ class TrustStore:
                 raise TrustStoreError(
                     f"trust-store entry stored under {map_key!r} names key_id {entry.key_id!r}"
                 )
+            problem = None if entry.issuer is None else issuer_name_problem(entry.issuer)
+            if problem is not None:
+                raise TrustStoreError(f"trust-store entry {map_key!r}: issuer {problem}")
         if self.entries:
             # The legacy views feed the older API and the entries feed the engine;
             # they must describe the same store or the two would disagree.
@@ -279,6 +566,17 @@ class TrustStore:
                 raise TrustStoreError(
                     "trust-store keys/revoked/parameter_set_pins are inconsistent with entries"
                 )
+        # Worked out once, here, from the validated records. Malicious code in this process can still change it
+        # (object.__setattr__), and that is outside what this library can guarantee.
+        object.__setattr__(
+            self,
+            "_binds_issuers",
+            bool(self.entries)
+            and all(
+                _is_validated_record(key_id, entry, self.keys.get(key_id))
+                for key_id, entry in self.entries.items()
+            ),
+        )
 
     # ----- Loaders --------------------------------------------------------
 
@@ -346,17 +644,15 @@ class TrustStore:
         )
 
     @classmethod
-    def from_json(cls, path: str | Path) -> TrustStore:
-        """Load a TrustStore from a JSON file."""
-        try:
-            size = Path(path).stat().st_size
-            if size > MAX_TRUST_STORE_BYTES:
-                raise TrustStoreError(
-                    f"trust-store {str(path)!r} size {size} exceeds {MAX_TRUST_STORE_BYTES} bytes"
-                )
-            body = Path(path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise TrustStoreError(f"trust-store {str(path)!r} is unreadable: {exc}") from exc
+    def from_json(cls, path: str | Path, *, private_storage: bool = False) -> TrustStore:
+        """Load a TrustStore from a JSON file.
+
+        What is parsed is what was read from the descriptor that was checked. ``private_storage`` refuses a file another
+        account could change, as a strict profile needs. Otherwise the reason is kept in ``storage_problem``, and a
+        strict policy refuses the store later. That also checks ownership and write access only: the same account, an
+        administrator or a restored copy can still change which keys are trusted.
+        """
+        body, problem = _read_store_file(path, private_storage=private_storage)
         try:
             # strict JSON: a duplicated key must not silently replace an earlier entry or the revoked list
             payload = loads_strict(body, max_bytes=MAX_TRUST_STORE_BYTES)
@@ -368,7 +664,10 @@ class TrustStore:
             raise TrustStoreError(f"trust-store {str(path)!r} is nested too deeply") from exc
         if not isinstance(payload, Mapping):
             raise TrustStoreError(f"trust-store {str(path)!r} must be a JSON object")
-        return cls.from_dict(payload)
+        _refuse_old_record(path)
+        store = cls.from_dict(payload)
+        object.__setattr__(store, "storage_problem", problem)
+        return store
 
     @classmethod
     def _from_entries(cls, payload: Mapping[str, Any]) -> TrustStore:
@@ -418,6 +717,15 @@ class TrustStore:
             status="revoked" if key_id in self.revoked else "active",
             parameter_set_pin=self.parameter_set_pins.get(key_id),
         )
+
+    @property
+    def binds_issuers(self) -> bool:
+        """Whether this store states, for every key, an issuer name. It says nothing about how that name was established.
+
+        A bare or ``keys`` store does not, whatever its number of keys or the shape of its key ids. Nothing else can
+        supply that statement: the report's own issuer name is what is being checked.
+        """
+        return bool(self._binds_issuers)  # type: ignore[attr-defined]
 
     def is_known(self, key_id: str) -> bool:
         return key_id in self.keys

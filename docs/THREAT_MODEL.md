@@ -322,6 +322,23 @@ unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted an
 `3` when it is supplied but unusable. None of this establishes that the trust
 history is complete; the O8 freshness requirement stays in force.
 
+**Trust store custody.** In the experimental code from pull request #65, not in published
+v0.2.1, the strict profiles refuse a trust store file that another
+unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
+it cannot read, because a writer of that file decides which keys are trusted. A process under the same
+account, an administrator or a restored copy can still change it and the verifier would
+not notice. A store built in memory is the caller's responsibility. See
+[DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
+
+**Replay file custody.** In the experimental code from pull request #65, not in published
+v0.2.1, the strict profiles refuse a replay file that another
+unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
+it cannot read. The records themselves
+are not authenticated. A process under the same account, an administrator or a
+restored backup can change them and the verifier would not notice, and `replay_durable`
+does not say otherwise: it says the file passed these checks and that a record is
+committed before the verdict. See [DEPLOYMENT.md](DEPLOYMENT.md#where-the-replay-file-can-live).
+
 Known limits of the v1 format: the `timestamp` block is outside the signed
 body, so it is never signed evidence. An attached timestamp is
 `UNVERIFIED` unless a `tsa_verifier` validates it, and a verified

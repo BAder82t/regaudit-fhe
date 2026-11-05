@@ -35,3 +35,18 @@ push and uploads it as a workflow artifact (see
 For prose-level guidance see [the README](../README.md),
 [COMPLIANCE.md](../COMPLIANCE.md), and the threat model under
 [docs/THREAT_MODEL.md](THREAT_MODEL.md).
+
+## Opt-in response format
+
+The default output of `regaudit-fhe verify` and `POST /v1/verify` does not say anything about revocation. Ask for `regaudit-fhe verify --response-format v2`
+or `POST /v1/verify?response_format=v2` to get every existing field, unchanged, plus:
+
+| Field | Value |
+|---|---|
+| `response_format` | `regaudit-fhe.verification-response.v2` |
+| `revocation_evaluation` | `not_evaluated`: no usable revocation data was consulted. `evaluated`: fresh signed data was consulted, and the report may still be refused because of it. `required_but_unavailable`: required and not established, never trusted |
+| `policy_evidence` | Versioned detail, `policy_evidence_version: 1` |
+
+`TRUSTED` keeps its meaning: signed by a key in your trust store, under your policy. `not_evaluated` beside `TRUSTED` means nothing is known here about revocation.
+The HTTP server has no revocation gate, so it always reports `not_evaluated`. Any other `response_format` value is a 422.
+

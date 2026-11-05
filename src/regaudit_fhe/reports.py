@@ -73,6 +73,8 @@ from .canonical import decode_canonical_b64
 from .trust import TrustStore
 
 SCHEMA_VERSION: str = "regaudit-fhe.report.v1"
+# The report line, not the package version. It is signed and feeds parameter_set_hash, and the schemas allow no
+# ".devN". A development build keeps the last release here, and a release sets it equal to __version__.
 LIB_VERSION: str = "0.2.1"
 SIGNATURE_ALG: str = "Ed25519"
 
@@ -665,7 +667,8 @@ class VerificationOutcome:
     ``trust_status`` is the field to branch on:
 
     * ``TRUSTED`` — integrity holds AND the issuer key is registered in the
-      supplied trust material, not revoked, and matches any pin.
+      supplied trust material, not revoked, and matches any pin. The signed issuer
+      name was compared with a name in the store only if ``issuer_bound``.
     * ``SELF_SIGNED_ONLY`` — integrity holds but no trust material was
       supplied, so the issuer is unauthenticated.
     * ``INVALID`` — integrity, issuer, revocation, pin or timestamp policy
@@ -691,6 +694,9 @@ class VerificationOutcome:
     timestamp_status: str = TS_ABSENT
     revoked: bool = False
     pin_ok: bool = True
+    # Whether the signed issuer name was compared with a name the store states and no migration stated. Not an
+    # authenticated binding: none exists. Not part of the serialised outcome.
+    issuer_bound: bool = field(default=False, repr=False, compare=False)
 
     @property
     def valid(self) -> bool:
@@ -800,6 +806,41 @@ def verify_envelope(
     ``ABSENT`` fail the trust decision. A verified timestamp never overrides
     revocation.
     """
+    _warn_if_no_issuers(trusted_keys, trust_store)
+    return _verify_envelope(
+        env,
+        trusted_keys=trusted_keys,
+        trust_store=trust_store,
+        require_signature=require_signature,
+        tsa_verifier=tsa_verifier,
+        require_verified_timestamp=require_verified_timestamp,
+    )
+
+
+def _warn_if_no_issuers(
+    trusted_keys: Mapping[str, str] | TrustStore | None, trust_store: TrustStore | None
+) -> None:
+    store = trust_store if trust_store is not None else trusted_keys
+    if store is None or (type(store) is TrustStore and store.binds_issuers):
+        return
+    warnings.warn(
+        "this trust material states no issuer for its keys, so issuer_trusted does not show that the report's "
+        "issuer name is the one enrolled for its key. Build a trust store with 'regaudit-fhe trust add': see "
+        "docs/MIGRATION_0.3.md. The verdict is unchanged.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _verify_envelope(
+    env: AuditEnvelope,
+    *,
+    trusted_keys: Mapping[str, str] | TrustStore | None,
+    trust_store: TrustStore | None,
+    require_signature: bool = True,
+    tsa_verifier: Callable[[bytes, bytes], bool] | None = None,
+    require_verified_timestamp: bool = False,
+) -> VerificationOutcome:
     store: TrustStore | None = trust_store
     keys: Mapping[str, str] | None = None
     if isinstance(trusted_keys, TrustStore):
@@ -807,6 +848,7 @@ def verify_envelope(
     elif trusted_keys is not None:
         keys = trusted_keys
     has_trust_material = store is not None or keys is not None
+    bound = type(store) is TrustStore and store.binds_issuers
 
     body_bytes = canonical_json(env.signed_body())
     sha_ok = sha256_hex(body_bytes) == env.receipt.get("sha256")
@@ -869,6 +911,7 @@ def verify_envelope(
         sha256_valid=sha_ok,
         signature_valid=sig_ok,
         issuer_trusted=has_trust_material and issuer_ok,
+        issuer_bound=bound and key_id not in store.issuer_declared,  # type: ignore[union-attr]
         timestamp_valid=ts_ok,
         issuer=env.issuer,
         key_id=key_id,
@@ -1009,6 +1052,12 @@ def verify_receipt(
     :func:`regaudit_fhe.trusted.verify_trusted`. The return value is unchanged, and a call
     that supplies trust material does not warn.
 
+    **This bool is not an issuer-attribution result and not a revocation result.** It cannot say
+    that a store without issuers left the issuer name unchecked, and it consults no revocation
+    data. When tenant identity matters, use the issuer-bound path:
+    :func:`regaudit_fhe.trusted.verify_trusted` with an ``entries`` trust store, under a policy
+    that refuses a store without issuers.
+
     By default this checks the SHA-256 receipt and the embedded
     Ed25519 signature against the embedded public key. **It does not
     validate that the embedded public key belongs to a trusted
@@ -1054,7 +1103,7 @@ def verify_receipt(
             UserWarning,
             stacklevel=2,
         )
-    outcome = verify_envelope(
+    outcome = _verify_envelope(
         env,
         trusted_keys=trusted_keys,
         trust_store=trust_store,

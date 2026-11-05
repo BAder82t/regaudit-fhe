@@ -1,0 +1,248 @@
+{
+  "list-bad-chain-epoch3": {
+    "expect": "REVOCATION_FORK",
+    "file": "list-bad-chain-epoch3.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-bad-signature": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "list-bad-signature.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-by-compromised-authority": {
+    "expect": "REVOCATION_AUTHORITY_COMPROMISED",
+    "file": "list-by-compromised-authority.json",
+    "kind": "list",
+    "preset": "recovered"
+  },
+  "list-by-new-authority": {
+    "expect": "ACCEPT",
+    "file": "list-by-new-authority.json",
+    "kind": "list",
+    "preset": "rotated"
+  },
+  "list-by-superseded-authority": {
+    "expect": "REVOCATION_AUTHORITY_SUPERSEDED",
+    "file": "list-by-superseded-authority.json",
+    "kind": "list",
+    "preset": "rotated"
+  },
+  "list-cross-issuer-revocation": {
+    "expect": "REVOCATION_ISSUER_SCOPE",
+    "file": "list-cross-issuer-revocation.json",
+    "kind": "list-foreign",
+    "preset": "enrolled"
+  },
+  "list-duplicate-entries": {
+    "expect": "REVOCATION_MALFORMED",
+    "file": "list-duplicate-entries.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-duplicate-json-key": {
+    "expect": "REVOCATION_MALFORMED",
+    "file": "list-duplicate-json-key.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-expired": {
+    "expect": "REVOCATION_EXPIRED",
+    "file": "list-expired.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-forged-issuer": {
+    "expect": "REVOCATION_WRONG_ISSUER",
+    "file": "list-forged-issuer.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-fork-epoch2": {
+    "expect": "REVOCATION_FORK",
+    "file": "list-fork-epoch2.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-gap-epoch5": {
+    "expect": "ACCEPT",
+    "file": "list-gap-epoch5.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-loosens-compromise": {
+    "expect": "REVOCATION_NOT_MONOTONE",
+    "file": "list-loosens-compromise.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-not-enrolled": {
+    "expect": "REVOCATION_NOT_ENROLLED",
+    "file": "list-not-enrolled.json",
+    "kind": "list",
+    "preset": "empty"
+  },
+  "list-omits-revoked-key": {
+    "expect": "REVOCATION_NOT_MONOTONE",
+    "file": "list-omits-revoked-key.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-replay-epoch2": {
+    "expect": "ACCEPT",
+    "file": "list-replay-epoch2.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-rollback-to-epoch1": {
+    "expect": "REVOCATION_ROLLBACK",
+    "file": "list-rollback-to-epoch1.json",
+    "kind": "list",
+    "preset": "epoch2"
+  },
+  "list-tampered-entry": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "list-tampered-entry.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-truncated-signature": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "list-truncated-signature.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-unknown-member": {
+    "expect": "REVOCATION_MALFORMED",
+    "file": "list-unknown-member.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-unsorted-entries": {
+    "expect": "REVOCATION_MALFORMED",
+    "file": "list-unsorted-entries.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-valid-epoch1": {
+    "expect": "ACCEPT",
+    "file": "list-valid-epoch1.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-version-2": {
+    "expect": "REVOCATION_VERSION_UNSUPPORTED",
+    "file": "list-version-2.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-wrong-authority": {
+    "expect": "REVOCATION_AUTHORITY_MISMATCH",
+    "file": "list-wrong-authority.json",
+    "kind": "list",
+    "preset": "enrolled"
+  },
+  "list-wrong-generation": {
+    "expect": "REVOCATION_AUTHORITY_MISMATCH",
+    "file": "list-wrong-generation.json",
+    "kind": "list",
+    "preset": "rotated"
+  },
+  "recovery-anchor-absent": {
+    "expect": "REVOCATION_RECOVERY_ANCHOR_ABSENT",
+    "file": "recovery-anchor-absent.json",
+    "kind": "recovery",
+    "preset": "enrolled-no-recovery"
+  },
+  "recovery-declares-nothing": {
+    "expect": "REVOCATION_MALFORMED",
+    "file": "recovery-declares-nothing.json",
+    "kind": "recovery",
+    "preset": "enrolled"
+  },
+  "recovery-forged-anchor-signature": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "recovery-forged-anchor-signature.json",
+    "kind": "recovery",
+    "preset": "enrolled"
+  },
+  "recovery-fork-same-epoch": {
+    "expect": "REVOCATION_FORK",
+    "file": "recovery-fork-same-epoch.json",
+    "kind": "recovery",
+    "preset": "recovered"
+  },
+  "recovery-reuses-compromised-key": {
+    "expect": "REVOCATION_TRANSITION_CYCLE",
+    "file": "recovery-reuses-compromised-key.json",
+    "kind": "recovery",
+    "preset": "recovered"
+  },
+  "recovery-signed-by-authority": {
+    "expect": "REVOCATION_RECOVERY_ANCHOR_MISMATCH",
+    "file": "recovery-signed-by-authority.json",
+    "kind": "recovery",
+    "preset": "enrolled"
+  },
+  "recovery-unknown-baseline": {
+    "expect": "REVOCATION_RECOVERY_BASELINE_UNKNOWN",
+    "file": "recovery-unknown-baseline.json",
+    "kind": "recovery",
+    "preset": "enrolled"
+  },
+  "recovery-valid": {
+    "expect": "ACCEPT",
+    "file": "recovery-valid.json",
+    "kind": "recovery",
+    "preset": "enrolled"
+  },
+  "transition-by-compromised-authority": {
+    "expect": "REVOCATION_AUTHORITY_COMPROMISED",
+    "file": "transition-by-compromised-authority.json",
+    "kind": "transition",
+    "preset": "recovered"
+  },
+  "transition-cycle-back-to-old": {
+    "expect": "REVOCATION_TRANSITION_CYCLE",
+    "file": "transition-cycle-back-to-old.json",
+    "kind": "transition",
+    "preset": "rotated"
+  },
+  "transition-generation-gap": {
+    "expect": "REVOCATION_TRANSITION_GAP",
+    "file": "transition-generation-gap.json",
+    "kind": "transition",
+    "preset": "enrolled"
+  },
+  "transition-impostor-from": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "transition-impostor-from.json",
+    "kind": "transition",
+    "preset": "enrolled"
+  },
+  "transition-no-possession-proof": {
+    "expect": "REVOCATION_SIGNATURE_INVALID",
+    "file": "transition-no-possession-proof.json",
+    "kind": "transition",
+    "preset": "enrolled"
+  },
+  "transition-replay": {
+    "expect": "REVOCATION_AUTHORITY_SUPERSEDED",
+    "file": "transition-replay.json",
+    "kind": "transition",
+    "preset": "rotated"
+  },
+  "transition-to-recovery-anchor": {
+    "expect": "REVOCATION_KEY_IS_REPORT_KEY",
+    "file": "transition-to-recovery-anchor.json",
+    "kind": "transition",
+    "preset": "enrolled"
+  },
+  "transition-valid": {
+    "expect": "ACCEPT",
+    "file": "transition-valid.json",
+    "kind": "transition",
+    "preset": "enrolled"
+  }
+}

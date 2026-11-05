@@ -12,6 +12,8 @@ import regaudit_fhe as rf
 import regaudit_fhe.reports as reports
 
 ROOT = Path(__file__).resolve().parents[1]
+DEV_VERSION = re.compile(r"^\d+\.\d+\.\d+\.dev\d+$")
+RELEASE_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _pyproject_version() -> str:
@@ -22,7 +24,12 @@ def _pyproject_version() -> str:
 
 
 def test_library_version_constants_agree():
-    assert rf.__version__ == reports.LIB_VERSION
+    if DEV_VERSION.match(rf.__version__):
+        # A development build signs the last release as its report line: that value is signed, feeds
+        # parameter_set_hash, and the schemas allow no .devN. See the comment on LIB_VERSION.
+        assert RELEASE_VERSION.match(reports.LIB_VERSION)
+    else:
+        assert rf.__version__ == reports.LIB_VERSION
 
 
 def test_pyproject_version_matches_the_library():
@@ -48,11 +55,11 @@ def test_new_envelopes_carry_the_library_version():
     report = rf.audit_fairness(
         np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, 1.0])
     )
-    assert rf.envelope("fairness", report).algorithm_version == rf.__version__
+    assert rf.envelope("fairness", report).algorithm_version == reports.LIB_VERSION
 
 
 def test_readme_example_shows_the_current_algorithm_version():
     readme = ROOT / "README.md"
     if not readme.is_file():
         pytest.skip("no README next to the tests")
-    assert f'"algorithm_version": "{rf.__version__}"' in readme.read_text(encoding="utf-8")
+    assert f'"algorithm_version": "{reports.LIB_VERSION}"' in readme.read_text(encoding="utf-8")

@@ -45,7 +45,7 @@ All configuration is supplied via environment variables.
 | `REGAUDIT_FHE_CORS_ORIGINS`           | (empty)       | Comma-separated CORS allow-list. Empty = no cross-origin response.      |
 | `REGAUDIT_FHE_TRUST_STORE`            | (empty)       | Path to a `TrustStore` JSON. **Required for `/v1/verify`.** A missing, unreadable or malformed file aborts startup. |
 | `REGAUDIT_FHE_ALLOW_SELF_SIGNED`      | `0`           | `1` (or `serve --allow-self-signed`) lets `/v1/verify` answer `SELF_SIGNED_ONLY` when no trust store is set. Development only: refused under non-development profiles and on non-loopback binds; never yields `TRUSTED`. |
-| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential` or `high-assurance`. Anything else aborts startup. |
+| `REGAUDIT_FHE_PROFILE`                | `development` | `development`, `confidential`, `high-assurance` or `secure-v1`. Anything else aborts startup. |
 | `REGAUDIT_FHE_VERIFIER_ID`            | (empty)       | This verifier's audience identifier (required for `high-assurance`). |
 | `REGAUDIT_FHE_MAX_AGE_S`              | (empty)       | Refuse reports older than this many seconds. Must be positive and finite; required outside development. |
 | `REGAUDIT_FHE_REPLAY_DB`              | (empty)       | sqlite path for the **local** persistent replay cache. |
@@ -132,7 +132,7 @@ report can consume its `audit_run_id` before the intended relying party does.
 `check` mode only looks up and never records. A stateless verification response
 reports `consumption: NOT_CHECKED`. Every replay-checked response also reports
 `replay_durable` (`false` for the in-memory cache, whose records are lost when the
-process exits).
+process exits, and, in the experimental code only, for a sqlite file that fails the storage check below).
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.
@@ -477,6 +477,9 @@ limits egress to the destinations the deployment actually requires
 
 ## Production checklist
 
+Under `confidential`, `high-assurance` or `secure-v1` the trust store must be an `entries` store built with `trust add`: see
+[Upgrading a trust store without issuers](#upgrading-a-trust-store-without-issuers), and [MIGRATION_0.3.md](MIGRATION_0.3.md) for both upgrade actions.
+
 - [ ] HTTPS termination at the ingress (TLS 1.2+, OCSP stapling).
 - [ ] API keys stored in a secret manager, rotated quarterly.
 - [ ] WAF in front of the server (block obvious payload classes).
@@ -513,3 +516,69 @@ limits egress to the destinations the deployment actually requires
 
 Each of those gaps is operator-side: TLS, KMS, and runbooks live with
 the deployment, not with this binary.
+
+## Where the trust store can live
+
+**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/trust-store-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the experimental code from pull request #65, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
+
+Under `confidential`, `high-assurance`, and `secure-v1`, another local account must not be able to change which keys the verifier trusts. Therefore, the trust store file needs to be one that other accounts cannot change. The file needs to be a regular file with one name. It cannot be a symlink. It needs to be owned by the account running the verifier or by root. It cannot be writable by group or others. The directories on the way to it have the same rules as below. `0600`, `0640`, and `0644` are all fine. `trust add` writes `0644`. `0660` is refused due to the lack of a way to name a trusted group.
+
+Anything else is refused: `verify` exits 3 and the `revocation` commands exit 3 or 2 as they do for any unusable store. `serve` does not start. In the library, a `VerificationPolicy` raises a `PolicyError` for a store loaded from this file. `development` still loads it but nothing protects it. `verify`, `serve`, `trust list`, and `trust status` warn. All the results of `verify`, `serve`, and `VerificationPolicy` carry the reason `TRUST_STORE_STORAGE_UNSAFE`. The older `verify_envelope` and `verify_envelope_or_raise` have no profile and do not look at this at all. `trust add`, `trust retire`, and `trust revoke` refuse any file that another account could have changed and any directory where others can write. This happens in all profiles. Writing a new file would clear that and make it look reviewed. The rules for directories below apply to any directory on the way to the file. This also includes one that only a chain of symlinks goes through. `trust add` also refuses a file where others would be able to write it. It also refuses a symlink at the store path. However, `trust retire` and `trust revoke` will edit a file where the problem is just the mode. They keep the mode so a strict profile keeps refusing it. If a store has been in this place check what it holds before fixing the mode or directory. Fixing them would not undo a change that someone has already made. All edits keep the mode of the file. `replay migrate` refuses a file with a second name or write ACL, or in a directory where others can write. This is due to the same reason. It still migrates a file that is only wrong due to its mode. This file keeps its mode so a strict profile keeps refusing it. Check what the file holds before fixing the mode. `replay migrate` cannot know if the file was changed before you start. A symlink at the file's own path is refused even if the mount is read-only. Some container platforms mount files this way. A safe symlinked directory above it is fine. Use a plain single-file mount owned by the verifier's account or root in a directory where nobody else can write. This has not been tried in a real cluster and a group-writable volume would be refused.
+
+This is only about other unprivileged accounts. A process in the same account, an administrator, or someone restoring an older copy can still add a key. The verifier would not notice. A store built in memory with `TrustStore.from_dict` is your own code's responsibility and no file is checked for it. A store is only read once. A later change in the file would only reach a running server when it restarts.
+
+## Where the replay file can live
+
+**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/replay-file-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the experimental code from pull request #65, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
+
+Under `confidential`, `high-assurance` and `secure-v1` the replay file needs to be one that other accounts cannot change. It needs to be a regular file with one name. It cannot be a symlink. It needs to be owned by the account running the verifier and not writable by group or others. The parent directory of the file needs to be owned by this account or root. This parent directory also cannot be writable by group or others. All the directories above it need to follow the same rules but a sticky directory such as `/tmp` is allowed above the parent directory. A new file is created with permissions `0600` whatever the umask. A good default is `0600` for the file and `0700` for its directory.
+
+Anything else is refused: `verify` will exit with code 3. `serve` will not start. A running verifier will answer `REPLAY_STATE_UNAVAILABLE`. It will also fail closed if the file is replaced, deleted, or made writable while it is being used. This only applies to running processes. A new `verify` or a server after a restart cannot tell the difference between a deleted file and first use. It will start a new empty file. Nothing will change an existing file's mode for you. There is no way yet to name a trusted group so `0660` is refused. But `0640` and `0644` are accepted since others can read but not write them. Choose `0600` if you want to keep the report identifiers in the file private. `development` still accepts these files and will say `replay_durable: false`.
+
+This would stop other unprivileged accounts and that is all it does. The records are not authenticated. A process running as the same account, an administrator, or someone restoring an older copy can still remove a record. The verifier would not know. A report it refused would then be able to be accepted again. A way to prevent this would be to have an independent store. This version does not have it.
+
+These are the limits of the checks. They apply to the trust store as well. Windows is refused in strict profiles due to the inability to establish the owner and permissions. Any ACL on macOS that allows any user except this account or root to change the file or a directory above it is refused. An ACL that cannot be read is also refused. An ACL entry that allows write in Linux shows in the group bits and is refused. This was tried with real user and group entries on files and directories in one container using overlayfs. Other filesystems have not been tried. Other Unix systems are refused like Windows. `trust add`, `trust retire`, `trust revoke`, and `replay migrate` still work on these systems without these checks. The owner and mode the client sees might be different than what the server enforces when using a network filesystem. The `flock`-style behaviour is also different. Therefore, this is not supported. A custom `ReplayCache` object is responsible for its own storage.
+
+## Upgrading with an existing replay file
+
+Start with [MIGRATION_0.3.md](MIGRATION_0.3.md), which covers this and the trust store together.
+
+A replay file written by a published version does not record what policy wrote it, and rows it has purged are gone. It is refused
+until migrated: `SqliteReplayCache` raises `LegacyReplayFile`, `regaudit-fhe verify` exits 3, and `serve` refuses to start. Stop every verifier using the file,
+and run one of:
+
+```bash
+regaudit-fhe replay status --db replay.db
+regaudit-fhe replay migrate --db replay.db --previous-max-age-seconds 86400   # the largest max_age this file ever served
+regaudit-fhe replay migrate --db replay.db --previous-policy-unknown          # you do not know
+```
+
+* **A stated `max_age`** becomes the store's floor. This is your statement: the file can only refuse a value its rows contradict. Verdicts are as
+  before under that setting, and a larger setting is not honoured.
+* **Unknown:** every report issued up to the migration, plus the clock skew, is refused from then on (`REPLAY_HISTORY_UNKNOWN`), since it may have been
+  recorded and purged. Later reports behave as before.
+* **`--previous-trust-history-max-age-seconds`** states the same for trust history, at most 86400. Without it, a trust history as of the migration or earlier
+  is not fresh.
+
+The file is treated as untrusted input. Anything but the exact published shape is refused, including triggers, views, indexes and extra tables: inspect such a file
+by hand, because someone changed it. The rows go into a new file, which is checked and swapped in; the original stays at `FILE.pre-migration`, unchanged. A kill at
+any step leaves the whole original or the whole new file. A `FILE-journal` left by a crash is refused: let a published version open the file once. The original's mode and
+group are kept, and the file must be owned by whoever runs this. A new, empty replay file needs no migration, and it also remembers nothing, so pointing a verifier
+at one is an explicit decision to forget.
+
+On a current file, floors for `max_age` and `trust_history_max_age` only go down. Going back to a larger value needs a new file. Two policies sharing one
+file are held to the smaller value, so a longer service refuses a report within its own window once a shorter one has used the file:
+give each its own file if that matters, knowing they then share no replay memory. Leaving out `max_age` means 30 days on a new file and
+is held to the floor on an existing one. `trust_history_max_age` above 24 hours is never honoured. An unexpected object in the file at any time stops verification with
+`REPLAY_STATE_UNAVAILABLE` rather than running without protection. Someone who can write the file can still make a coherent edit that nothing here detects: keep it private
+to the verifier's account.
+
+## Upgrading a trust store without issuers
+
+A bare store (`{"key_id": "PEM"}`) or a `keys` store (`{"keys": {...}}`) does not say which issuer each key belongs to, so any
+enrolled key can sign under any issuer name and be reported as trusted. That holds with one key as much as with many. `confidential`, `high-assurance` and
+`secure-v1` refuse such a store: `regaudit-fhe verify` exits 2 and `serve` does not start. `development` still accepts it and says
+`ISSUER_UNBOUND` in `reasons`.
+
+**`trust migrate` does not get you back onto a strict profile.** Its issuers are your statement, and those profiles refuse them too (`ISSUER_ENROLLMENT_UNAUTHENTICATED`). The way
+back is a new store built with `trust add`. The steps and what they do and do not establish are in [MIGRATION_0.3.md](MIGRATION_0.3.md#1-a-trust-store-without-issuers).

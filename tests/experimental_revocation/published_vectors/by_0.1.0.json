@@ -1,0 +1,145 @@
+{
+ "issuer": "vector-issuer",
+ "key_id": "vec-key",
+ "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcyZl70ijiYvdkTilWHj9V0L+LckKh+VUvGf45yybvXs=\n-----END PUBLIC KEY-----\n",
+ "reports": {
+  "v1": {
+   "algorithm_version": "0.1.0",
+   "backend": "plaintext",
+   "depth_budget": {
+    "consumed": 6,
+    "declared": 6
+   },
+   "input_commitments": [],
+   "issued_at": "2026-11-01T21:07:07.041564+00:00",
+   "issuer": "vector-issuer",
+   "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.1.0",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+   },
+   "parameter_set_hash": "c1262015326d48cee3ffb27e5083cb8da9587247afc81c48848d91b23722776d",
+   "primitive": "drift",
+   "receipt": {
+    "key_id": "vec-key",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcyZl70ijiYvdkTilWHj9V0L+LckKh+VUvGf45yybvXs=\n-----END PUBLIC KEY-----\n",
+    "sha256": "98b9fa4f61d324b66b4a3536022cc9f2d92bd9656033b9b20bac4e72f0e8187f",
+    "signature_alg": "Ed25519",
+    "signature_b64": "sVIyISNrWZ1UycvcPM66LS09IYW2KRWU008aDowVztZbjUmIdiU+iEKcPM+5AmGf78I1edLw/RA74EAA8AriCQ=="
+   },
+   "regulations": [
+    "EU_AI_ACT_ART15",
+    "FDA_SAMD_PCCP",
+    "BASEL_III"
+   ],
+   "result": {
+    "distance": 0.009999999999999995,
+    "drift_bit": true,
+    "w1_distance": 0.09999999999999998
+   },
+   "schema": "regaudit-fhe.report.v1",
+   "schema_version": "regaudit-fhe.report.v1"
+  },
+  "v2-audience": {
+   "algorithm_version": "0.1.0",
+   "audience": [
+    "reg"
+   ],
+   "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e602",
+   "backend": "plaintext",
+   "deployment_id": "dep",
+   "depth_budget": {
+    "consumed": 6,
+    "declared": 6
+   },
+   "input_commitments": [],
+   "issued_at": "2026-10-25T12:00:00+00:00",
+   "issuer": "vector-issuer",
+   "key_id": "vec-key",
+   "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.1.0",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+   },
+   "parameter_set_hash": "c1262015326d48cee3ffb27e5083cb8da9587247afc81c48848d91b23722776d",
+   "primitive": "drift",
+   "public_key_fingerprint": "3e44f675db060f238b756eeef5cb13102b21a9b25340fba0fe2e986b7d338127",
+   "receipt": {
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcyZl70ijiYvdkTilWHj9V0L+LckKh+VUvGf45yybvXs=\n-----END PUBLIC KEY-----\n",
+    "sha256": "d5b6f8729233cb608eb0fcef3dc49f4f8bae70432b2a1d8804268d405abf40aa",
+    "signature_alg": "Ed25519",
+    "signature_b64": "EbOm4KubJdZJtC27vuFENMXS0CsKTX0TAdq/QprIdD80JsR4QJ7h1zcLcZdpJCznsVQteSJphqHsJgZokbU3Aw=="
+   },
+   "regulations": [
+    "EU_AI_ACT_ART15",
+    "FDA_SAMD_PCCP",
+    "BASEL_III"
+   ],
+   "result": {
+    "distance": 0.009999999999999995,
+    "drift_bit": true,
+    "w1_distance": 0.09999999999999998
+   },
+   "schema": "regaudit-fhe.report.v2",
+   "schema_version": "regaudit-fhe.report.v2",
+   "trust_policy_version": 1
+  },
+  "v2-no-audience": {
+   "algorithm_version": "0.1.0",
+   "audit_run_id": "3f2b1c4e-5a6d-4e7f-8091-a2b3c4d5e601",
+   "backend": "plaintext",
+   "deployment_id": "dep",
+   "depth_budget": {
+    "consumed": 6,
+    "declared": 6
+   },
+   "input_commitments": [],
+   "issued_at": "2026-10-25T12:00:00+00:00",
+   "issuer": "vector-issuer",
+   "key_id": "vec-key",
+   "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.1.0",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+   },
+   "parameter_set_hash": "c1262015326d48cee3ffb27e5083cb8da9587247afc81c48848d91b23722776d",
+   "primitive": "drift",
+   "public_key_fingerprint": "3e44f675db060f238b756eeef5cb13102b21a9b25340fba0fe2e986b7d338127",
+   "receipt": {
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcyZl70ijiYvdkTilWHj9V0L+LckKh+VUvGf45yybvXs=\n-----END PUBLIC KEY-----\n",
+    "sha256": "6888bbe0677a2d489e65e3201a5084ab695ff893e13162ddbcc261e40d2213f8",
+    "signature_alg": "Ed25519",
+    "signature_b64": "850doOnHaiSBCOzsFJG5kBx6l/9IR5FFRYxr3v4yPIo5jlfdQKWo5itkxnsJVSMDx18mdsVX+KE+rem79GYXBQ=="
+   },
+   "regulations": [
+    "EU_AI_ACT_ART15",
+    "FDA_SAMD_PCCP",
+    "BASEL_III"
+   ],
+   "result": {
+    "distance": 0.009999999999999995,
+    "drift_bit": true,
+    "w1_distance": 0.09999999999999998
+   },
+   "schema": "regaudit-fhe.report.v2",
+   "schema_version": "regaudit-fhe.report.v2",
+   "trust_policy_version": 1
+  }
+ },
+ "signed_by": "0.1.0"
+}

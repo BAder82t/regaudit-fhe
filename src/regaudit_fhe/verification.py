@@ -28,6 +28,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -36,12 +37,24 @@ from ._provenance import CONTRADICTION, UNVERIFIABLE
 from ._provenance import check_provenance as _check_provenance
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, decode_canonical_b64
-from .replay import SCOPE_LOCAL_PERSISTENT, ReplayCache
-from .report_v2 import AuditEnvelopeV2
+from .replay import (
+    SCOPE_LOCAL_PERSISTENT,
+    TRUST_HISTORY_CEILING,
+    ReplayCache,
+    ReplayStateError,
+    SqliteReplayCache,
+)
+from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, _assert_plain_json
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
 from .trust import KeyEntry, TrustStore
 
-PROFILES = ("development", "confidential", "high-assurance")
+# A versioned profile with its own rules, so that no existing parameter or profile changes meaning. Everything else in it is
+# as in ``confidential``. See TRUST_SPEC 8.3.
+SECURE_PROFILE_V1 = "secure-v1"
+ISSUER_ENROLLMENT_UNAUTHENTICATED = (
+    "ISSUER_ENROLLMENT_UNAUTHENTICATED"  # a configuration refusal, not a verdict on a report
+)
+PROFILES = ("development", "confidential", "high-assurance", SECURE_PROFILE_V1)
 
 TRUSTED = "TRUSTED"
 SELF_SIGNED_ONLY = "SELF_SIGNED_ONLY"
@@ -164,6 +177,14 @@ class VerificationPolicy:
             raise PolicyError("clock_skew must not be negative")
         if self.trust_history_max_age <= timedelta(0):
             raise PolicyError("trust_history_max_age must be positive")
+        if (
+            self.profile == SECURE_PROFILE_V1
+            and self.trust_history_max_age != TRUST_HISTORY_CEILING
+        ):
+            raise PolicyError(
+                f"the {SECURE_PROFILE_V1!r} profile has a fixed trust-history window of {TRUST_HISTORY_CEILING}: "
+                "trust_history_max_age cannot be set, larger or smaller"
+            )
         if self.verifier_id is not None and (
             not isinstance(self.verifier_id, str) or not self.verifier_id
         ):
@@ -175,6 +196,29 @@ class VerificationPolicy:
         if self.profile != "development":
             if self.trust_store is None:
                 raise PolicyError(f"the {self.profile!r} profile requires a trust store")
+            if type(self.trust_store) is not TrustStore:
+                raise PolicyError(
+                    f"the {self.profile!r} profile requires exactly a TrustStore, not a subclass: what it reads about a "
+                    "key and its issuer must come from validated records"
+                )
+            if self.trust_store.storage_problem is not None:
+                raise PolicyError(
+                    f"the {self.profile!r} profile refuses this trust store, because another account could change which "
+                    f"keys it trusts: {self.trust_store.storage_problem}"
+                )
+            if not self.trust_store.binds_issuers:
+                raise PolicyError(
+                    f"the {self.profile!r} profile requires a trust store that states the issuer of each key, and this "
+                    "one does not, so a report could claim any issuer name. Build a new store with "
+                    "'regaudit-fhe trust add': see docs/MIGRATION_0.3.md"
+                )
+            if self.trust_store.issuer_declared:
+                raise PolicyError(
+                    f"{ISSUER_ENROLLMENT_UNAUTHENTICATED}: the {self.profile!r} profile refuses a store whose issuers were "
+                    f"recorded as a local operator's statement by 'trust migrate': {sorted(self.trust_store.issuer_declared)}. "
+                    "That is not an authenticated enrollment. Build a new store with 'regaudit-fhe trust add': see "
+                    "docs/MIGRATION_0.3.md"
+                )
             if self.max_age is None:
                 raise PolicyError(f"the {self.profile!r} profile requires max_age")
             if self.replay_mode == "off" or self.replay_cache is None:
@@ -184,6 +228,12 @@ class VerificationPolicy:
                     f"the {self.profile!r} profile requires a persistent replay cache "
                     "(an in-memory cache is lost on restart)"
                 )
+            enforce_storage = getattr(self.replay_cache, "enforce_private_storage", None)
+            if enforce_storage is not None:
+                try:
+                    enforce_storage()
+                except ReplayStateError as exc:
+                    raise PolicyError(f"the {self.profile!r} profile refuses this: {exc}") from exc
         if self.profile == "high-assurance" and self.verifier_id is None:
             raise PolicyError("the 'high-assurance' profile requires a verifier_id (audience)")
 
@@ -293,6 +343,97 @@ def _effective_max_age(policy: VerificationPolicy) -> timedelta | None:
     return DEFAULT_RETENTION if policy.replay_mode != "off" else None
 
 
+def _bound_max_age(policy: VerificationPolicy) -> tuple[timedelta | None, bool, bool]:
+    """(max_age to enforce, whether the replay store's floor lowered it, whether the floor was unusable).
+
+    A larger ``max_age`` than a replay store has served is not honoured against that store: its older entries may be
+    gone, so the same report could be accepted twice, and evidence refused as stale could become acceptable merely
+    because a setting changed. With the setting unchanged this returns the setting. An unusable floor does not raise
+    here: it is reported at the replay step, the same place and with the same code as any other store failure.
+    """
+    requested = _effective_max_age(policy)
+    binder = getattr(policy.replay_cache, "bind_max_age", None)
+    if requested is None or policy.replay_mode == "off" or binder is None:
+        return requested, False, False
+    try:
+        bound = binder(requested, persist=True)
+    except Exception:  # any store failure, of any type
+        if policy.replay_mode == "record":
+            return requested, False, True
+        try:  # check mode records nothing, so a read-only store keeps working: honour what is there
+            bound = binder(requested, persist=False)
+        except Exception:
+            return requested, False, True
+    if not isinstance(bound, timedelta) or bound <= timedelta(0):
+        return requested, False, True
+    effective = min(bound, requested)
+    return effective, effective < requested, False
+
+
+@dataclass(frozen=True)
+class _HistoryBound:
+    limit: timedelta
+    not_as_of_or_before: datetime | None = None
+    applied: bool = False  # the setting was not honoured in full
+    failed: bool = False  # the store's floor could not be used: no history counts
+
+
+def _fixed_history_window(
+    policy: VerificationPolicy, now: datetime, *, use_store: bool
+) -> _HistoryBound:
+    """The same 24 hours on a new store, an existing one and no store state at all. Only what a shorter setting already
+    refused on this store is held back, by the cutover: it stays refused, and the window itself never moves."""
+    cache = policy.replay_cache
+    if not use_store or policy.replay_mode == "off" or type(cache) is not SqliteReplayCache:
+        return _HistoryBound(TRUST_HISTORY_CEILING)
+    try:
+        return _HistoryBound(TRUST_HISTORY_CEILING, cache.adopt_fixed_history_window(now=now))
+    except Exception:
+        return _HistoryBound(TRUST_HISTORY_CEILING, failed=True)
+
+
+def _bound_history_age(
+    policy: VerificationPolicy, now: datetime, *, use_store: bool = True
+) -> _HistoryBound:
+    """How old a trust history may be. The same principle as ``max_age``: raising the setting must not make a
+    history acceptable that was already stale.
+
+    Above the ceiling a setting is never honoured, whatever the cache says about itself. Below it, only the shipped
+    sqlite store is believed to remember the earlier setting, as a floor. If that floor cannot be used, no history
+    counts: a failure must not widen the window.
+    """
+    if policy.profile == SECURE_PROFILE_V1:
+        return _fixed_history_window(policy, now, use_store=use_store)
+    requested = policy.trust_history_max_age
+    ceiling = min(requested, TRUST_HISTORY_CEILING)
+    cache = policy.replay_cache
+    if not use_store or policy.replay_mode == "off" or type(cache) is not SqliteReplayCache:
+        return _HistoryBound(ceiling, applied=ceiling < requested)
+    try:
+        try:
+            bound = cache.bind_trust_history_age(ceiling, persist=True)
+        except Exception:
+            if policy.replay_mode == "record":
+                raise
+            bound = cache.bind_trust_history_age(ceiling, persist=False)
+        cutover = cache.trust_history_cutover()
+    except Exception:
+        return _HistoryBound(ceiling, applied=True, failed=True)
+    effective = min(bound, ceiling)
+    return _HistoryBound(effective, cutover, applied=effective < requested)
+
+
+def _replay_cutover(policy: VerificationPolicy) -> tuple[datetime | None, bool]:
+    """(the time up to which a migrated replay file cannot speak, whether that could not be read)."""
+    reader = getattr(policy.replay_cache, "history_cutover", None)
+    if policy.replay_mode == "off" or reader is None:
+        return None, False
+    try:
+        return reader(), False
+    except Exception:
+        return None, True
+
+
 def _aware_now(policy: VerificationPolicy) -> datetime:
     moment = policy.now()
     if not isinstance(moment, datetime) or moment.tzinfo is None or moment.utcoffset() is None:
@@ -300,13 +441,19 @@ def _aware_now(policy: VerificationPolicy) -> datetime:
     return moment
 
 
-def _history_state(policy: VerificationPolicy, now: datetime) -> str:
+def _history_state(
+    policy: VerificationPolicy, now: datetime, bound: _HistoryBound | None = None
+) -> str:
     history = policy.trust_history
-    if history is None or not history.authenticated:
+    if bound is None:
+        bound = _bound_history_age(policy, now, use_store=False)
+    if history is None or not history.authenticated or bound.failed:
         return HISTORY_UNPROVEN
     if history.as_of.tzinfo is None or history.as_of > now + policy.clock_skew:
         return HISTORY_UNPROVEN
-    if now - history.as_of > policy.trust_history_max_age:
+    if now - history.as_of > bound.limit:
+        return HISTORY_STALE
+    if bound.not_as_of_or_before is not None and history.as_of <= bound.not_as_of_or_before:
         return HISTORY_STALE
     return HISTORY_FRESH
 
@@ -357,6 +504,26 @@ def _evaluate_timestamps(
 # ---------------------------------------------------------------------------
 
 
+def _is_untrusted_object(env: AuditEnvelope | AuditEnvelopeV2) -> bool:
+    """Whether this object could answer the verifier's questions in its own way.
+
+    Every field must be exactly what a JSON parser produces, so a ``str`` subclass cannot answer a comparison, and the object
+    exactly the envelope class with nothing added to it, so a subclass or an instance attribute cannot replace what is signed.
+    ``object.__setattr__`` and other malicious code in this process are outside what this library can guarantee.
+    """
+    if type(env) is not AuditEnvelope and type(env) is not AuditEnvelopeV2:
+        return True
+    fields = dataclass_fields(env)
+    if {f.name for f in fields} != set(vars(env)):
+        return True
+    try:
+        for f in fields:
+            _assert_plain_json(getattr(env, f.name))
+    except (EnvelopeFormatError, RecursionError):
+        return True
+    return False
+
+
 def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> VerificationResult:
     """Verify an envelope under ``policy``; fail closed on every doubt.
 
@@ -377,6 +544,33 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         raise TypeError("verify() expects an AuditEnvelope or AuditEnvelopeV2")
     fmt = "v2" if v2 else "v1"
     store = policy.trust_store
+    if policy.profile != "development" and _is_untrusted_object(env):
+        # Before any field is read: nothing about this object can be believed or repeated.
+        return VerificationResult(
+            trust_status=INVALID,
+            accepted=False,
+            integrity_valid=False,
+            issuer_trusted=False,
+            key_status="none",
+            chronology=CHRONOLOGY_NONE,
+            signed_not_after=None,
+            timestamp_status=TS_FAILED,
+            reasons=("MALFORMED_ENVELOPE",),
+            blocking_reasons=("MALFORMED_ENVELOPE",),
+            policy_id=policy.policy_id,
+            format=fmt,
+            replay_scope="NONE",
+            replay_durable=None,
+            consumption=CONSUMPTION_NOT_CHECKED,
+            trust_history=_history_state(policy, now),
+            trust_store_as_of=store.as_of.isoformat() if store and store.as_of else None,
+            issuer="",
+            key_id="",
+            primitive="",
+            issued_at="",
+            regulations=(),
+            parameter_set_hash="",
+        )
     if store is None and not policy.allow_self_signed:
         raise VerificationUnavailable(
             "no trust material configured: refusing to verify a report against its own embedded key"
@@ -452,6 +646,8 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     signed_not_after = evidence.gen_time.isoformat() if evidence is not None else None
     if not v2:
         note("LEGACY_V1_FORMAT")
+    if store is not None and store.storage_problem is not None:  # a strict profile never gets here
+        note("TRUST_STORE_STORAGE_UNSAFE")
     if policy.check_provenance:
         prov_status, _ = _check_provenance(env)
         if prov_status == CONTRADICTION:
@@ -538,10 +734,21 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("PIN_MISMATCH")
             identity_ok = False
     issuer_trusted = entry is not None and identity_ok and sig_ok
+    if entry is not None and entry.issuer is None:
+        # Only a development policy gets here. The verdict is what it always was, and it says less than it looks.
+        note("ISSUER_UNBOUND")
+    if entry is not None and entry.key_id in getattr(policy.trust_store, "issuer_declared", ()):
+        # Only development gets here: the others refuse this store. The name was compared with a local operator's statement.
+        note("ISSUER_OPERATOR_DECLARED")
 
     # ----- key lifecycle and chronology rules (spec 4) ----------------------
+    history_bound = _bound_history_age(policy, now)
+    if history_bound.applied and policy.trust_history is not None:
+        note("TRUST_HISTORY_FLOOR_APPLIED")
     if entry is not None:
-        _apply_key_lifecycle(entry, v2, issued, evidence, policy, now, note=note, block=block)
+        _apply_key_lifecycle(
+            entry, v2, issued, evidence, policy, now, history_bound, note=note, block=block
+        )
 
     # ----- timestamp policy ---------------------------------------------------
     if ts_status == TS_FAILED:
@@ -561,12 +768,18 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
             block("AUDIENCE_MISMATCH")
     elif policy.profile == "high-assurance":
         block("AUDIENCE_MISMATCH")
-    max_age = _effective_max_age(policy)
+    max_age, floor_applied, floor_failed = _bound_max_age(policy)
+    if floor_applied:
+        note("REPLAY_POLICY_FLOOR_APPLIED")
     if max_age is not None and issued is not None:
         if issued > now + policy.clock_skew:
             block("REPORT_FROM_FUTURE")
         elif now - issued > max_age:
             block("REPORT_TOO_OLD")
+    cutover, cutover_failed = _replay_cutover(policy)
+    if v2 and cutover is not None and issued is not None and issued <= cutover + policy.clock_skew:
+        # A migration said this file cannot tell whether a report that old was already recorded and purged.
+        block("REPLAY_HISTORY_UNKNOWN")
 
     # ----- local replay (last: only a report that would be accepted counts) ---
     consumption = CONSUMPTION_NOT_CHECKED
@@ -574,7 +787,14 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
     replay_durable: bool | None = None
     if policy.replay_mode != "off" and not blocking:
         consumption, replay_scope, replay_durable = _apply_replay(
-            env, policy, now, fmt=fmt, key_id=key_id, note=note, block=block
+            env,
+            policy,
+            now,
+            max_age=max_age,
+            floor_failed=floor_failed or history_bound.failed or cutover_failed,
+            key_id=key_id,
+            note=note,
+            block=block,
         )
 
     accepted = not blocking and integrity_valid and issuer_trusted
@@ -594,7 +814,7 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         replay_scope=replay_scope,
         replay_durable=replay_durable,
         consumption=consumption,
-        trust_history=_history_state(policy, now),
+        trust_history=_history_state(policy, now, history_bound),
         **base,
     )
 
@@ -606,6 +826,7 @@ def _apply_key_lifecycle(
     evidence: TimestampEvidence | None,
     policy: VerificationPolicy,
     now: datetime,
+    history_bound: _HistoryBound,
     *,
     note: Callable[[str], None],
     block: Callable[[str], None],
@@ -629,7 +850,10 @@ def _apply_key_lifecycle(
         return
 
     def history_ok() -> bool:
-        return policy.profile != "high-assurance" and _history_state(policy, now) == HISTORY_FRESH
+        return (
+            policy.profile != "high-assurance"
+            and _history_state(policy, now, history_bound) == HISTORY_FRESH
+        )
 
     if status == "compromised":
         boundary = entry.compromised_from
@@ -671,7 +895,8 @@ def _apply_replay(
     policy: VerificationPolicy,
     now: datetime,
     *,
-    fmt: str,
+    max_age: timedelta | None,
+    floor_failed: bool,
     key_id: str,
     note: Callable[[str], None],
     block: Callable[[str], None],
@@ -685,8 +910,10 @@ def _apply_replay(
     durable = bool(getattr(cache, "durable", False))
     # A report is fresh until issued_at + max_age, and issued_at may be up to
     # clock_skew in the future, so remember the id for max_age + 2*skew.
-    retain = (_effective_max_age(policy) or DEFAULT_RETENTION) + 2 * policy.clock_skew
+    retain = (max_age or DEFAULT_RETENTION) + 2 * policy.clock_skew
     try:
+        if floor_failed:
+            raise ReplayStateError("the replay store's policy floor could not be read or written")
         if policy.replay_mode == "check":
             if cache.seen(key_id, env.audit_run_id, now=now):
                 block("REPLAY_DETECTED")

@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.3.0 — unreleased
+
+AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
+canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with the authorized exceptions under
+Changed, below. Release scope is undecided.
+
+**Published v0.2.1 has none of these changes, including the storage refusals below, so do not assume it is protected.** See the advisories in [docs/advisories/](docs/advisories/). This section describes the experimental code from pull request #65, which is not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
+
+**Before upgrading, read [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md). Under `confidential` and `high-assurance`, a trust store without issuers is refused and `trust migrate` does not satisfy them: build a new
+store with `trust add`. Any replay file written by a published version is refused until you migrate it.**
+
+### Changed
+
+- **`verify --strict` is documented as having no effect.** It has done nothing since at least 0.1.0 and it selects no assurance profile, so use `--profile`. Verdicts and exit codes are unchanged. A later version will warn about it, and a later breaking change will remove it or make it a usage error. It will not become an alias for a profile.
+- **Trust store storage under the strict profiles.** `confidential`, `high-assurance` and `secure-v1` refuse a trust store file owned by another account except root. They also refuse it if another account is able to write this file directly or through a directory above it. They also refuse symlinks. This is for `verify`, `serve`, the `revocation` commands and `VerificationPolicy` with a store from `TrustStore.from_json`. This does not protect against the same account, an administrator or a restored copy. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#where-the-trust-store-can-live).
+- **macOS ACLs are checked** for the trust store, the replay file, and the directories above them, under the strict profiles, and one that cannot be read fails closed. The `revocation` state and pin files have the same ACL and directory checks in all profiles.
+- **`trust add`, `trust retire` and `trust revoke` refuse a store file another account could have changed, or a directory where others can write**, in all profiles. These commands will keep the mode of a store file they edit. `trust add` used to reset the mode to `0644`. `replay migrate` refuses a file with a second name or write ACL. It also refuses a file in a directory where others can write. For all of these this includes a directory that only a chain of symlinks goes through.
+- **A failed `revocation enroll` will not leave a record behind** and can be tried again. This is not the case if the pin was already in place, where it will normally say that both are in place. After a crash between the two writes, the record would give nothing without a pin. `rebaseline` would be used to get it back.
+- **Replay file storage under the strict profiles.** `confidential`, `high-assurance` and `secure-v1` refuse any replay file that another account owns or can write directly or through a directory above it. They also refuse any symlinks and other file types. New files are `0600` in all profiles. `replay_durable` is `false` for any unsafe file under `development`. This would not protect against the same account, an administrator, or a restored backup. More information can be found in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#where-the-replay-file-can-live).
+- **`revocation enroll` and `rebaseline` exit 3 for an unusable trust store**, where they used to exit with 2. A failed `rebaseline` will now leave the state record as it was. Before it would have changed it before finding that the pin file could not be saved. The exception is where the pin was already in place.
+- **Upgrade action: `confidential` and `high-assurance` refuse a trust store that states no issuer (security, published
+  0.1.0 to 0.2.1).** With a bare or `keys` store, any enrolled key could sign under any issuer name and get `TRUSTED` with
+  `issuer_trusted` true, in every policy, and nothing in the output said so. The number of keys makes no difference. The policy now refuses
+  such a store before reading a report: `PolicyError`, CLI exit 2, and `serve` does not start. Build a new store with `regaudit-fhe trust add`. See `docs/MIGRATION_0.3.md`. `development` and the lenient
+  library paths keep their verdicts.
+- **Upgrade action: the same profiles refuse an issuer that only `trust migrate --issuer` stated (`ISSUER_ENROLLMENT_UNAUTHENTICATED`).** That is an operator's assertion, and no authenticated enrollment exists. `development`
+  accepts such a store and labels results `ISSUER_OPERATOR_DECLARED`. The record is `issuer_source` on each entry of the store, so it survives a copy, a move and `from_dict`. **Published versions refuse a migrated store (`verify` exits 3), which fails closed: keep the source store, which is left unchanged and is the way back.**
+- With such a store in `development`, `reasons` gains `ISSUER_UNBOUND` and the CLI warns on stderr. `verify_envelope`'s result gains `issuer_bound`,
+  which `to_dict` leaves out and `dataclasses.asdict` includes, and it raises a `DeprecationWarning`. `verify_receipt` does not warn, as its contract says. No verdict changes. Response format v2 gains `issuer_binding`.
+- **An `entries` store holding an ambiguous issuer name no longer loads, in any profile.** One rule at enrollment, loading and migration: not empty, no leading or trailing
+  whitespace, no whitespace other than U+0020, no control, zero-width, bidi or other invisible characters, and not only combining marks or blanks. Nothing is normalised. `verify` exits 3 and `serve` does not start. Signing is not
+  covered, but only a store with no issuers can accept such a report.
+- `trust migrate` says its issuers are a local operator's statement, in its output, `trust list` and `trust status`. `trust add`'s output gains `issuer_binding` and `authenticated_binding: false`.
+- `confidential` and `high-assurance` refuse a `TrustStore` subclass (`PolicyError`), and issuer binding is worked out from validated records.
+- Under the same profiles, `verify_report` gives `INVALID` with `MALFORMED_ENVELOPE` for an envelope object that is a subclass, has an added attribute, or has a field that is not plain JSON. A `str` subclass as `issuer` could otherwise answer the comparison and get `TRUSTED` for the wrong issuer. Reports read from JSON are not affected.
+- **Upgrade action: a replay file written by a published version is refused until migrated.** It never recorded its policy,
+  so nothing can reconstruct it. `SqliteReplayCache` raises `LegacyReplayFile`, CLI `verify` exits 3 and `serve` refuses to
+  start. Run `regaudit-fhe replay migrate`, stating the earlier `max_age` or that it is unknown. If unknown, reports issued
+  before the migration are refused (`REPLAY_HISTORY_UNKNOWN`). See `docs/DEPLOYMENT.md`.
+- Replay: raising `max_age` against a replay store no longer takes effect. A report that had gone stale, or whose
+  identifier had expired under the earlier setting, used to become acceptable again, so the same report could be accepted
+  twice. The same happened with no one raising anything, when two services with different settings shared a file or a later run left
+  `max_age` out. The store keeps a floor, the smallest effective `max_age` served. It only goes down and survives restarts. Only when
+  the setting exceeds the floor, the floor is enforced and the result carries the informational
+  `REPLAY_POLICY_FLOOR_APPLIED`. With `max_age` unchanged or lowered, verdicts are unchanged. See `docs/TRUST_SPEC.md` 6.1.
+- The same for `trust_history_max_age` (`TRUST_HISTORY_FLOOR_APPLIED`), and a value above 24 hours is no longer honoured on
+  any store: a caller with such a setting and a caller-supplied history older than 24 hours is now refused. If the floor
+  cannot be used, no history counts.
+- Replay: an identifier now lives through its expiry instant. With `clock_skew=0` a report first presented at exactly T was
+  accepted again at exactly T+max_age; that second presentation is now `REPLAY_DETECTED`. Library only, since the CLI and
+  server have no `clock_skew` option. No other verdict changes.
+- A replay file with any database object beyond the exact expected ones (a trigger, view, index or table) is refused, at
+  migration and at every use. A migration builds a clean new file and keeps the original as `FILE.pre-migration`.
+
+### Added
+
+- The `secure-v1` profile: `confidential` plus a fixed 24 hour trust-history window, the same on a new store, an existing store and with no store state, which a caller cannot set larger or
+  smaller. The existing profiles keep their window rules and make no such claim.
+- CLI `trust status`, `trust retire`, `trust revoke`: read-only lifecycle view, and one-way edits of an `entries`
+  trust store (active to retired, active or retired to compromised; never re-dated, never loosened, never
+  deleted). These edit a **local, unauthenticated file**; they are not authoritative revocation and do not
+  distribute anything. Edits are validated, atomic, keep a one-generation `STORE.prev`, and preserve the store's
+  permission bits (store and backup); symlinked stores are edited through the link. Legacy and bare-mapping stores
+  are refused, not converted. See `docs/TRUST_LIFECYCLE_PROPOSAL.md`; the signed-revocation design is in
+  `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`. Output of `trust retire|revoke` is labelled LOCAL VERIFIER POLICY CHANGE
+  (not issuer-authorised revocation) and states that rollback of the local file is undetectable.
+- EXPERIMENTAL, off by default, nothing exported, no schema registered: signed revocation data under private modules, with
+  `revocation` CLI commands, `trust migrate` and `verify --revocation-mode`. `high-assurance` with revocation off does not
+  evaluate revocation. The default output of `verify` and `POST /v1/verify` is unchanged and does not say so; opt in with
+  `verify --response-format v2` or `POST /v1/verify?response_format=v2` for an explicit `revocation_evaluation`. The revocation-aware `high-assurance` profile is unavailable and refuses, because no independently
+  protected state store is qualified. `required` is available under the lower profiles on a local file store, which is not
+  independent. The pin and recovery anchor are the root and the signer a delegate, with no independent approver and no quorum.
+  See `docs/proposals/revocation-list.v1/IMPLEMENTATION_NOTES.md`.
+
 ## [0.2.1] - 2026-11-01
 
 Availability hardening of the HTTP server (`regaudit-fhe[server]`). AI-assisted engineering work; not an audit and

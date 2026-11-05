@@ -88,6 +88,38 @@ matches **all** of:
 Embedding a key in the envelope is a convenience for self-consistency checks
 and MUST NOT be an authority.
 
+**Issuer attribution.** `issuer_trusted: true` means the signed issuer name is exactly the name the
+trust store states for the key that verified the report, and that key is registered, in scope and not revoked.
+The name comes from the trust store. It never comes from the report, the `key_id`, or the number of keys in the
+store: one key can sign under any name unless something in the store says which name it has. It does not show
+that the store's statement is true, or who held the key. **No authenticated issuer enrollment exists in this version, and no
+output claims one.** A trust store is a local file.
+
+Four cases, by the owner's ruling, under the strict profiles `confidential`, `high-assurance` and `secure-v1`:
+
+| Store | Strict profiles | `development` and the lenient library paths |
+|---|---|---|
+| Bare or `keys`, with no issuers | Refused when the policy is built (`PolicyError`; CLI exit 2; the server does not start), before any report is read. No opt-out | Verdict as before, labelled `ISSUER_UNBOUND` |
+| `entries`, with issuers recorded as stated by `trust migrate --issuer` | Refused the same way, code `ISSUER_ENROLLMENT_UNAUTHENTICATED`. That is an operator's assertion, not an enrollment | Accepted, labelled `ISSUER_OPERATOR_DECLARED` |
+| `entries`, enrolled with `trust add`, or written by hand | Accepted when every other requirement passes, as normal enrollment. `issuer_binding` is `store_entry`, and it does not mean authenticated. Whether this should count is open | Accepted |
+| Authenticated enrollment | Permitted when it exists. None exists, and none is implemented | |
+
+The record of a migration is in the store: `issuer_source: "operator-declared"` on each entry. It travels with the store through a copy, a move or `from_dict`. Any other value is refused. Deliberately deleting the member
+from the file is an edit of local state, outside the guarantee: nothing can detect it, the store then looks like a hand-written one, and a strict profile accepts it.
+
+Published versions refuse an unknown member in a store, so every one of them refuses a migrated store, which fails closed. An older verifier is a downgrade limitation, and the source store stays the way back.
+
+An issuer's name follows one rule at enrollment, trust-store parsing and migration, in every profile, and is never normalised: it may not be empty, have leading or
+trailing whitespace, contain whitespace other than U+0020, contain a control, format (zero-width, bidi), unassigned, private-use or blank character, or render as nothing because it has no letter, number, punctuation mark or symbol. A combining mark after a base character is fine. Look-alike letters,
+double spaces and Unicode normal forms stay different names. A signer is not held to this rule, but only a store with no issuers can then accept its report.
+
+In `development`, and on the lenient library paths `verify_envelope` and `verify_report(parse_envelope(...))`, such a store
+keeps the verdicts it has always had, for compatibility. There `issuer_trusted` shows only that the key is registered, in scope and
+not revoked, and the result says so: `ISSUER_UNBOUND` in `reasons`, a warning on the CLI's stderr, `issuer_binding: "not_bound"`
+in response format v2, and `issuer_bound` false plus a `DeprecationWarning` from `verify_envelope`. `verify_receipt` returns a bare bool and by its
+contract does not warn when given trust material, so it carries no label. A relying
+application MUST NOT treat the `issuer` field as attributed there.
+
 ### 3.2 `report.v2` signed identity fields
 
 These move into the **signed body** (v1 left them in the unsigned receipt):
@@ -437,8 +469,22 @@ Requirements for `confidential` and `high-assurance`:
 * **Persistence.** The cache is durable. An in-memory cache is allowed only
   under `development`.
 * **Retention.** Entries live at least `max_age + clock_skew`; they MUST NOT be
-  evicted early. If capacity is exhausted the verifier fails closed
-  (`REPLAY_STATE_UNAVAILABLE`); it MUST NOT evict to make room.
+  evicted early. Retention is fixed when an identifier is recorded, so a shipped
+  cache keeps a floor: the smallest effective `max_age` it has served under
+  `record`. It only goes down, the sqlite floor survives restarts, and a larger
+  setting is not honoured against that store (`REPLAY_POLICY_FLOOR_APPLIED`).
+  Otherwise raising `max_age` would let the same report be accepted twice, and
+  evidence refused as stale become acceptable merely because a setting changed.
+  Going back to a larger `max_age` needs a new replay file, which forgets the
+  old identifiers, so it is an explicit operator decision. A file from a published
+  version never recorded its policy, so it is refused until migrated
+  (`docs/DEPLOYMENT.md`): the operator states the earlier `max_age`, which becomes
+  the floor, or states that it is unknown, in which case every report issued up to
+  the migration is refused (`REPLAY_HISTORY_UNKNOWN`). The same floor applies to
+  `trust_history_max_age`, which is also never honoured above 24 hours. Any database
+  object in a replay file beyond the exact expected ones is a refusal, at migration
+  and at every use. An entry lives through its expiry instant: a report is still
+  fresh at exactly `issued_at + max_age`.
 * **Failure.** If the cache is unreachable or errors, verification fails closed
   with `REPLAY_STATE_UNAVAILABLE`. `development` MAY fail open and MUST say so
   in `reasons`.
@@ -468,8 +514,9 @@ Independent verifiers that do not share a store can each record the same report.
 
 **Durability disclosure.** Every result that performed a replay check reports
 `replay_durable`: `true` only if a recorded identifier survives a process restart
-(the sqlite cache commits before returning), `false` for the in-memory cache, whose
-records are lost when the process exits and which is therefore not crash-durable.
+(the sqlite cache commits before returning) in a file that passes the storage check,
+`false` for the in-memory cache, whose records are lost when the process exits and which
+is therefore not crash-durable, and `false` for a sqlite file that fails that check.
 `replay_durable` is `null` when no replay check ran. Even a durable local record is
 not an exactly-once guarantee for a downstream operation.
 
@@ -539,7 +586,7 @@ original canonical signing format. v2 MUST NOT alter that format.
 |---|---|---|
 | `trust_status` | `TRUSTED` \| `SELF_SIGNED_ONLY` \| `INVALID` | The single classification. |
 | `integrity_valid` | bool | SHA-256 receipt and signature are consistent (against the registered key when trust material exists). |
-| `issuer_trusted` | bool | The issuer matched §3.1 items 1-6. False when no trust material was supplied. |
+| `issuer_trusted` | bool | The issuer matched §3.1 items 1-6. False when no trust material was supplied. See "Issuer attribution" in §3.1 for a store that states no issuer. |
 | `key_status` | `active` \| `retired` \| `compromised` \| `revoked` \| `unknown` \| `none` | State of the signing key in the trust store. |
 | `chronology` | `NONE` \| `SIGNER_ASSERTED` \| `AUTHENTICATED` | Best evidence class available. |
 | `signed_not_after` | RFC 3339 or null | Upper bound on signing time from authenticated evidence. |
@@ -576,12 +623,14 @@ report is distinguishable from a forgery.
 `REPORT_FROM_FUTURE`, `REPLAY_DETECTED`, `REPLAY_ID_MISSING`,
 `TIMESTAMP_FAILED`, `TIMESTAMP_REQUIRED`, `TRUST_STORE_STALE`,
 `TRUST_STORE_ROLLBACK`, `TRUST_STORE_FORK`, `TRUST_STORE_FRESHNESS_UNPROVEN`,
+`TRUST_STORE_STORAGE_UNSAFE`,
 `TRUST_ANCHOR_MISSING`, `REPLAY_STATE_UNAVAILABLE`, `LEASE_EXPIRED`,
 `LEGACY_V1_FORMAT`, `SELF_SIGNED_NO_TRUST_MATERIAL`, `PROVENANCE_CONTRADICTION`,
-`PROVENANCE_UNVERIFIABLE`.
+`PROVENANCE_UNVERIFIABLE`, `REPLAY_POLICY_FLOOR_APPLIED`, `REPLAY_HISTORY_UNKNOWN`,
+`TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND`, `ISSUER_OPERATOR_DECLARED`.
 
-Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT` and
-`SELF_SIGNED_NO_TRUST_MATERIAL` are informational unless a policy also refuses on
+Of these, `CHRONOLOGY_UNAUTHENTICATED`, `LEGACY_V1_FORMAT`,
+`SELF_SIGNED_NO_TRUST_MATERIAL`, `REPLAY_POLICY_FLOOR_APPLIED`, `TRUST_HISTORY_FLOOR_APPLIED`, `ISSUER_UNBOUND` and `ISSUER_OPERATOR_DECLARED` are informational unless a policy also refuses on
 them; the result's `blocking_reasons` lists the codes that caused a refusal. The
 `TRUST_STORE_*`, `TRUST_ANCHOR_MISSING` and `LEASE_EXPIRED` codes are reserved for
 the held O8 / reserve-commit work and are not emitted in Phase 3A.
@@ -720,6 +769,14 @@ one function, called by every entry point.
 | `development` | allowed, loopback only | optional | signer-asserted allowed | allowed | off |
 | `confidential` | refused | required, authenticated | authenticated for retired keys | **refused** (cannot be replay-checked) | required |
 | `high-assurance` | refused | required, authenticated, fresh | authenticated always | refused unless waived in policy | required, shared |
+| `secure-v1` | refused | as `confidential` | as `confidential`, with a fixed 24 hour trust-history window | **refused** (cannot be replay-checked) | required |
+
+`secure-v1` is a distinct versioned profile, so that no existing parameter changes meaning. Its window is the same on a new replay store, an existing one
+and with no store state: `trust_history_max_age` other than 24 hours is refused when the policy is built, and a history older than 24 hours is never fresh. On a
+store where a shorter setting was served, the floor moves to 24 hours and the trust-history cutover to that moment, in one transaction, so what the shorter setting
+refused stays refused; if that cannot be written, no history counts. The other profiles keep their own rules, including the floor and the ceiling in 6.1, and make
+no such claim. Under `confidential`, `high-assurance` and `secure-v1` the store must be exactly a `TrustStore`, not a subclass, and §3.1 says which stores they refuse. An envelope object passed to the
+verifier must be exactly `AuditEnvelope` or `AuditEnvelopeV2` with every field plain JSON, or the result is `INVALID` with `MALFORMED_ENVELOPE` before any field is read. Malicious code in the verifier's process is outside this.
 
 A `high-assurance` deployment MUST refuse to start if any required element is
 missing, and MUST NOT fall back to a weaker profile.
@@ -962,6 +1019,11 @@ not an omission.
   bounds chunked uploads.
 * JSON number formatting is Python's `repr`; RFC 8785 is needed before a
   non-Python verifier is supported.
+
+* Local lifecycle editing (`trust status|retire|revoke`) exists for `entries` stores only. It edits an
+  unauthenticated local file; it is not the anchor-authenticated mechanism of 4.5/4.6 and does not make
+  `TrustHistory.authenticated` true. See `docs/TRUST_LIFECYCLE_PROPOSAL.md` and
+  `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
 
 ### C.4 Owner contract decisions for Phase 3A (final)
 

@@ -133,7 +133,7 @@ and, without a trust store, only means "the file is intact".
 | --- | --- |
 | `accepted` | The final decision. True only when `trust_status` is `TRUSTED`. |
 | `integrity_valid` | The hash and signature are consistent (checked against *your* registered key). |
-| `issuer_trusted` | The key is registered, in scope and not revoked. The signed issuer name is checked only with the `entries` trust-store form. A legacy `{"keys": ...}` or bare `{key_id: PEM}` store has no issuer binding, so this field does not establish the issuer there; see [the advisory](advisories/issuer-attribution-0.2.1.md). |
+| `issuer_trusted` | The key is registered, in scope, not revoked, and the signed issuer name is the one your trust store states for it. A store that states no issuer cannot show that last part: strict profiles refuse it, and in `development` the result says `ISSUER_UNBOUND`. See [the advisory](advisories/issuer-attribution-0.2.1.md). |
 | `key_status` | `active`, `retired`, `compromised`, `revoked`, `unknown` or `none`. |
 | `chronology` / `timestamp_status` | How well the signing time is established (see the rules below). |
 | `blocking_reasons` | The codes that caused a refusal (for example `ISSUER_UNKNOWN`, `REPORT_TOO_OLD`). |
@@ -173,7 +173,7 @@ persistent replay cache, and refuse development-only options.
 * **Replay detection is local.** `consumption` is `NOT_CHECKED`,
   `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL`. `RECORDED_LOCAL` means "recorded in this
   verifier's own store at verification time"; it does not prove the authorised operation
-  completed. `replay_durable` says whether that record survives a restart. It is never
+  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the experimental code from pull request #65 and not in published v0.2.1. It is never
   global single-use protection or an exactly-once guarantee. Changing freshness settings on an
   existing store has its own limits: see the [replay advisory](advisories/replay-limitations-0.2.1.md).
 * **Retired or compromised keys.** They are accepted for historical reports only with

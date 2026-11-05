@@ -1,0 +1,188 @@
+{
+  "authority_recovery": {
+    "digest": "e3890962fc70a25d01b809f77f42acdf86525831190ba656ede4ee94b4c63855",
+    "document": {
+      "algorithm_version": 1,
+      "declares_compromised": [
+        {
+          "compromised_from": "2026-09-01T00:00:00Z",
+          "key_fingerprint": "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518"
+        }
+      ],
+      "issued_at": "2026-11-01T10:00:00Z",
+      "issuer": "acme",
+      "new_authority": {
+        "generation": 2,
+        "key_fingerprint": "59061f4aa2c034df8c1e585dab33e112ee17c8450a93057f020044bbaf1977da",
+        "key_id": "acme-rev-2",
+        "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfzmICTboldy6gUZqygn8SpcLc6X7QMRBr3fC37QMuKQ=\n-----END PUBLIC KEY-----\n"
+      },
+      "rebase": {
+        "epoch": 1,
+        "list_digest": "ef0eb8df23352856bc82c0a29e97179f6d4a721dc5bb1ee67d0a75ba17b67712"
+      },
+      "recovery_anchor": {
+        "key_fingerprint": "2c815d6d85ba15866ed58ecf84a546079e9e5f0c55ff619d8e9905351b5857ed",
+        "key_id": "acme-recovery-1"
+      },
+      "recovery_epoch": 1,
+      "schema": "regaudit-fhe.revocation-authority-recovery",
+      "schema_version": 1,
+      "signatures": {
+        "anchor": {
+          "algorithm": "ed25519",
+          "signature_b64": "rbB2UULWS9xAZt4CbuksyauScgPhXoXwJnQryILpGfCxC8MMVS5cZksgoH1tCsB6DLRMduGI6GnWwYHUQUEdBA=="
+        },
+        "new_authority": {
+          "algorithm": "ed25519",
+          "signature_b64": "CvGy6czp+ZKNK4ejNxLS3oEQaLkTlBbfg/yMO9QqNLOBIguPhL/uoBlLKueP2H1KCKVM7hSFPlLxU43PR/oJCg=="
+        }
+      },
+      "valid_until": "2026-11-15T08:00:00Z"
+    },
+    "signature_anchor_hex": "adb0765142d64bdc4066de026ee92cc9ab927203e15e85f026742bc882e919f0b10bc30c552e5c664b20a07d6d0ac07a0cb44c76e188e869d6c181d441411d04",
+    "signature_new_authority_hex": "0af1b2e9cce9f9928d2b87a33712d2de811068b9139416df83fc8c3bd42a34b381220b8f84bfeea0194b2ae78fd87d4a08a54cee14853e52f1538dcf47fa090a",
+    "signing_input_anchor_sha256": "f3ccdfca2b90ea41f0af267c8916cbed0507bd3c6d8d5290793afb807ef0e74b",
+    "signing_input_new_authority_sha256": "2326fd4cf48362247ce6e05f494c9c75a5c93dfb6f5672094bbc2198b8fa2f4d"
+  },
+  "authority_transition": {
+    "digest": "f2a7e824258ad5929ff040d639462cc3823babde555f91a445a50733b9fcddcb",
+    "document": {
+      "algorithm_version": 1,
+      "from_authority": {
+        "generation": 1,
+        "key_fingerprint": "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518",
+        "key_id": "acme-rev-1"
+      },
+      "issued_at": "2026-11-01T08:00:00Z",
+      "issuer": "acme",
+      "schema": "regaudit-fhe.revocation-authority-transition",
+      "schema_version": 1,
+      "signatures": {
+        "from": {
+          "algorithm": "ed25519",
+          "signature_b64": "l58uCI7icTHl7MV2y1d2nBnVmAi8PAL6N4ZQtNLzcbpXTCM8PEHa8slVIJkhdYJC4hEihEZm5zlFxg1AFFtKDg=="
+        },
+        "to": {
+          "algorithm": "ed25519",
+          "signature_b64": "OBluVzLGzf76H8SqwJsRURUd/HAqE0tB4zMHSXVqcv6LNktelCl07WqlBMNMLANRSCPWS7JkatgfnGuk6BGWDg=="
+        }
+      },
+      "to_authority": {
+        "generation": 2,
+        "key_fingerprint": "59061f4aa2c034df8c1e585dab33e112ee17c8450a93057f020044bbaf1977da",
+        "key_id": "acme-rev-2",
+        "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfzmICTboldy6gUZqygn8SpcLc6X7QMRBr3fC37QMuKQ=\n-----END PUBLIC KEY-----\n"
+      },
+      "valid_until": "2026-11-15T08:00:00Z"
+    },
+    "signature_from_hex": "979f2e088ee27131e5ecc576cb57769c19d59808bc3c02fa378650b4d2f371ba574c233c3c41daf2c955209921758242e21122844666e73945c60d40145b4a0e",
+    "signature_to_hex": "38196e5732c6cdfefa1fc4aac09b1151151dfc702a134b41e3330749756a72fe8b364b5e942974ed6aa504c34c2c03514823d64bb2646ad81f9c6ba4e811960e",
+    "signing_input_from_sha256": "ee4d2a8b255ac36ac262dac82ef87ff3015ad82c5bde224962f51602ae4ae190",
+    "signing_input_to_sha256": "6ba7afedf47e2c8779b1c4fbf7676f58c85d58281bb81c814046c561690b628b"
+  },
+  "keys": {
+    "recovery_anchor": {
+      "fingerprint": "2c815d6d85ba15866ed58ecf84a546079e9e5f0c55ff619d8e9905351b5857ed",
+      "key_id": "acme-recovery-1",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAywWdEkEQqZ5EWxP6jwGhwfhUbe3RTNSposcDUfCk0r8=\n-----END PUBLIC KEY-----\n"
+    },
+    "report_key_new": {
+      "fingerprint": "a242666202e4bacf9fbe961205c7d7c6fd659c18bd8b59945562e35a0e2b86df",
+      "key_id": "acme-2026b",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAJmP+4mBLcVqiTQ8a5J+JTC6VMP6LLtBYwfN2QjBTblk=\n-----END PUBLIC KEY-----\n"
+    },
+    "report_key_old": {
+      "fingerprint": "8516a3fe5507a3029e3069db8ce5085e485293742213bb6823e2c49f91868f20",
+      "key_id": "acme-2026a",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfIjT3/gFhDqQ8VhkFPxbYcme1QtFlxGBv1Vi9JRq77I=\n-----END PUBLIC KEY-----\n"
+    },
+    "revocation_authority_1": {
+      "fingerprint": "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518",
+      "key_id": "acme-rev-1",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtnBWDUJQzqGVSzWuLidvB4zB6U7Q2BcfA/j/4crjpj4=\n-----END PUBLIC KEY-----\n"
+    },
+    "revocation_authority_2": {
+      "fingerprint": "59061f4aa2c034df8c1e585dab33e112ee17c8450a93057f020044bbaf1977da",
+      "key_id": "acme-rev-2",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAfzmICTboldy6gUZqygn8SpcLc6X7QMRBr3fC37QMuKQ=\n-----END PUBLIC KEY-----\n"
+    }
+  },
+  "list_epoch1_retired": {
+    "digest": "ef0eb8df23352856bc82c0a29e97179f6d4a721dc5bb1ee67d0a75ba17b67712",
+    "document": {
+      "algorithm_version": 1,
+      "authority": {
+        "generation": 1,
+        "key_fingerprint": "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518",
+        "key_id": "acme-rev-1"
+      },
+      "entries": [
+        {
+          "effective_from": "2026-10-01T00:00:00Z",
+          "key_fingerprint": "8516a3fe5507a3029e3069db8ce5085e485293742213bb6823e2c49f91868f20",
+          "key_id": "acme-2026a",
+          "status": "retired"
+        }
+      ],
+      "epoch": 1,
+      "issued_at": "2026-11-01T09:00:00Z",
+      "issuer": "acme",
+      "prev_list_digest": null,
+      "schema": "regaudit-fhe.revocation-list",
+      "schema_version": 1,
+      "signature": {
+        "algorithm": "ed25519",
+        "signature_b64": "N+0APlAz/aSuMFOWubKJWgF1a5GXbmzEDVELuiuxESk4s2b1zcKJ90hW4fJyn1X+l38IvUIoiEJwosxNY00ECA=="
+      },
+      "valid_from": "2026-11-01T09:00:00Z",
+      "valid_until": "2026-11-08T09:00:00Z"
+    },
+    "signature_hex": "37ed003e5033fda4ae305396b9b2895a01756b91976e6cc40d510bba2bb1112938b366f5cdc289f74856e1f2729f55fe977f08bd4228884270a2cc4d634d0408",
+    "signing_input_sha256": "767d48b3bcafd2f7f36902f8eb54d51e0423f647eb4c00a802314722fb84acac"
+  },
+  "list_epoch2_replaced_and_compromised": {
+    "digest": "44642a50f8c525f29a58aceeaf1323aa9f6ffadf627d44a794634cf89bb32a61",
+    "document": {
+      "algorithm_version": 1,
+      "authority": {
+        "generation": 1,
+        "key_fingerprint": "79f7d84700712bb1dfac574b8269c976fe6deaaa6bb5dceb39922fc794415518",
+        "key_id": "acme-rev-1"
+      },
+      "entries": [
+        {
+          "effective_from": "2026-10-01T00:00:00Z",
+          "key_fingerprint": "8516a3fe5507a3029e3069db8ce5085e485293742213bb6823e2c49f91868f20",
+          "key_id": "acme-2026a",
+          "status": "replaced",
+          "successor": {
+            "key_fingerprint": "a242666202e4bacf9fbe961205c7d7c6fd659c18bd8b59945562e35a0e2b86df",
+            "key_id": "acme-2026b"
+          }
+        },
+        {
+          "effective_from": null,
+          "key_fingerprint": "9e11deee4422004e76745d1c677f3e57ef6e1a69aa2d3d94c6f493353d71d642",
+          "key_id": "acme-2026c",
+          "status": "compromised"
+        }
+      ],
+      "epoch": 2,
+      "issued_at": "2026-11-01T09:00:00Z",
+      "issuer": "acme",
+      "prev_list_digest": "ef0eb8df23352856bc82c0a29e97179f6d4a721dc5bb1ee67d0a75ba17b67712",
+      "schema": "regaudit-fhe.revocation-list",
+      "schema_version": 1,
+      "signature": {
+        "algorithm": "ed25519",
+        "signature_b64": "Mca17MQnmq5PPHaLhsHIxe8TBG8hNzrZrid0oXRwY1ezFDUOQTZveJt63efZJK0B1demlRZdmQc0ZZMcwylXCw=="
+      },
+      "valid_from": "2026-11-01T09:00:00Z",
+      "valid_until": "2026-11-08T09:00:00Z"
+    },
+    "signature_hex": "31c6b5ecc4279aae4f3c768b86c1c8c5ef13046f21373ad9ae2774a174706357b314350e41366f789b7adde7d924ad01d5d7a695165d99073465931cc329570b",
+    "signing_input_sha256": "da4594a688ce300c728443878177b394d67f86697d0c01083a1cb5d1c3c7f9e0"
+  },
+  "note": "FROZEN draft-v1 golden vectors (synthetic deterministic keys). Regenerate only with a version bump."
+}

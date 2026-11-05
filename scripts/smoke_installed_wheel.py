@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -67,7 +68,16 @@ def main() -> int:
     signer = rf.Signer.generate(issuer="smoke", key_id="k1")
     v1 = rf.envelope("fairness", report, signer=signer)
     schemas.validate_envelope(v1.to_dict())
-    if v1.algorithm_version != args.version:
+    # A development build such as 0.3.0.dev0 signs the last release as its report line, because that value is signed.
+    from regaudit_fhe.reports import LIB_VERSION
+
+    expected_line = (
+        LIB_VERSION if re.fullmatch(r"\d+\.\d+\.\d+\.dev\d+", args.version) else args.version
+    )
+    if (
+        v1.algorithm_version != expected_line
+        or re.fullmatch(r"\d+\.\d+\.\d+", expected_line) is None
+    ):
         print("FAIL: envelope algorithm_version != package version", file=sys.stderr)
         return 1
     trusted = rf.verify_envelope(v1, trusted_keys={"k1": signer.public_key_pem()})

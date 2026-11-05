@@ -44,7 +44,7 @@ Configuration via environment variables (see docs/DEPLOYMENT.md):
     REGAUDIT_FHE_TRUST_STORE           - path to a TrustStore JSON; REQUIRED for /v1/verify
     REGAUDIT_FHE_ALLOW_SELF_SIGNED     - "1" lets /v1/verify report SELF_SIGNED_ONLY
                                          (development profile, loopback only)
-    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance
+    REGAUDIT_FHE_PROFILE               - development (default) | confidential | high-assurance | secure-v1
     REGAUDIT_FHE_VERIFIER_ID           - this verifier's audience identifier
     REGAUDIT_FHE_MAX_AGE_S             - reject reports older than this many seconds
     REGAUDIT_FHE_REPLAY_DB             - sqlite path for the local persistent replay cache
@@ -120,6 +120,7 @@ from ._limits import (
     check_input_bounds,
     use_limits,
 )
+from ._verification_response import response_v2
 from .canonical import CanonicalError, loads_strict
 from .cli import SCHEMAS, _audit_dispatch
 from .replay import ReplayCache, SqliteReplayCache
@@ -548,6 +549,7 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
     # is not even read.
     trust_path = (trust_store_path or os.environ.get("REGAUDIT_FHE_TRUST_STORE", "")).strip()
     replay_db = os.environ.get("REGAUDIT_FHE_REPLAY_DB", "").strip()
+    profile = os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip()
     config = ServerConfig(
         api_keys=_parse_api_keys(os.environ.get("REGAUDIT_FHE_API_KEYS", "")),
         dev_mode=os.environ.get("REGAUDIT_FHE_DEV_MODE", "0") == "1",
@@ -559,12 +561,16 @@ def load_config_from_env(*, trust_store_path: str | None = None) -> ServerConfig
             for s in os.environ.get("REGAUDIT_FHE_CORS_ORIGINS", "").split(",")
             if s.strip()
         ),
-        trust_store=TrustStore.from_json(trust_path) if trust_path else None,
+        trust_store=TrustStore.from_json(trust_path, private_storage=profile != "development")
+        if trust_path
+        else None,
         allow_self_signed=os.environ.get("REGAUDIT_FHE_ALLOW_SELF_SIGNED", "0") == "1",
-        profile=os.environ.get("REGAUDIT_FHE_PROFILE", "development").strip(),
+        profile=profile,
         verifier_id=os.environ.get("REGAUDIT_FHE_VERIFIER_ID", "").strip() or None,
         max_age_s=_env_float("REGAUDIT_FHE_MAX_AGE_S"),
-        replay_cache=SqliteReplayCache(replay_db) if replay_db else None,
+        replay_cache=SqliteReplayCache(replay_db, private_storage=profile != "development")
+        if replay_db
+        else None,
         replay_mode=os.environ.get("REGAUDIT_FHE_REPLAY_MODE", "off").strip(),
         trusted_proxies=tuple(
             p.strip()
@@ -1487,6 +1493,12 @@ def build_app(
                     status.HTTP_403_FORBIDDEN,
                     f"development self-signed verification refused: {refusal}",
                 )
+        # Read from the request, not declared as a parameter, so the published OpenAPI document is unchanged.
+        response_format = request.query_params.get("response_format", "v1")
+        if response_format not in ("v1", "v2"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "response_format must be v1 or v2"
+            )
         # Read the body ourselves so the size limit also covers chunked uploads
         # that carry no Content-Length, then parse it strictly.
         raw = await _read_body(
@@ -1537,6 +1549,9 @@ def build_app(
             },
         )
         response: dict[str, Any] = result.to_dict()
+        if response_format == "v2":
+            # Opt-in. This server has no revocation gate, so it says revocation was not evaluated.
+            return response_v2(response, None)
         return response
 
     return app

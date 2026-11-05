@@ -45,6 +45,9 @@ def _first(pattern: str, text: str, what: str) -> str:
     return match.group(1)
 
 
+DEV_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+$")
+
+
 def source_versions(root: Path) -> dict[str, str]:
     return {
         "pyproject.toml": _first(
@@ -352,10 +355,21 @@ def main(argv: list[str] | None = None) -> int:
     problems: list[str] = []
     versions = source_versions(args.root)
     distinct = set(versions.values())
-    if len(distinct) != 1:
+    package = versions["pyproject.toml"]
+    # Only a rehearsal of a development build may keep the last release in LIB_VERSION. A tag needs all three equal.
+    development_build = (
+        not args.tag
+        and DEV_VERSION.match(package) is not None
+        and versions["regaudit_fhe/__init__.py"] == package
+    )
+    if len(distinct) != 1 and not development_build:
         problems.append(f"source version strings disagree: {versions}")
-    version = next(iter(sorted(distinct)))
+    version = package if development_build else next(iter(sorted(distinct)))
 
+    if args.tag and DEV_VERSION.match(package):
+        problems.append(
+            f"{package} is a development version and cannot be released from tag {args.tag}"
+        )
     if args.tag:
         match = STRICT_TAG.match(args.tag)
         if not match:
