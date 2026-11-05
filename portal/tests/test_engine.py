@@ -266,8 +266,10 @@ def test_the_engine_is_checked_three_times_for_every_verification(demo, monkeypa
         calls.append(1)
         return real(*args, **kwargs)
 
+    client = client_for(
+        demo / "portal-config.json"
+    )  # starting the portal checks the engine too, so count from here
     monkeypatch.setattr(portal_app, "check_engine", counting)
-    client = client_for(demo / "portal-config.json")
     for _ in range(3):
         assert post(client, demo, "1-trusted.json").status_code == 200
     assert len(calls) == 9
@@ -351,7 +353,7 @@ def test_no_option_flag_or_environment_variable_can_change_which_engine_is_accep
     for path in package.glob("*.py"):
         text = path.read_text()
         assert "os.environ" not in text and "getenv" not in text, path.name
-    flags = set(re.findall(r'add_argument\("(-[-a-z]+)"', (package / "__main__.py").read_text()))
+    flags = set(re.findall(r'add_argument\(\s*"(-[-a-z]+)"', (package / "__main__.py").read_text()))
     assert flags == {"--config", "--port"}
     monkeypatch.setattr(engine_module, "files_digest", _crashes)
     for name in (

@@ -1,4 +1,9 @@
-"""``regaudit-portal serve``, ``check-config`` and ``demo-setup``. Only the administrator uses these.
+"""``regaudit-portal serve``, ``check-config`` and ``demo-setup``. Only the administrator, or a launcher, uses these.
+
+``serve`` without ``--config`` looks for the configuration in the standard per-user folder. If there is none it starts in
+welcome mode, where the bundled samples work and your own reports are not set up. It never creates that folder or
+anything in it. ``--port 0`` takes any free port, and the line ``portal-listening url=... mode=...`` tells a launcher
+where the portal is.
 
 The engine is checked before anything that imports it is loaded. If the check fails, ``serve`` starts the
 "verification unavailable" application instead, and the other commands stop with exit code 3. What failed and where is
@@ -17,22 +22,66 @@ import os
 import shlex
 import shutil
 import signal
+import socket
 import sys
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
 from .engine import REINSTALL, check_engine
+from .paths import default_config_path, display_path
 
 HOST = "127.0.0.1"  # local only: this first version has no sign-in, so it must not be reachable from a network
 
 
-def started_message(ready: bool, port: int) -> str:
-    """What to tell the administrator once the portal is listening. Not before, and not if it never started."""
-    if ready:
-        return f"open http://{HOST}:{port} in a browser. Press Ctrl-C to stop."
-    return (
-        "the portal is running but NOT ready, so it gives no verdicts. "
-        "Run check-config with the same --config to see why. Press Ctrl-C to stop."
-    )
+def listening_line(port: int, mode: str) -> str:
+    """One line a launcher can read: where the portal is and which mode it is in.
+
+    ``mode`` is ``ready`` (your own reports can be checked), ``welcome`` (no configuration: the samples work),
+    ``needs-attention`` (a configuration that cannot be used: the samples work) or ``unavailable`` (the engine check
+    failed: only a page saying so is served).
+    """
+    return f"portal-listening url=http://{HOST}:{port}/ mode={mode}"
+
+
+def started_message(mode: str, port: int) -> str:
+    """What to tell the person at the terminal once the portal is listening. Not before, and not if it never started."""
+    opening = f"open http://{HOST}:{port} in a browser."
+    if mode == "welcome":
+        return (
+            f"{opening} The samples work. Your own reports are not set up yet: an administrator has to set up trust "
+            "first (the page says how). Press Ctrl-C to stop."
+        )
+    if mode == "needs-attention":
+        return (
+            f"{opening} The samples work, but your own reports cannot be checked until the configuration is fixed. "
+            "Run check-config with the same --config to see why. Press Ctrl-C to stop."
+        )
+    return f"{opening} Press Ctrl-C to stop."
+
+
+def _bind_loopback(port: int) -> socket.socket:
+    """Listen on this computer only. Port 0 takes any free port, which the caller reads back from the socket."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((HOST, port))
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _configuration(given: str | None) -> str | None:
+    """The configuration to use: ``--config`` if given, else the standard per-user file if one is there, else none.
+
+    ``None`` is welcome mode. This only looks. It creates nothing.
+    """
+    if given is not None:
+        return given
+    try:
+        standard = default_config_path()
+    except RuntimeError:  # no home folder to look in
+        return None
+    return str(standard) if os.path.lexists(standard) else None
 
 
 def unavailable_message(reason: str, detail: str) -> str:
@@ -49,7 +98,7 @@ def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
     raise KeyboardInterrupt
 
 
-def _run(app: object, port: int, ready: bool) -> None:
+def _run(app: object, sock: socket.socket, mode: str) -> None:
     """Serve until Ctrl-C or SIGTERM (what ``kill`` sends), then stop cleanly with one line.
 
     uvicorn shuts down gracefully, puts back the handlers that were in place before it started, and then raises the
@@ -62,15 +111,15 @@ def _run(app: object, port: int, ready: bool) -> None:
     class Announcing(uvicorn.Server):
         async def startup(self, sockets: list | None = None) -> None:
             await super().startup(sockets=sockets)
-            if self.started:  # only after the port was bound; a failed start exits before this
-                print(started_message(ready, port), flush=True)
+            if self.started:  # only after the socket was taken up; a failed start exits before this
+                print(listening_line(port, mode), flush=True)
+                print(started_message(mode, port), flush=True)
 
-    config = uvicorn.Config(
-        app, host=HOST, port=port, access_log=False, server_header=False, log_level="warning"
-    )
+    port = sock.getsockname()[1]
+    config = uvicorn.Config(app, access_log=False, server_header=False, log_level="warning")
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
     with contextlib.suppress(KeyboardInterrupt):
-        Announcing(config).run()
+        Announcing(config).run(sockets=[sock])
     print(STOPPED, flush=True)  # a start that failed raised SystemExit above and does not get here
 
 
@@ -97,6 +146,8 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     except OSError as exc:
         sys.stderr.write(f"cannot listen on {HOST}:{port}: {exc.strerror or exc}\n")
         return 1
+    port = server.server_address[1]  # the real port, also when 0 asked for any free one
+    print(listening_line(port, "unavailable"), flush=True)
     print(
         f"open http://{HOST}:{port} in a browser. It will say that verification is unavailable. "
         "Press Ctrl-C to stop.",
@@ -117,12 +168,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="regaudit-portal")
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="Start the portal on this computer only.")
-    serve.add_argument("--config", required=True)
-    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument(
+        "--config",
+        help="The configuration file. Without it, the standard per-user location is used if a file is there.",
+    )
+    serve.add_argument(
+        "--port", type=int, default=8765, help="The port on this computer. 0 takes any free port."
+    )
     check = commands.add_parser(
         "check-config", help="Say whether a configuration can be used, and why not."
     )
-    check.add_argument("--config", required=True)
+    check.add_argument(
+        "--config", help="The configuration file. Without it, the standard per-user location."
+    )
     demo = commands.add_parser(
         "demo-setup", help="Create a synthetic trust store, configuration and sample reports."
     )
@@ -167,8 +225,14 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     if args.command == "check-config":
+        configured = _configuration(args.config)
+        if configured is None:
+            sys.stderr.write(
+                f"not usable: there is no configuration at {display_path(default_config_path())}\n"
+            )
+            return 3
         try:
-            portal = load_portal(args.config)
+            portal = load_portal(configured)
         except ConfigProblem as exc:
             sys.stderr.write(f"not usable: {exc}\n")
             return 3
@@ -187,9 +251,15 @@ def main(argv: list[str] | None = None) -> int:
         return _serve_unavailable(args.port, "ENGINE_UNLOADABLE", f"{type(exc).__name__}: {exc}")
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    app = build_app(args.config, port=args.port)
+    try:
+        sock = _bind_loopback(args.port)
+    except OSError as exc:
+        sys.stderr.write(f"cannot listen on {HOST}:{args.port}: {exc.strerror or exc}\n")
+        return 1
+    configured = _configuration(args.config)
+    app = build_app(configured, port=sock.getsockname()[1])
     print(f"engine: {identity.engine['summary'] if identity.engine else ''}", flush=True)
-    _run(app, args.port, app.state.ready)
+    _run(app, sock, app.state.mode)
     return 0
 
 

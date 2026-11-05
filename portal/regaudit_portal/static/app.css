@@ -91,6 +91,39 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
+.choices { display: grid; gap: 12px; }
+.choice {
+  display: block;
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.choice:hover, .choice:focus-visible { border-color: var(--accent); }
+.choice strong { display: block; margin-bottom: 2px; color: var(--accent); font-size: 17px; }
+.choice span { display: block; color: var(--muted); font-size: 14px; }
+.sample-list { margin: 0 0 4px; padding: 0; list-style: none; }
+.sample-list li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.sample-list li:last-child { border-bottom: 0; }
+.sample-list strong { display: block; }
+.sample-list .fine { margin: 2px 0 8px; }
+.sample-list button { margin-top: 0; }
+.demo-banner {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 2px solid var(--warn-text);
+  border-radius: 6px;
+  font-weight: 600;
+}
 button.quiet { background: transparent; color: var(--accent); border: 1px solid var(--line); }
 .fine { color: var(--muted); font-size: 13px; }
 .statement { margin: 0 0 8px; font-weight: 600; }

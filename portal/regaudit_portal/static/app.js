@@ -7,6 +7,9 @@ const CHOOSE = "Drop a report file (.json) here, or click to choose one";
 const LIMIT = 1048576;
 let chosen = null;
 let lastSaved = null;
+let ownReady = false; // can the administrator's policy check an uploaded report?
+let lastView = "welcome"; // where "Check another report" goes back to
+const VIEWS = ["welcome", "samples", "upload", "not-ready"];
 
 function show(id, visible) {
   $(id).hidden = !visible;
@@ -14,19 +17,29 @@ function show(id, visible) {
 
 // The engine is missing or failed its check: nothing can be verified or saved until the administrator fixes it.
 function unavailable() {
-  show("upload", false);
+  for (const view of VIEWS) show(view, false);
   show("result", false);
   show("failure", false);
-  show("not-ready", false);
   show("record-notice", false);
   show("saved", false);
   show("unavailable", true);
   // Nothing that names the engine, the policy or a result may stay on screen once the engine has stopped passing.
-  for (const id of ["policy", "claim", "engine-summary", "engine-scope", "check-key", "raw", "verdict", "result-file"]) {
+  for (const id of ["policy", "claim", "engine-summary", "engine-scope", "check-key", "raw", "verdict", "result-file", "demo-banner"]) {
     $(id).textContent = "";
   }
+  $("sample-list").replaceChildren();
   chosen = null;
   lastSaved = null;
+}
+
+// One screen at a time: the start, the samples, uploading your own report, or the note that your own reports are not set up.
+function showView(name) {
+  const view = name === "own" ? (ownReady ? "upload" : "not-ready") : name;
+  for (const each of VIEWS) show(each, each === view);
+  show("failure", false);
+  show("result", false);
+  show("saved", false);
+  if (name === "welcome" || name === "samples" || name === "own") lastView = name;
 }
 
 function fail(message) {
@@ -61,6 +74,9 @@ function render(body, fileName) {
   verdict.textContent = v.trust_status;
   // The word itself is always the verifier's own.
   verdict.className = v.trust_status === "TRUSTED" ? "verdict trusted" : "verdict";
+  const demonstration = body.synthetic_demonstration === true;
+  $("demo-banner").textContent = demonstration ? body.demonstration.notice : "";
+  show("demo-banner", demonstration);
   $("result-file").textContent = fileName ? "Result for: " + fileName : "";
   $("verdict-meaning").textContent = e.verdict;
   $("verdict-means").textContent = e.means || "";
@@ -141,11 +157,58 @@ async function verifyChosen() {
       return;
     }
     lastSaved = { body: body, name: chosen.name };
+    lastView = "own";
     render(body, chosen.name);
   } catch (error) {
     fail("The check could not be completed, so there is no verdict. Treat the report as not accepted.");
   } finally {
     $("verify").disabled = !chosen;
+  }
+}
+
+// A bundled sample, chosen from the list by its id. Nothing is uploaded and no report is sent: the portal reads its own copy.
+async function checkSample(sample, button) {
+  button.disabled = true;
+  show("failure", false);
+  show("result", false);
+  show("saved", false);
+  try {
+    const response = await fetch("/api/samples/" + encodeURIComponent(sample.id) + "/verify", { method: "POST" });
+    const body = JSON.parse(await response.text());
+    if (body.state === "unavailable") {
+      unavailable();
+      return;
+    }
+    if (!response.ok || !body.verification) {
+      fail(body.message || "The check could not be completed, so there is no verdict.");
+      return;
+    }
+    lastSaved = { body: body, name: "sample-" + sample.id };
+    lastView = "samples";
+    render(body, "sample: " + sample.title);
+  } catch (error) {
+    fail("The check could not be completed, so there is no verdict.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function listSamples(samples) {
+  const list = $("sample-list");
+  list.replaceChildren();
+  for (const sample of samples) {
+    const item = document.createElement("li");
+    const title = document.createElement("strong");
+    title.textContent = sample.title;
+    const text = document.createElement("p");
+    text.className = "fine";
+    text.textContent = sample.description;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Check this sample";
+    button.addEventListener("click", () => checkSample(sample, button));
+    item.append(title, text, button);
+    list.append(item);
   }
 }
 
@@ -159,7 +222,8 @@ async function download() {
     return;
   }
   const stem = lastSaved.name.replace(/\.json$/i, "").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "report";
-  const fileName = "verification-result-" + stem + "-" + lastSaved.body.report_sha256.slice(0, 12) + ".json";
+  const kind = lastSaved.body.synthetic_demonstration === true ? "demonstration-result-" : "verification-result-";
+  const fileName = kind + stem + "-" + lastSaved.body.report_sha256.slice(0, 12) + ".json";
   const saved = Object.assign({ report_file_name: lastSaved.name }, lastSaved.body);
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([JSON.stringify(saved, null, 2) + "\n"], { type: "application/json" }));
@@ -177,15 +241,13 @@ async function start() {
     return;
   }
   $("claim").textContent = body.not_a_claim;
-  if (!body.ready) {
-    $("not-ready-message").textContent = body.message;
-    show("not-ready", true);
-    return;
-  }
-  show("upload", true);
+  ownReady = body.ready === true;
+  $("not-ready-message").textContent = ownReady ? "" : body.message;
   show("record-notice", body.replay_mode === "record");
-  $("policy").textContent =
-    body.policy_text + " " + body.engine.summary;
+  $("policy").textContent = (body.policy_text ? body.policy_text + " " : "") + body.engine.summary;
+  listSamples(body.samples || []);
+  $("choose-samples").disabled = (body.samples || []).length === 0;
+  showView("welcome");
 }
 
 $("file").addEventListener("change", (event) => choose(event.target.files[0]));
@@ -194,8 +256,16 @@ $("download").addEventListener("click", download);
 $("again").addEventListener("click", () => {
   $("file").value = "";
   choose(null);
-  $("drop").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  showView(lastView);
 });
+$("choose-samples").addEventListener("click", () => showView("samples"));
+$("choose-own").addEventListener("click", () => showView("own"));
+for (const back of document.querySelectorAll(".back")) {
+  back.addEventListener("click", () => {
+    choose(null);
+    showView("welcome");
+  });
+}
 const drop = $("drop");
 drop.addEventListener("dragover", (event) => {
   event.preventDefault();
