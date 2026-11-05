@@ -64,6 +64,35 @@ echo $! > portal.pid
 
 Stop it later with `kill $(cat portal.pid)`, which stops it as cleanly as Ctrl-C does. `portal.log` holds the portal's start-up lines and any error messages. A failing engine check is logged once when it starts failing and once when it recovers, not on every request.
 
+## The welcome screen
+
+The first screen offers three choices. All of them sit behind the same engine check as everything else: if the engine is not the recognised release, none of them is offered and the "Verification unavailable" page is shown instead.
+
+- **Try a sample report.** A short list of made-up demonstration reports, chosen from the list and never uploaded: one the demonstration issuer signed, one signed by a key nobody enrolled, one changed after it was signed, one that says it was computed on plaintext and one that names an encrypted backend although nothing was encrypted. No trust setup is needed. They are checked against a demonstration trust list with a separate demonstration policy that is used for these samples only, selected by their id. Every sample result, on the page and in the saved file, says it is a synthetic demonstration made with made-up data and a demonstration trust list. The saved file carries `synthetic_demonstration: true`, and the issuer is named "DEMO-ONLY synthetic issuer". The verdicts and reason codes are the engine's own. The package holds the demonstration issuer's public key and trust list, and no private key: the key that signed the samples was thrown away when they were made (`tools/make_demo_samples.py` makes them), so nothing in the package can sign anything.
+- **Verify your own report.** This uses the administrator's trust policy, as before. If none is set up, the page says "Verification of your own reports is not set up yet. An administrator has to set up trust first.", links to the administrator setup page and offers no upload, and the upload endpoint refuses without a verdict. A sample report uploaded here is checked against the administrator's policy, never against the demonstration's, so a demonstration key can never be taken for a trusted issuer.
+- **Administrator setup.** A separate page, `/setup`, with plain instructions and a read-only readiness status: the engine, the configuration, the trust list, the replay setting, the file ownership and permission check, and the port. It creates nothing and changes nothing, and it never accepts or shows a signing key. It shows places only as `~/...`, and never on the verification pages. It says what an administrator has to prepare (the trust list and the issuers' fingerprints received by another route than the report), where the files go and the existing commands that make a trust list.
+
+Making the trust list still needs those existing commands (`regaudit-fhe trust add`, below). Creating it in the browser would be a separate change that has to be designed and reviewed on its own. The setup page does not do it.
+
+### Where the configuration is looked for
+
+`serve` and `check-config` without `--config` look for the configuration in the standard per-user location:
+
+- macOS: `~/Library/Application Support/Evidence Verification Portal/portal-config.json`
+- Linux: `~/.config/evidence-verification-portal/portal-config.json`
+
+If there is no file there, `serve` starts in welcome mode: the samples work and your own reports are not set up. If there is one, it behaves exactly as with `--config`, including refusing when the configuration cannot be used and the check of who owns the folder and its files. With a configuration that cannot be used, your own reports are refused with the usual explanation and the samples still work. `--config` always overrides the standard location. The portal never creates that folder, or anything in it, by itself.
+
+### For a launcher
+
+An application that starts the portal for someone who never opens a terminal can run `regaudit-portal serve --port 0`. That takes any free port on this computer (`127.0.0.1` only, as always). Before the existing human line ("open http://... in a browser"), the portal prints one line a launcher can read once the portal is listening:
+
+```
+portal-listening url=http://127.0.0.1:PORT/ mode=MODE
+```
+
+`MODE` is `ready` (your own reports can be checked), `welcome` (no configuration: the samples work), `needs-attention` (a configuration that cannot be used: the samples work) or `unavailable` (the engine check failed: only the page saying so is served). The launcher stops the portal with SIGTERM, which stops it as cleanly as Ctrl-C does.
+
 ## Reading the result
 
 The big word is the verifier's `trust_status`, copied as it was returned: `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`. Only `TRUSTED` means the report was accepted. Under it the page keeps four questions apart.
@@ -167,7 +196,9 @@ Paths are relative to the configuration file.
 
 The configuration file, trust store, replay file and the folders holding them must belong to the account running the portal, or to root for the first two, and must not be writable by group or others. Otherwise the page says it is not ready and gives no verdicts. This is a basic start-up check the portal makes itself, from owner and permission bits. It is not the protection that the [security limitation](#security-limitation--published-v021) below says published v0.2.1 lacks, and it does not stop the same account, or an administrator, changing the files after start-up. Keep these files in a folder that only administrators can use.
 
-If the page says it is not ready, nothing can be verified. To see why, run:
+Without `--config`, the portal looks in the standard per-user folder (see [Where the configuration is looked for](#where-the-configuration-is-looked-for)). The setup page, `/setup`, shows what is in place and what is not, read-only.
+
+If the page says your own reports cannot be checked, nothing of yours can be verified. To see why, run:
 
 ```
 .venv/bin/regaudit-portal check-config --config portal-config.json

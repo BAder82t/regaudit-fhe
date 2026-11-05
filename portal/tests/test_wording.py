@@ -133,3 +133,54 @@ def test_the_readme_says_verifier_id_matters_for_reports_that_name_an_audience()
 def test_the_size_limit_is_called_1_mb_everywhere_and_never_1_mib():
     assert "MiB" not in _portal_text()
     assert "1 MB" in README.read_text() and "1 MB" in (_STATIC / "app.js").read_text()
+
+
+def test_the_readme_describes_the_welcome_screen_the_standard_location_and_what_a_launcher_can_rely_on():
+    text = README.read_text()
+    welcome = text[text.index("## The welcome screen") : text.index("## Reading the result")]
+    for said in (
+        "The first screen offers three choices",
+        "**Try a sample report.**",
+        "**Verify your own report.**",
+        "**Administrator setup.**",
+        "chosen from the list and never uploaded",
+        "a separate demonstration policy that is used for these samples only, selected by their id",
+        "synthetic demonstration made with made-up data and a demonstration trust list",
+        "`synthetic_demonstration: true`",
+        "DEMO-ONLY synthetic issuer",
+        "no private key: the key that signed the samples was thrown away",
+        "Verification of your own reports is not set up yet. An administrator has to set up trust first.",
+        "checked against the administrator's policy, never against the demonstration's",
+        "It creates nothing and changes nothing, and it never accepts or shows a signing key",
+        "only as `~/...`, and never on the verification pages",
+        "Making the trust list still needs those existing commands",
+        "Creating it in the browser would be a separate change that has to be designed and reviewed on its own",
+        "`~/Library/Application Support/Evidence Verification Portal/portal-config.json`",
+        "`~/.config/evidence-verification-portal/portal-config.json`",
+        "welcome mode: the samples work and your own reports are not set up",
+        "`--config` always overrides the standard location",
+        "never creates that folder, or anything in it, by itself",
+        "`regaudit-portal serve --port 0`",
+        "portal-listening url=http://127.0.0.1:PORT/ mode=MODE",
+        "`ready`",
+        "`welcome`",
+        "`needs-attention`",
+        "`unavailable`",
+        "SIGTERM",
+        "if the engine is not the recognised release, none of them is offered",
+    ):
+        assert said in welcome, said
+
+
+def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_apart_from_real_trust():
+    text = (README.parent / "SECURITY.md").read_text()
+    for said in (
+        "checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else",
+        "so a demonstration key can never be taken for a trusted issuer",
+        "Every sample result is labelled a synthetic demonstration",
+        "no private key",
+        "The administrator setup page only reads",
+        "never accepts or shows a signing key",
+        "never creates the per-user configuration folder by itself",
+    ):
+        assert said in text, said
