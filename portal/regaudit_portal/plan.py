@@ -75,11 +75,12 @@ _END_PUBLIC = "-----END PUBLIC KEY-----"
 
 # Text that only private or secret key material carries, in the forms people are likely to paste: PEM and PGP private
 # key blocks (PKCS#8, encrypted PKCS#8, RSA, EC, DSA, OpenSSH), PuTTY key files, age and minisign or signify secret
-# keys, the OpenSSH private key magic in base64, and a JSON Web Key's private member.
+# keys, the OpenSSH private key magic in base64, a JSON Web Key's private member, and the base64 start that every
+# unencrypted Ed25519 PKCS#8 private key has (so its body is caught even cut short or with characters added).
 _SECRET_MARKERS = re.compile(
     r"-----BEGIN[^\n-]*(PRIVATE|SECRET)|(PRIVATE|SECRET)\s+KEY\s*(BLOCK\s*)?-----|PuTTY-User-Key-File|"
     r"Private-Lines\s*:|AGE-SECRET-KEY-|b3BlbnNzaC1rZXktdjE|openssh-key-v1|secret\s+key\s*$|"
-    r"\"d\"\s*:\s*\"[A-Za-z0-9_-]{20,}",
+    r"\"d\"\s*:\s*\"[A-Za-z0-9_-]{20,}|MC4CAQAwBQYDK2VwBCIEI",
     re.IGNORECASE | re.MULTILINE,
 )
 # In the box meant for a public key, any mention of these words is enough to refuse.
@@ -95,6 +96,10 @@ KEY_MATERIAL_MESSAGE = (
 RAW_KEY_MESSAGE = (
     "This looks like raw key bytes. They could be a secret key, so they were refused and not shown back. Paste the "
     "issuer's public key in PEM form instead. It starts with -----BEGIN PUBLIC KEY-----."
+)
+NAME_KEY_MESSAGE = (
+    "This looks like raw key bytes, which could be a secret key, so it was refused and not shown back. A name is "
+    "never key material."
 )
 HEX_KEY_MESSAGE = (
     "This is 64 hexadecimal characters. It could be a fingerprint or a raw secret key, so it was refused and not "
@@ -261,8 +266,32 @@ def _raw_bytes(text: str) -> bytes | None:
     return None
 
 
-def refuse_secret(value: str, where: str | None = None, *, key_box: bool = False) -> None:
+def _looks_like_raw_key(value: str) -> bool:
+    """A name that is one token of hexadecimal or base64 the size of a raw Ed25519 secret key.
+
+    Base64 counts only with digits and both cases in it, as random bytes almost always have, so a long one-word name
+    is not mistaken for a key.
+    """
+    if any(c.isspace() for c in value):
+        return False
+    if _HEXISH.fullmatch(value):
+        return len(value) in (64, 96, 128)
+    if not _BASE64ISH.fullmatch(value) or not (
+        any(c.isdigit() for c in value)
+        and any(c.islower() for c in value)
+        and any(c.isupper() for c in value)
+    ):
+        return False
+    raw = _raw_bytes(value)
+    return raw is not None and len(raw) in _RAW_SECRET_LENGTHS
+
+
+def refuse_secret(
+    value: str, where: str | None = None, *, key_box: bool = False, name: bool = False
+) -> None:
     """Raise :class:`SecretMaterial` if ``value`` looks like private or secret key material. Never repeats it."""
+    if name and _looks_like_raw_key(value):
+        raise SecretMaterial(NAME_KEY_MESSAGE, where)
     if _SECRET_MARKERS.search(value) or (key_box and _SECRET_WORDS.search(value)):
         raise SecretMaterial(where=where)
     if "-----BEGIN" in value and _decodes_to_private_key(value.encode("utf-8", "replace")):
@@ -308,7 +337,8 @@ def _refuse_secrets_anywhere(value: Any, path: tuple[Any, ...] = ()) -> None:
     if len(path) > 8:
         raise PlanProblem("It is nested more deeply than a setup plan ever is.")
     if isinstance(value, str):
-        refuse_secret(value, _place(path), key_box=bool(path) and path[-1] in _KEY_MEMBERS)
+        last = path[-1] if path else None
+        refuse_secret(value, _place(path), key_box=last in _KEY_MEMBERS, name=last == "issuer")
     elif isinstance(value, list):
         for index, item in enumerate(value):
             _refuse_secrets_anywhere(item, (*path, index))

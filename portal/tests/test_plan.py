@@ -233,6 +233,45 @@ def test_a_private_key_in_the_verifier_id_an_unknown_member_or_a_member_name_is_
     ][:24] not in json.dumps(body)
 
 
+def test_raw_key_bytes_or_a_cut_private_key_in_a_name_are_refused_and_not_shown_back(
+    signer, request_body
+):
+    raw = signer.private_key.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()
+    )
+    der = signer.private_key.private_bytes(
+        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    public_raw = signer.public_key.public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    for value in (
+        raw.hex(),
+        raw.hex().upper(),
+        (raw + public_raw).hex(),
+        base64.b64encode(raw).decode(),
+        base64.urlsafe_b64encode(raw).decode().rstrip("="),
+        base64.b64encode(der).decode() + "x",
+        base64.b64encode(der).decode()[:30],
+    ):
+        status, body = _send(_with(request_body, issuer=value))
+        assert status == 422 and body["error"] == "secret_key_material", (value, body)
+        assert value not in json.dumps(body)
+
+
+def test_long_one_word_names_and_hexadecimal_key_ids_are_still_accepted(signer, request_body):
+    """Only random-looking tokens of a raw key's size are refused in a name. A key id may be hexadecimal: issuers
+    sometimes derive it from the key, and it cannot be told apart from a raw secret by its form."""
+    for name in (
+        "NorthwindAnalyticsLimitedOfTheUnitedKingdomX",
+        "ACME",
+        "a" * 44,
+        "Northwind 2026 Ltd",
+    ):
+        assert _send(_with(request_body, issuer=name))[0] == 200, name
+    assert _send(_with(request_body, key_id="ab" * 32))[0] == 200
+
+
 def test_ordinary_names_that_mention_private_or_secret_are_not_mistaken_for_keys(signer):
     for name in (
         "Acme Private Bank AG",
