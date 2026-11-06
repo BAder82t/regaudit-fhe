@@ -226,3 +226,13 @@ def test_the_readme_and_the_security_document_describe_administrator_setup_and_w
         assert said in part, said
     for text in (section, part):
         assert "—" not in text and "owner" not in text.lower() and "round" not in text.lower()
+
+
+def test_the_docs_state_that_a_demo_setup_trust_list_is_still_accepted_for_verification():
+    said = (
+        "Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started "
+        "with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only "
+        "the setup page labels it a demonstration. Never use the `demo-setup` files for real reports."
+    )
+    assert said in README.read_text()
+    assert said in (README.parent / "SECURITY.md").read_text()

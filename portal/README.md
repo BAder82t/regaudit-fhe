@@ -213,7 +213,7 @@ You apply a plan yourself, outside the browser:
 .venv/bin/regaudit-portal admin-apply setup-plan.json --expect-fingerprint KEY_ID=FINGERPRINT
 ```
 
-`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
+`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. It starts with a notice when the plan uses the development profile, a maximum report age over 30 days (the age 0.2.1 applies on its own, and the value this portal suggests) or the replay mode check, and it names the verifier id that reports must name. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
 
 What `admin-apply` holds to:
 
@@ -226,6 +226,8 @@ What `admin-apply` holds to:
 - It makes the folder with mode 0700 and the files with mode 0600, and moves them into place in one step. If it fails or is stopped before that step, nothing has changed, and it says so. If something after that step fails, it says the change is complete and exits with status 4. When the folder already exists, the trust list and the configuration go in one after the other. Only a hard kill or a power cut at that exact moment can leave the trust list without the configuration. The portal does not use it, and the next apply says what to move away.
 - Only one can run at a time for a folder.
 - It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
+
+Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only the setup page labels it a demonstration. Never use the `demo-setup` files for real reports.
 
 What stays manual: getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
 

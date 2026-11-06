@@ -43,7 +43,9 @@ A person applies a plan outside the browser: with `regaudit-portal admin-apply` 
 
 This adds no privilege. Anyone who can run the command can already enrol a key with `regaudit-fhe trust add`. It does not authenticate the administrator, and it does not add the protections that the limitation above says published v0.2.1 lacks.
 
-The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up. Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
+The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up.
+
+Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only the setup page labels it a demonstration. Never use the `demo-setup` files for real reports. Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
 
 ## Reporting a problem
 
