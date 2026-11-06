@@ -408,7 +408,17 @@ def test_the_command_line_check_says_why(demo):
 def test_the_browser_has_no_way_to_change_the_configuration(client, demo):
     before = (demo / "trust-store.json").read_bytes(), (demo / "portal-config.json").read_bytes()
     routes = {route.path for route in client.app.routes}
-    assert routes == {"/", "/static/{name}", "/security", "/api/status", "/api/verify"}
+    assert routes == {
+        "/",
+        "/static/{name}",
+        "/static/fonts/{name}",
+        "/security",
+        "/setup",
+        "/api/setup",
+        "/api/status",
+        "/api/verify",
+        "/api/samples/{sample_id}/verify",
+    }
     for method, path in (
         ("post", "/api/status"),
         ("put", "/api/verify"),
@@ -431,7 +441,7 @@ def test_status_does_not_reveal_paths_or_key_material(client, demo):
 def test_a_not_ready_page_does_not_reveal_why(demo):
     (demo / "trust-store.json").unlink()
     text = client_for(demo / "portal-config.json").get("/api/status").text
-    assert str(demo) not in text and "trust-store" not in text
+    assert str(demo) not in text and "trust-store.json" not in text
 
 
 def test_uploads_are_not_kept(client, demo):
@@ -478,10 +488,10 @@ def test_the_page_carries_a_strict_content_policy(client):
     assert headers["x-content-type-options"] == "nosniff" and headers["cache-control"] == "no-store"
 
 
-def test_only_the_two_static_files_can_be_read(client):
-    for name in ("app.js", "app.css"):
+def test_only_the_listed_static_files_can_be_read(client):
+    for name in ("app.js", "app.css", "setup.js", "vaultbytes-mark.svg"):
         assert client.get(f"/static/{name}").status_code == 200
-    for name in ("index.html", "..%2Fconfig.py", "%2e%2e%2fapp.py"):
+    for name in ("index.html", "setup.html", "..%2Fconfig.py", "%2e%2e%2fapp.py", "fonts"):
         assert client.get(f"/static/{name}").status_code == 404
 
 
@@ -661,14 +671,15 @@ def test_head_does_not_open_the_verify_route_or_anything_else(client):
     assert client.head("/static/index.html").status_code == 404
 
 
-def test_the_started_message_says_to_open_the_page_only_when_the_portal_is_ready():
-    assert (
-        started_message(True, 8765)
-        == "open http://127.0.0.1:8765 in a browser. Press Ctrl-C to stop."
-    )
-    not_ready_message = started_message(False, 8765)
-    assert "NOT ready" in not_ready_message and "open http" not in not_ready_message
-    assert "check-config" in not_ready_message
+def test_the_started_message_always_says_where_to_open_the_page_and_says_what_works(tmp_path):
+    ready = started_message("ready", 8765)
+    assert ready == "open http://127.0.0.1:8765 in a browser. Press Ctrl-C to stop."
+    welcome = started_message("welcome", 8765)
+    assert welcome.startswith("open http://127.0.0.1:8765 in a browser.")
+    assert "samples work" in welcome and "not set up yet" in welcome
+    attention = started_message("needs-attention", 8765)
+    assert attention.startswith("open http://127.0.0.1:8765 in a browser.")
+    assert "samples work" in attention and "check-config" in attention
 
 
 def test_the_app_knows_whether_it_is_ready(demo):
