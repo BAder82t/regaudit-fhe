@@ -410,6 +410,7 @@ def test_the_browser_has_no_way_to_change_the_configuration(client, demo):
     assert routes == {
         "/",
         "/static/{name}",
+        "/static/fonts/{name}",
         "/security",
         "/setup",
         "/api/setup",
@@ -486,10 +487,10 @@ def test_the_page_carries_a_strict_content_policy(client):
     assert headers["x-content-type-options"] == "nosniff" and headers["cache-control"] == "no-store"
 
 
-def test_only_the_two_static_files_can_be_read(client):
-    for name in ("app.js", "app.css"):
+def test_only_the_listed_static_files_can_be_read(client):
+    for name in ("app.js", "app.css", "setup.js", "vaultbytes-mark.svg"):
         assert client.get(f"/static/{name}").status_code == 200
-    for name in ("index.html", "..%2Fconfig.py", "%2e%2e%2fapp.py"):
+    for name in ("index.html", "setup.html", "..%2Fconfig.py", "%2e%2e%2fapp.py", "fonts"):
         assert client.get(f"/static/{name}").status_code == 404
 
 

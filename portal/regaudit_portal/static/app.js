@@ -28,6 +28,8 @@ function unavailable() {
     $(id).textContent = "";
   }
   $("sample-list").replaceChildren();
+  $("verdict").removeAttribute("data-status");
+  $("result").classList.remove("demonstration");
   chosen = null;
   lastSaved = null;
 }
@@ -74,7 +76,9 @@ function render(body, fileName) {
   verdict.textContent = v.trust_status;
   // The word itself is always the verifier's own.
   verdict.className = v.trust_status === "TRUSTED" ? "verdict trusted" : "verdict";
+  verdict.dataset.status = v.trust_status; // the style picks its shape and colour from this, and never the wording
   const demonstration = body.synthetic_demonstration === true;
+  $("result").classList.toggle("demonstration", demonstration);
   $("demo-banner").textContent = demonstration ? body.demonstration.notice : "";
   show("demo-banner", demonstration);
   $("result-file").textContent = fileName ? "Result for: " + fileName : "";

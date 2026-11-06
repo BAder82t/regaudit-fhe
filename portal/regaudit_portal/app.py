@@ -44,11 +44,21 @@ _STATIC_FILES = {
     "app.js": (_STATIC / "app.js", "text/javascript"),
     "app.css": (_STATIC / "app.css", "text/css"),
     "setup.js": (_STATIC / "setup.js", "text/javascript"),
+    "vaultbytes-mark.svg": (_STATIC / "vaultbytes-mark.svg", "image/svg+xml"),
+}
+# The three typefaces the pages use, as files of this package. Nothing else in the folder can be asked for.
+_FONT_FILES = {
+    name: _STATIC / "fonts" / name
+    for name in (
+        "inter-latin-wght-normal.woff2",
+        "space-grotesk-latin-wght-normal.woff2",
+        "jetbrains-mono-latin-wght-normal.woff2",
+    )
 }
 _HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
-        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        "font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -311,6 +321,13 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         if known is None:
             return _refusal(404, "not_found", "Not found.")
         return FileResponse(known[0], media_type=known[1])
+
+    @app.api_route("/static/fonts/{name}", methods=["GET", "HEAD"])
+    def font_file(name: str) -> Response:
+        known = _FONT_FILES.get(name)
+        if known is None:
+            return _refusal(404, "not_found", "Not found.")
+        return FileResponse(known, media_type="font/woff2")
 
     @app.api_route("/security", methods=["GET", "HEAD"])
     def security() -> FileResponse:

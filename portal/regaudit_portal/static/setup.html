@@ -4,15 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Administrator setup - Evidence Verification Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/vaultbytes-mark.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header>
-    <h1>Evidence Verification Portal</h1>
-    <p>Administrator setup</p>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <header class="navbar">
+    <div class="container nav-wrapper">
+      <a class="logo" href="/"><img class="logo-icon" src="/static/vaultbytes-mark.svg" alt="" width="40" height="40"><span class="logo-text">VaultBytes</span></a>
+      <nav aria-label="Portal">
+        <ul class="nav-menu">
+          <li><a href="/">Portal</a></li>
+          <li><a href="/setup" aria-current="page">Setup</a></li>
+          <li><a href="/security">Security</a></li>
+        </ul>
+      </nav>
+    </div>
   </header>
 
-  <main>
+  <main id="main">
+    <div class="page-title">
+      <h1>Evidence Verification Portal</h1>
+      <p class="lead">Administrator setup</p>
+      <div class="title-underline"></div>
+    </div>
     <section class="panel">
       <h2>This page only reads</h2>
       <p>It shows what is set up and what is not, and it explains what an administrator has to prepare. It does not create or change anything: no trust list, no key, no setting, no approval. It never asks for a signing key and never shows one.</p>
@@ -67,6 +82,12 @@
 
     <p><a href="/">Back to the portal</a></p>
   </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p class="copyright">&copy; 2026 VaultBytes Innovations Ltd.</p>
+    </div>
+  </footer>
   <script src="/static/setup.js"></script>
 </body>
 </html>
