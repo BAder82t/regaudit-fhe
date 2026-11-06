@@ -28,6 +28,21 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
+def _builder_traces(app: Path) -> list[str]:
+    """What of this machine would show if the build had leaked into the bundle: the account's name, its home folder, the
+    temporary folder the build was made in and the folder the application sits in. Read here, not written down."""
+    import getpass
+
+    names = {
+        getpass.getuser(),
+        str(Path.home()),
+        str(Path(tempfile.gettempdir()).resolve()),
+        str(app.parent.resolve()),
+    }
+    return [flag for name in sorted(names) if len(name) > 3 for flag in ("-e", name)]
+
+
 OK = True
 
 
@@ -295,7 +310,7 @@ def main(app_path: str) -> int:
     )
     check("no bytecode is shipped for the installed packages", not list(site.rglob("__pycache__")))
     leaks = subprocess.run(
-        ["grep", "-r", "-a", "-l", "-E", "baderissaei|claude-501|scratchpad", str(app)],
+        ["grep", "-r", "-a", "-l", "-F", *_builder_traces(app), str(app)],
         capture_output=True,
         text=True,
     ).stdout.split()
