@@ -131,3 +131,24 @@ def test_the_launcher_type_checks():
         capture_output=True, text=True, timeout=300, check=False,
     )  # fmt: skip
     assert done.returncode == 0, done.stderr[-3000:]
+
+
+def test_the_summary_sits_in_a_scrolling_box_of_fixed_height_so_the_buttons_stay_on_screen():
+    """Ten long issuer names and the notices cannot push Apply and Cancel off the screen. A person must still look."""
+    source = SWIFT.read_text()
+    assert (
+        "fixedBox(scrollingText(summary, width: 480, height: 200), width: 480, height: 200)"
+        in source
+    )
+    assert "fieldsBox = fixedBox(scroll, width: size.width + 20, height: 200)" in source
+    assert "alert.accessoryView = whole" in source
+    assert "alert.informativeText = summary" not in source
+    assert "text.isEditable = false" in source and "text.isVerticallyResizable = true" in source
+
+
+def test_the_launcher_has_no_logic_about_a_plans_settings_and_shows_python_s_words():
+    source = SWIFT.read_text()
+    code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("//"))
+    for banned in ("development", "3650", "max_age", "replay", "Notice", "profile", "verifier"):
+        assert banned not in code, banned
+    assert 'body["summary"] as? String' in code

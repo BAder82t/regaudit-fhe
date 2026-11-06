@@ -273,19 +273,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Text that can be read, scrolled and copied in a box of fixed size, so a long text never pushes an alert's
+    /// buttons off the screen. It shows the text exactly as given.
+    func scrollingText(_ string: String, width: CGFloat, height: CGFloat) -> NSScrollView {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let inside = scroll.contentSize
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: inside.width, height: inside.height))
+        text.minSize = NSSize(width: 0, height: inside.height)
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        text.isVerticallyResizable = true
+        text.isHorizontallyResizable = false
+        text.autoresizingMask = [.width]
+        text.textContainer?.containerSize = NSSize(width: inside.width, height: CGFloat.greatestFiniteMagnitude)
+        text.textContainer?.widthTracksTextView = true
+        text.isEditable = false
+        text.isSelectable = true
+        text.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        text.string = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        scroll.documentView = text
+        return scroll
+    }
+
+    /// The same box, sized by constraints, for use inside a stack of views.
+    func fixedBox(_ view: NSView, width: CGFloat, height: CGFloat) -> NSView {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: width).isActive = true
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
+    }
+
     /// A native alert whose long text can be scrolled and copied.
     func inform(_ title: String, _ detail: String) {
         let alert = NSAlert()
         alert.messageText = title
-        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 260))
-        text.string = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        text.isEditable = false
-        text.isSelectable = true
-        text.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 260))
-        scroll.documentView = text
-        scroll.hasVerticalScroller = true
-        alert.accessoryView = scroll
+        alert.accessoryView = scrollingText(detail, width: 520, height: 260)
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -344,17 +367,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.layoutSubtreeIfNeeded()
         let size = stack.fittingSize
         stack.frame = NSRect(origin: .zero, size: size)
-        let alert = NSAlert()
-        alert.messageText = "Administrator setup"
-        alert.informativeText = summary
-        if size.height > 320 {
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: size.width + 20, height: 320))
+        // Python's summary, notices first, in a box of fixed height; the fields below it, scrolled if there are many.
+        // However long either is, the alert keeps its Apply and Cancel buttons on the screen.
+        let summaryBox = fixedBox(scrollingText(summary, width: 480, height: 200), width: 480, height: 200)
+        let fieldsBox: NSView
+        if size.height > 200 {
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: size.width + 20, height: 200))
             scroll.documentView = stack
             scroll.hasVerticalScroller = true
-            alert.accessoryView = scroll
+            fieldsBox = fixedBox(scroll, width: size.width + 20, height: 200)
         } else {
-            alert.accessoryView = stack
+            fieldsBox = stack
         }
+        let whole = NSStackView(views: [summaryBox, fieldsBox])
+        whole.orientation = .vertical
+        whole.alignment = .leading
+        whole.spacing = 10
+        whole.layoutSubtreeIfNeeded()
+        whole.frame = NSRect(origin: .zero, size: whole.fittingSize)
+        let alert = NSAlert()
+        alert.messageText = "Administrator setup"
+        alert.informativeText = "The box below is what admin-describe says about this plan. Read it before you apply."
+        alert.accessoryView = whole
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = fields.first?.1
