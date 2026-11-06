@@ -1049,7 +1049,11 @@ def test_with_an_engine_that_is_not_the_recognised_release_nothing_is_described_
 
 
 def _env(home: Path) -> dict[str, str]:
-    return {**os.environ, "HOME": str(home), "PYTHONPATH": str(PORTAL)}
+    """The account, with a temporary folder of the test's own: a process killed here leaves its private bytecode
+    folder behind, and it should stay inside the test's folder."""
+    tmp = home.parent / "tmp"
+    tmp.mkdir(mode=0o700, exist_ok=True)
+    return {**os.environ, "HOME": str(home), "PYTHONPATH": str(PORTAL), "TMPDIR": str(tmp)}
 
 
 _KILL_AT = """
