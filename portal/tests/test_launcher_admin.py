@@ -48,7 +48,7 @@ def test_the_launcher_makes_no_trust_decision_of_its_own():
     assert not re.search(r"stringValue\s*[=!]=", code), (
         "the launcher must not compare what was typed"
     )
-    assert "applied.status == 0" in code  # the only decision: what Python's exit status says
+    assert "applied.status == 0" in code  # the only decisions: what Python's exit status says
 
 
 def test_the_launcher_has_no_option_or_variable_that_could_skip_the_typed_fingerprint():
@@ -95,7 +95,31 @@ def test_quit_sigterm_and_sigkill_handling_of_the_launcher_are_unchanged():
     ]
     assert '"--exit-when-input-closes"' in start and "let input = Pipe()" in start
     assert "inputPipe = input" in start and "p.standardInput = input" in start
-    assert "if quitting || proc !== process { return }" in source
+    assert "if quitting || proc === retiring || proc !== process { return }" in source
+
+
+def test_a_restart_keeps_the_old_portal_current_until_it_has_stopped():
+    """So a Quit during the restart still waits for it and still ends it with SIGKILL if it does not stop."""
+    source = SWIFT.read_text()
+    restart = source[
+        source.index("func restartPortal()") : source.index("@objc func openPortal()")
+        if source.index("@objc func openPortal()") > source.index("func restartPortal()")
+        else len(source)
+    ]
+    restart = restart[: restart.index("\n    }\n") + 6]
+    assert "retiring = running" in restart and "running.terminate()" in restart
+    assert restart.index("running.terminate()") < restart.index("self.process = nil")
+    assert "guard let self = self, !self.quitting else { return }" in restart
+
+
+def test_the_launcher_restarts_only_when_python_says_the_new_files_are_in_place():
+    source = SWIFT.read_text()
+    assert "applied.status == 0" in source and "applied.status == 4" in source
+    assert source.count("self.restartPortal()") == 2
+    assert (
+        "if group.wait(timeout: .now() + 10) == .timedOut { kill(p.processIdentifier, SIGKILL) }"
+        in source
+    )
 
 
 @pytest.mark.skipif(

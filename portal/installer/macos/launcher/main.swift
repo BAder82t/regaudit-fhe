@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var inputPipe: Pipe?  // the portal stops by itself when this closes, which it does if this program is killed
     var python: String?
     var adminBusy = false
+    var retiring: Process?  // a portal being stopped on purpose so that a new one reads the new configuration
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -207,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func portalExited(_ proc: Process, status: Int32) {
-        if quitting || proc !== process { return }  // a portal stopped on purpose for a restart is not a failure
+        if quitting || proc === retiring || proc !== process { return }  // stopped on purpose for a restart
         let detail = tail.text.trimmingCharacters(in: .whitespacesAndNewlines)
         fail("The portal stopped (exit code \(status)).\n\n\(detail.suffix(1200))")
     }
@@ -263,6 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.global().async { problems.set(err.fileHandleForReading.readDataToEndOfFile()); group.leave() }
             if group.wait(timeout: .now() + 120) == .timedOut {
                 p.terminate()
+                if group.wait(timeout: .now() + 10) == .timedOut { kill(p.processIdentifier, SIGKILL) }
                 group.wait()
             }
             p.waitUntilExit()
@@ -367,24 +369,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if applied.status == 0 {
                 self.inform("The setup plan was applied.", applied.output + "\nThe portal now restarts so that it reads the new configuration.")
                 self.restartPortal()
+            } else if applied.status == 4 {
+                // Python says the new files are in place but a step after that did not finish.
+                self.inform("The setup plan was applied, but a step after it did not finish.", applied.problems + "\nThe portal now restarts so that it reads the new configuration.")
+                self.restartPortal()
             } else {
                 self.inform("The setup plan was not applied.", applied.problems.isEmpty ? applied.output : applied.problems)
             }
         }
     }
 
-    /// Stop the portal the way Quit does, then start it again so that it reads its configuration afresh.
+    /// Stop the portal the way Quit does, then start it again so that it reads its configuration afresh. The old
+    /// portal stays the current one until it has stopped, so a Quit meanwhile still waits for it as before.
     func restartPortal() {
         guard !quitting else { return }
-        let old = process
-        process = nil  // its exit is expected now, so it is not reported as a failure
-        guard let running = old, running.isRunning else { return startPortal() }
+        guard let running = process, running.isRunning else { process = nil; return startPortal() }
+        retiring = running  // its exit is expected now, so it is not reported as a failure
         running.terminate()
         DispatchQueue.global().async { [weak self] in
             let end = Date().addingTimeInterval(6)
             while running.isRunning && Date() < end { Thread.sleep(forTimeInterval: 0.05) }
             if running.isRunning { kill(running.processIdentifier, SIGKILL) }
-            DispatchQueue.main.async { self?.startPortal() }
+            DispatchQueue.main.async {
+                guard let self = self, !self.quitting else { return }
+                self.process = nil
+                self.startPortal()
+            }
         }
     }
 
