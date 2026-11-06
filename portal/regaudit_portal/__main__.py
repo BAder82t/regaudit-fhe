@@ -16,6 +16,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import logging
 import os
@@ -27,6 +28,7 @@ import sys
 import threading
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
+from . import STOPPED, _stop_while_starting
 from .engine import REINSTALL, check_engine
 from .paths import default_config_path, display_path
 
@@ -92,11 +94,49 @@ def unavailable_message(reason: str, detail: str) -> str:
     )
 
 
-STOPPED = "the portal has stopped."
+GRACEFUL_SHUTDOWN_SECONDS = 3
+
+
+_stop_requested = False
 
 
 def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
+    """One stop is enough. A second request while the first is being handled (a signal, and then the launcher's input
+    closing) must not raise again in the middle of the clean-up."""
+    global _stop_requested
+    if _stop_requested:
+        return
+    _stop_requested = True
     raise KeyboardInterrupt
+
+
+def _leaving() -> None:
+    """A stop has begun. From here until the process is gone, further stop requests change nothing: a second one (a
+    signal, and then the launcher's input closing) must not interrupt the clean-up, which includes removing the
+    private bytecode folder when the interpreter exits."""
+    global _stop_requested
+    _stop_requested = True
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+class _DropCancelledRequests(logging.Filter):
+    """uvicorn logs a traceback for each request it had to cancel because the portal was asked to stop. That is the
+    stop working as intended, so only that record is dropped; any other error is still shown."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        error = record.exc_info[1] if record.exc_info else None
+        return not isinstance(error, asyncio.CancelledError)
+
+
+def _hand_over_from_the_early_stop(serving: bool) -> None:
+    """The package's early handler covers the program from its first line to here. From here on, a stop while serving
+    is a KeyboardInterrupt that ``main`` catches, and any other command stops the ordinary way. Handlers that are not
+    the early one (an inherited "ignore", or one a command sets for itself) are left alone."""
+    if signal.getsignal(signal.SIGINT) == _stop_while_starting:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    if signal.getsignal(signal.SIGTERM) == _stop_while_starting:
+        signal.signal(signal.SIGTERM, _stop_like_ctrl_c if serving else signal.SIG_DFL)
 
 
 def _stop_when_input_closes() -> None:
@@ -138,10 +178,20 @@ def _run(app: object, sock: socket.socket, mode: str) -> None:
                 print(started_message(mode, port), flush=True)
 
     port = sock.getsockname()[1]
-    config = uvicorn.Config(app, access_log=False, server_header=False, log_level="warning")
+    # A request still arriving when the portal is asked to stop (a slow upload) gets three seconds. The macOS launcher
+    # gives up after six and kills the portal, which would leave its private folder behind.
+    config = uvicorn.Config(
+        app,
+        access_log=False,
+        server_header=False,
+        log_level="warning",
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    )
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    logging.getLogger("uvicorn.error").addFilter(_DropCancelledRequests())
     with contextlib.suppress(KeyboardInterrupt):
         Announcing(config).run(sockets=[sock])
+    _leaving()
     print(STOPPED, flush=True)  # a start that failed raised SystemExit above and does not get here
 
 
@@ -180,6 +230,7 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        _leaving()
         print(STOPPED, flush=True)
     finally:
         server.server_close()
@@ -187,6 +238,17 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        _leaving()
+        # A stop asked for after the portal set up its own handlers and before the server was running: for example
+        # SIGTERM, or the launcher's input closing, while the engine is still being checked. Nothing was served.
+        print(STOPPED, flush=True)
+        return 0
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="regaudit-portal")
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="Start the portal on this computer only.")
@@ -213,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     demo.add_argument("directory")
     args = parser.parse_args(argv)
+    _hand_over_from_the_early_stop(args.command == "serve")
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
 
