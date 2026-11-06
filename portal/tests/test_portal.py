@@ -11,6 +11,7 @@ import socket
 import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -502,10 +503,17 @@ def test_the_page_uses_no_outside_resources_and_no_html_injection():
     assert "innerHTML" not in text and "eval(" not in text
 
 
+def _clock(monkeypatch, module, now: list[float]) -> None:
+    """The limiter counts per window of 60 seconds of the monotonic clock. Fix the clock, so that the test does not
+    depend on whether a minute boundary falls between its requests."""
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
+
+
 def test_too_many_checks_are_refused(demo, monkeypatch):
     module = importlib.import_module("regaudit_portal.app")
 
     monkeypatch.setattr(module, "MAX_REQUESTS_PER_MINUTE", 2)
+    _clock(monkeypatch, module, [1000.0])
     client = client_for(demo / "portal-config.json")
     report = (demo / "sample-reports" / "1-trusted.json").read_bytes()
     codes = [
@@ -513,6 +521,28 @@ def test_too_many_checks_are_refused(demo, monkeypatch):
         for _ in range(4)
     ]
     assert codes[:2] == [200, 200] and codes[2:] == [429, 429]
+
+
+def test_the_limit_counts_each_minute_afresh(demo, monkeypatch):
+    """A new window starts at every multiple of 60 seconds, so the count starts again there. Up to twice the limit can
+    therefore be accepted across a boundary; that is how a fixed window works, and what this test pins."""
+    module = importlib.import_module("regaudit_portal.app")
+
+    monkeypatch.setattr(module, "MAX_REQUESTS_PER_MINUTE", 2)
+    now = [1019.0]  # 1019 // 60 == 16; 1020 // 60 == 17
+    _clock(monkeypatch, module, now)
+    client = client_for(demo / "portal-config.json")
+    report = (demo / "sample-reports" / "1-trusted.json").read_bytes()
+
+    def codes(count: int) -> list[int]:
+        return [
+            client.post("/api/verify", content=report, headers=JSON_HEADERS).status_code
+            for _ in range(count)
+        ]
+
+    assert codes(3) == [200, 200, 429]
+    now[0] = 1020.0
+    assert codes(3) == [200, 200, 429]
 
 
 def test_no_verdict_messages_say_to_treat_it_as_not_accepted(client, demo):
