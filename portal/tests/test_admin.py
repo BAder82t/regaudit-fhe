@@ -427,6 +427,49 @@ def test_the_bundled_demonstration_key_is_refused_by_fingerprint_at_apply_time(
     assert not default_config_folder().exists()
 
 
+def test_the_weak_settings_plan_is_flagged_at_the_top_before_it_can_be_applied(
+    home, tmp_path, run, northwind
+):
+    """The plan a reviewer ran: the real issuer's key, the development profile, 3650 days and replay mode check. The
+    typed fingerprint matches, so it can be applied, but the summary must say plainly what it weakens first."""
+    plan = _plan_file(
+        tmp_path,
+        prepare_plan([northwind], profile="development", max_age_days=3650, replay_mode="check"),
+    )
+    code, out, _ = run("admin-describe", plan)
+    lines = out.splitlines()
+    assert code == 0
+    assert lines[0].startswith("Notice: the profile is development. It is for trying things out.")
+    assert lines[1].startswith("Notice: the maximum report age is 3650 days.")
+    assert lines[2].startswith("Notice: the replay mode is check.")
+    assert (
+        lines[3].startswith('Verifier id: "northwind-verifier".')
+        and "your own organisation's id" in lines[3]
+    )
+    assert (
+        out.index("Notice:")
+        < out.index("Setup plan, content checksum")
+        < out.index("Issuers to enrol")
+    )
+    code, out, _ = run("admin-describe", "--json", plan)
+    body = json.loads(out)
+    assert code == 0 and len(body["notices"]) == 3
+    assert body["summary"].splitlines()[:3] == body["notices"]  # what the application shows, first
+    assert (
+        run("admin-apply", plan, *_expect(northwind))[0] == 0
+    )  # still the administrator's choice to make
+    assert load_portal(default_config_folder() / "portal-config.json").profile == "development"
+
+
+def test_a_plan_without_weak_settings_starts_with_the_verifier_id(home, tmp_path, run, northwind):
+    plan = _plan_file(tmp_path, prepare_plan([northwind], replay_mode="record"))
+    code, out, _ = run("admin-describe", plan)
+    assert (
+        code == 0 and out.startswith('Verifier id: "northwind-verifier".') and "Notice:" not in out
+    )
+    assert json.loads(run("admin-describe", "--json", plan)[1])["notices"] == []
+
+
 def test_a_plan_that_changed_since_it_was_described_is_refused(home, tmp_path, run, northwind):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     code, _, err = run("admin-apply", plan, "--expect-plan-sha256", "0" * 64, *_expect(northwind))

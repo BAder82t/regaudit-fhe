@@ -672,8 +672,50 @@ def read_request(data: bytes) -> tuple[Plan, list[dict[str, Any]]]:
 # ----------------------------------------------------------------------------- what a plan means, in words
 
 
-def summary_lines(plan: Plan) -> list[str]:
-    """A plain description of the plan, worked out from its content alone. It shows no fingerprint on purpose."""
+# A maximum report age above this gets a notice. 30 days is the maximum age regaudit-fhe 0.2.1 applies on its own when
+# replay checking is on and none is given (its DEFAULT_RETENTION), and the value this portal suggests.
+LONG_AGE_DAYS = 30
+
+
+def notices(plan: Plan) -> list[str]:
+    """Plain warnings about settings that weaken what the portal checks. They come first, before anything else."""
+    if plan.mode != FIRST_SETUP:
+        return []
+    found = []
+    if plan.profile == "development":
+        found.append(
+            "Notice: the profile is development. It is for trying things out. Do not rely on its results: every "
+            "result says so, and a report is not refused when the replay file cannot be used."
+        )
+    days = plan.max_age_days or 0
+    if days > LONG_AGE_DAYS:
+        found.append(
+            f"Notice: the maximum report age is {days} days. That is longer than {LONG_AGE_DAYS} days, the age "
+            "regaudit-fhe 0.2.1 applies on its own and the value this portal suggests, so an old report stays "
+            "acceptable for longer."
+        )
+    if plan.replay_mode == "check":
+        found.append(
+            "Notice: the replay mode is check. Nothing is recorded, so a report shown twice is not refused as a "
+            "repeat."
+        )
+    return found
+
+
+def top_lines(plan: Plan) -> list[str]:
+    """What must be read first: the notices, then the verifier id the reports must name."""
+    lines = notices(plan)
+    if plan.mode == FIRST_SETUP:
+        lines.append(
+            f"Verifier id: {quoted(plan.verifier_id or '')}. A report that names its recipients must name this id, "
+            "and under high-assurance every report must. It should be your own organisation's id, the one issuers "
+            "address their reports to."
+        )
+    return lines
+
+
+def body_lines(plan: Plan) -> list[str]:
+    """Everything else the plan does, worked out from its content alone. It shows no fingerprint on purpose."""
     lines: list[str] = []
     if plan.mode == FIRST_SETUP:
         lines.append(
@@ -682,7 +724,6 @@ def summary_lines(plan: Plan) -> list[str]:
         )
         profile = explain(plan.profile or "")
         lines.append(f"Profile: {plan.profile}. {profile['summary']}")
-        lines.append(f"Verifier id: {quoted(plan.verifier_id or '')}")
         days = plan.max_age_days
         lines.append(f"Maximum report age: {days} day{'' if days == 1 else 's'}")
         lines.append(f"Replay mode: {replay_text(plan.replay_mode or '')}")
@@ -703,6 +744,11 @@ def summary_lines(plan: Plan) -> list[str]:
         "the key in the plan."
     )
     return lines
+
+
+def summary_lines(plan: Plan) -> list[str]:
+    """A plain description of the plan: notices and the verifier id first, then the rest. No fingerprint."""
+    return top_lines(plan) + body_lines(plan)
 
 
 NEXT_STEPS = (
@@ -749,6 +795,7 @@ def prepared(data: bytes) -> tuple[int, dict[str, Any]]:
         "file_name": plan.file_name(),
         "issuers": checks,
         "writes": writes,
+        "notices": notices(plan),
         "summary": summary_lines(plan),
         "next_steps": list(NEXT_STEPS),
     }

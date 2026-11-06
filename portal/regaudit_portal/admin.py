@@ -67,9 +67,11 @@ from .plan import (
     PlanProblem,
     fingerprints_match,
     quoted,
+    body_lines,
+    notices,
     read_plan,
     shown,
-    summary_lines,
+    top_lines,
     typed_fingerprint,
 )
 
@@ -904,9 +906,10 @@ def _describe(args: Any) -> int:
     problem, leftovers = _describe_destination(folder, plan)
     origin = "the standard folder for this account" if standard else "given with --config-folder"
     lines = [
+        *top_lines(plan),
         f"Setup plan, content checksum (SHA-256) {plan.content_sha256}. The checksum matches the content. It shows "
         "only that the file is intact, not who made it.",
-        *summary_lines(plan),
+        *body_lines(plan),
         f"Destination folder: {folder} ({origin}). The plan cannot choose it.",
         "Destination check: it can be applied here."
         if problem is None
@@ -922,6 +925,7 @@ def _describe(args: Any) -> int:
             "problem": None if problem is None else shown(problem, 4000),
             "plan_sha256": plan.content_sha256,
             "mode": plan.mode,
+            "notices": [shown(line, 4000) for line in notices(plan)],
             "summary": "\n".join(shown(line, 4000) for line in lines),
             "issuers": [
                 {"number": n, "issuer": i.issuer, "key_id": i.key_id}

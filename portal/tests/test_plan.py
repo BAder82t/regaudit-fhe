@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from helpers import crafted_plan, fingerprint_of, issuer_signer, plan_request, prepare_plan
 from regaudit_portal import plan as plan_module
 from regaudit_portal.config import read_settings, read_trust_store
-from regaudit_portal.plan import PlanProblem, prepared, read_plan, shown, summary_lines
+from regaudit_portal.plan import PlanProblem, notices, prepared, read_plan, shown, summary_lines
 
 import regaudit_fhe as rf
 from regaudit_fhe import cli as engine_cli
@@ -786,3 +786,73 @@ def test_shown_makes_control_and_invisible_characters_visible_and_caps_the_lengt
     assert shown("a\x1b[31mb‮c\x07") == "a\\u{001B}[31mb\\u{202E}c\\u{0007}"
     assert shown("x" * 10, 4) == "xxxx (shortened)"
     assert shown("Northwind Ltd") == "Northwind Ltd"
+
+
+# ----------------------------------------------------------------------------- settings that weaken the checks are named first
+
+
+def _plan(signer, **options):
+    return read_plan(prepare_plan([signer], **options).encode())
+
+
+def test_the_weak_settings_plan_says_so_first_in_plain_sentences(signer):
+    """The real issuer's key with the development profile, 3650 days and replay mode check."""
+    plan = _plan(signer, profile="development", max_age_days=3650, replay_mode="check")
+    lines = summary_lines(plan)
+    assert len(notices(plan)) == 3 and lines[:3] == notices(plan)
+    assert lines[0].startswith("Notice: the profile is development. It is for trying things out.")
+    assert "Do not rely on its results" in lines[0]
+    assert (
+        lines[1].startswith("Notice: the maximum report age is 3650 days.")
+        and "longer than 30 days" in lines[1]
+    )
+    assert (
+        lines[2].startswith("Notice: the replay mode is check.")
+        and "not refused as a repeat" in lines[2]
+    )
+    assert lines[3].startswith(
+        'Verifier id: "northwind-verifier". A report that names its recipients must name'
+    )
+    assert "your own organisation's id" in lines[3]
+    assert lines.index(lines[3]) < next(
+        i for i, line in enumerate(lines) if line.startswith("Issuers to enrol")
+    )
+
+
+def test_a_plan_without_weak_settings_has_no_notice_and_starts_with_the_verifier_id(signer):
+    for profile in ("confidential", "high-assurance"):
+        plan = _plan(signer, profile=profile, max_age_days=30, replay_mode="record")
+        assert notices(plan) == [] and summary_lines(plan)[0].startswith("Verifier id:")
+
+
+@pytest.mark.parametrize(
+    "options, expected",
+    [
+        ({"profile": "development", "replay_mode": "record"}, ["development"]),
+        ({"replay_mode": "check"}, ["replay mode is check"]),
+        ({"max_age_days": 30, "replay_mode": "record"}, []),
+        ({"max_age_days": 31, "replay_mode": "record"}, ["31 days"]),
+        ({"max_age_days": 1, "replay_mode": "record"}, []),
+    ],
+)
+def test_each_notice_appears_for_its_own_setting_and_the_age_notice_starts_above_30_days(
+    signer, options, expected
+):
+    found = notices(_plan(signer, **options))
+    assert len(found) == len(expected) and all(
+        word in line for word, line in zip(expected, found, strict=True)
+    )
+
+
+def test_adding_issuers_changes_no_setting_so_it_has_no_notice_and_no_verifier_line(signer):
+    plan = _plan(signer, mode="add-issuers")
+    assert notices(plan) == [] and not any(
+        line.startswith("Verifier id") for line in summary_lines(plan)
+    )
+
+
+def test_the_prepare_answer_shows_the_notices_first(signer):
+    status, body = _send(
+        plan_request([signer], profile="development", max_age_days=3650, replay_mode="check")
+    )
+    assert status == 200 and len(body["notices"]) == 3 and body["summary"][:3] == body["notices"]
