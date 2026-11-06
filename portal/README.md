@@ -200,9 +200,9 @@ Without `--config`, the portal looks in the standard per-user folder (see [Where
 
 ### Guided administrator setup
 
-The setup page, `/setup`, shows each requirement and its state. For anything missing or failing, it says what is missing, why it matters and the one next step. A trust list that holds one of the portal's demonstration keys or names is labelled a demonstration. It never counts as trust being set up.
+The setup page, `/setup`, shows each requirement and its state. For anything that is missing or failing, it shows what is missing, why it matters and what the next step is. A trust list that has one of the demo keys or names from the portal is also shown as a demo. This never counts as setting up trust.
 
-The page `/setup/plan` prepares a setup plan. You choose one of the three profiles, your verifier id, the oldest report you accept and the replay mode. For each issuer you enter the name, the key id, the issuer's public key and the fingerprint the issuer gave you by another route. The portal checks all of it and shows the fingerprint it computed from each key next to the one you typed. It shows exactly what applying the plan would write and gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing. It refuses anything that looks like a private key and does not show it back.
+The page `/setup/plan` prepares a setup plan. You can choose one of the three profiles and enter your verifier id, the oldest report you accept and the replay mode. For each issuer you need to enter the name, the key id, the public key and the fingerprint the issuer gave you through another route. The portal checks all of it and shows the fingerprint it computed from each key next to the one you typed. It shows exactly what applying the plan would write and gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing. It refuses anything that looks like a private key and does not show it back.
 
 The page explains each profile by what published 0.2.1 does with it. Confidential refuses a report that names its recipients without your verifier id, a report in the older v1 format, and any report when the replay file cannot be used. High-assurance also refuses a report that does not name your verifier id at all. Development does not refuse a report because the replay file cannot be used, and every result says not to rely on it. In 0.2.1, high-assurance does not authenticate the trust list, share the replay record or ask for a verified timestamp.
 
@@ -229,9 +229,9 @@ What `admin-apply` holds to:
 
 Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only the setup page labels it a demonstration. Never use the `demo-setup` files for real reports.
 
-What stays manual: getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
+What stays manual is getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
 
-The plan's checksum only shows that the file is intact. Anyone can compute it, so it says nothing about who made the plan. A web page can make a browser download a file that looks like a plan. The fingerprint you type when you apply it is the check that matters, so type it from what the issuer gave you, never from the plan or from this computer.
+The checksum in the plan only shows that the file is intact. Anyone can calculate it, so it says nothing about who made the plan. A web page can make a browser download a file that looks like a plan. The fingerprint you type when you apply it is what matters, so type it from what the issuer gave you, never from the plan or from this computer.
 
 If the page says your own reports cannot be checked, nothing of yours can be verified. To see why, run:
 
