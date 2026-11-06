@@ -52,10 +52,10 @@
 
     <section class="panel">
       <h2>The commands that make the trust list</h2>
-      <p>Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. It refuses a key whose fingerprint does not match the one you received.</p>
-      <pre>regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
+      <p id="cmd-intro">Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. It refuses a key whose fingerprint does not match the one you received.</p>
+      <pre id="cmd-trust-add">regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
   --public-key issuer.pub --fingerprint FINGERPRINT</pre>
-      <p>To look at the result, run <code>regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
+      <p>To look at the result, run <code id="cmd-check-config">regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
       <p><strong>For now, making the trust list needs these commands.</strong> Creating it in the browser would be a separate change that has to be designed and reviewed on its own. This page does not do it.</p>
     </section>
 

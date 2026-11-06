@@ -24,6 +24,10 @@ function render(body) {
     list.append(name, value);
   }
   $("status-message").textContent = "Configuration location: " + body.configuration_in_use;
+  // How to type the commands on this computer: by their plain names, or by the full path of the programs in the application.
+  $("cmd-intro").textContent = body.commands.intro;
+  $("cmd-trust-add").textContent = body.commands.trust_add;
+  $("cmd-check-config").textContent = body.commands.check_config;
 }
 
 async function start() {
