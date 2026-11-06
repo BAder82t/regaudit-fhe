@@ -168,6 +168,8 @@ def test_the_page_script_puts_the_answer_into_the_page():
         ("intro", "cmd-intro"),
         ("trust_add", "cmd-trust-add"),
         ("check_config", "cmd-check-config"),
+        ("admin_describe", "cmd-admin-describe"),
+        ("admin_apply", "cmd-admin-apply"),
     ):
         assert f'$("{element}").textContent = body.commands.{field};' in script
         assert f'id="{element}"' in html
@@ -314,10 +316,13 @@ def test_the_page_shows_the_commands_the_portal_answers_with(tmp_path, home, mon
     assert shown["status-message"].startswith("Configuration location: ")
 
 
-def test_the_page_still_says_that_guided_trust_creation_in_the_browser_is_not_built():
+def test_the_page_says_the_browser_can_prepare_a_plan_but_cannot_create_the_trust_list():
     html = (STATIC / "setup.html").read_text()
     assert "For now, making the trust list needs these commands." in html
-    assert "Creating it in the browser would be a separate change" in html
-    assert "This page does not do it." in html
+    assert "The browser cannot create or change the trust list." in html
+    assert "this page does not do it." in html
     readme = (PORTAL / "README.md").read_text()
-    assert "Guided creation of the trust list in the browser is not built." in readme
+    assert (
+        "The browser can prepare a setup plan, but it cannot create or change the trust list."
+        in readme
+    )

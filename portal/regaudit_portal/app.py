@@ -31,6 +31,7 @@ from . import __version__ as PORTAL_VERSION
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
 from .explain import DEMONSTRATION_NOTICE, FHE_NOTICE, NOT_A_CLAIM, declarations, describe
+from .plan import MAX_PLAN_BYTES, prepared
 from .samples import DEMONSTRATION_ISSUER, Sample, Samples, SamplesProblem, load_samples
 from .setup import readiness
 
@@ -44,6 +45,7 @@ _STATIC_FILES = {
     "app.js": (_STATIC / "app.js", "text/javascript"),
     "app.css": (_STATIC / "app.css", "text/css"),
     "setup.js": (_STATIC / "setup.js", "text/javascript"),
+    "plan.js": (_STATIC / "plan.js", "text/javascript"),
     "vaultbytes-mark.svg": (_STATIC / "vaultbytes-mark.svg", "image/svg+xml"),
 }
 # The three typefaces the pages use, as files of this package. Nothing else in the folder can be asked for.
@@ -162,14 +164,14 @@ def _unavailable() -> JSONResponse:
     )
 
 
-async def _read_limited(request: Request) -> bytes:
+async def _read_limited(request: Request, limit: int = MAX_REPORT_BYTES) -> bytes:
     length = request.headers.get("content-length")
-    if length is not None and (not length.isdigit() or int(length) > MAX_REPORT_BYTES):
+    if length is not None and (not length.isdigit() or int(length) > limit):
         raise _TooLarge
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_REPORT_BYTES:
+        if len(body) > limit:
             raise _TooLarge
     return bytes(body)
 
@@ -353,6 +355,50 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             own_state=own_state,
             own_message=_own_message(own_state),
         )
+
+    @app.api_route("/setup/plan", methods=["GET", "HEAD"])
+    def plan_page() -> FileResponse:
+        return FileResponse(_STATIC / "plan.html", media_type="text/html")
+
+    @app.post("/api/setup/plan")
+    async def prepare_plan(request: Request) -> Response:
+        """Stateless: check a setup plan and say exactly what applying it would write.
+
+        It writes nothing, keeps nothing and enrols nothing. It reads no file and does not look at the configuration.
+        Applying a plan is a separate command that this process never imports, so no request can reach it.
+        """
+        if engine_refused:
+            return _unavailable()
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            return _refusal(
+                415, "bad_type", "A setup plan is sent as JSON from the portal's own page."
+            )
+        if not limit.allow():
+            return _refusal(
+                429, "too_many", "Too many requests in the last minute. Try again shortly."
+            )
+        identity = await run_in_threadpool(check_engine)
+        watch.seen(identity)
+        if not identity.ok:
+            return _unavailable()
+        try:
+            raw = await asyncio.wait_for(_read_limited(request, MAX_PLAN_BYTES), BODY_TIMEOUT_S)
+        except _TooLarge:
+            return _refusal(
+                413, "too_large", "This is far larger than a setup plan. Nothing was kept."
+            )
+        except asyncio.TimeoutError:
+            return _refusal(408, "too_slow", "The request took too long. Nothing was kept.")
+        try:
+            status_code, body = await run_in_threadpool(prepared, raw)
+        except Exception as exc:  # never log the exception's text: it could carry what was entered
+            logger.error("preparing a setup plan failed: %s", type(exc).__name__)
+            return _refusal(500, "no_plan", "The plan could not be checked. Nothing was kept.")
+        after = await run_in_threadpool(check_engine)
+        watch.seen(after)
+        if not after.ok:
+            return _unavailable()
+        return JSONResponse(body, status_code=status_code)
 
     @app.api_route("/api/status", methods=["GET", "HEAD"])
     def status() -> dict[str, Any]:

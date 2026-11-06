@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prepare a setup plan - Evidence Verification Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/vaultbytes-mark.svg">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <header class="navbar">
+    <div class="container nav-wrapper">
+      <a class="logo" href="/"><img class="logo-icon" src="/static/vaultbytes-mark.svg" alt="" width="40" height="40"><span class="logo-text">VaultBytes</span></a>
+      <nav aria-label="Portal">
+        <ul class="nav-menu">
+          <li><a href="/">Portal</a></li>
+          <li><a href="/setup" aria-current="page">Setup</a></li>
+          <li><a href="/security">Security</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="page-title">
+      <h1>Evidence Verification Portal</h1>
+      <p class="lead">Prepare a setup plan</p>
+      <div class="title-underline"></div>
+    </div>
+
+    <section class="panel">
+      <h2>This page only prepares a plan</h2>
+      <p>It checks what you enter and shows exactly what applying the plan would write. Then it gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing, and the portal forgets the plan as soon as it has answered.</p>
+      <p>You apply the plan yourself, outside the browser: with Administrator setup in the application's menu, or with admin-apply in Terminal. When you apply it, you type each issuer's fingerprint again, from what the issuer gave you by a call or another route. Do not copy it from this page. The plan is applied only if every fingerprint matches the key in the plan.</p>
+      <p>Never paste a private key here. Only the issuer's public key belongs in a plan. The portal refuses anything that looks like a private key and does not show it back.</p>
+    </section>
+
+    <section id="unavailable" class="panel notice" role="alert" hidden>
+      <h2>Verification unavailable</h2>
+      <p>The verification engine could not be loaded or its installation could not be validated. No plan can be prepared.</p>
+    </section>
+
+    <div id="plan-form">
+      <section class="panel">
+        <h2>1. What to set up</h2>
+        <fieldset class="options">
+          <legend>Kind of plan</legend>
+          <label class="option"><input type="radio" name="mode" value="first-setup" checked> <span><strong>First setup.</strong> A new configuration and a new trust list. Applying it refuses to replace either if one is already there.</span></label>
+          <label class="option"><input type="radio" name="mode" value="add-issuers"> <span><strong>Add issuers.</strong> Adds issuers to the trust list your existing configuration names. It removes, revokes and replaces nothing, and it does not change the configuration.</span></label>
+        </fieldset>
+      </section>
+
+      <section id="settings" class="panel">
+        <h2>2. Trust policy</h2>
+        <p id="common" class="fine"></p>
+        <fieldset class="options">
+          <legend>Profile</legend>
+          <div id="profiles"></div>
+        </fieldset>
+        <p class="field"><label for="verifier-id">Verifier id</label><input id="verifier-id" type="text" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false"><span id="verifier-help" class="fine"></span></p>
+        <p class="field"><label for="max-age">Maximum report age, in days</label><input id="max-age" type="number" min="1" max="3650" step="1" value="30" autocomplete="off"><span id="max-age-help" class="fine"></span></p>
+        <fieldset class="options">
+          <legend>Replay mode</legend>
+          <div id="replay-modes"></div>
+        </fieldset>
+      </section>
+
+      <section class="panel">
+        <h2>3. Issuers</h2>
+        <p class="fine">For each issuer whose reports you will accept: the name exactly as their reports give it, the key id they gave you, their public key, and the fingerprint they gave you by another route than the key itself.</p>
+        <div id="issuers"></div>
+        <button id="add-issuer" type="button" class="quiet">Add another issuer</button>
+      </section>
+
+      <section class="panel">
+        <h2>4. Check the plan</h2>
+        <button id="check" type="button">Check the plan</button>
+        <p id="message" class="statement" role="status"></p>
+        <div id="result" hidden>
+          <h3>Fingerprints</h3>
+          <table>
+            <thead><tr><th>Issuer</th><th>You typed</th><th>Computed from the key</th><th>Match</th></tr></thead>
+            <tbody id="fingerprints"></tbody>
+          </table>
+          <div id="written">
+            <h3>What applying it would write</h3>
+            <div id="writes"></div>
+            <h3>In plain words</h3>
+            <ul id="summary"></ul>
+            <h3>Next steps</h3>
+            <ol id="next-steps"></ol>
+            <button id="save" type="button">Save the plan file</button>
+            <p id="saved" class="fine" role="status"></p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>What you can rely on</h2>
+      <p>Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
+      <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
+    </section>
+
+    <p><a href="/setup">Back to the setup page</a></p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p class="copyright">&copy; 2026 VaultBytes Innovations Ltd.</p>
+    </div>
+  </footer>
+  <script src="/static/plan.js"></script>
+</body>
+</html>
