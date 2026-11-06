@@ -1,4 +1,5 @@
-"""``regaudit-portal serve``, ``check-config`` and ``demo-setup``. Only the administrator, or a launcher, uses these.
+"""``regaudit-portal serve``, ``check-config``, ``demo-setup``, ``admin-describe`` and ``admin-apply``. Only the
+administrator, or a launcher, uses these.
 
 ``serve`` without ``--config`` looks for the configuration in the standard per-user folder. If there is none it starts in
 welcome mode, where the bundled samples work and your own reports are not set up. It never creates that folder or
@@ -212,6 +213,41 @@ def main(argv: list[str] | None = None) -> int:
         "demo-setup", help="Create a synthetic trust store, configuration and sample reports."
     )
     demo.add_argument("directory")
+    describe = commands.add_parser(
+        "admin-describe",
+        help="Say what a setup plan would do, worked out from its content. It changes nothing.",
+    )
+    describe.add_argument(
+        "plan", help="The setup plan file saved from the Prepare a setup plan page."
+    )
+    describe.add_argument(
+        "--config-folder",
+        help="The configuration folder. Without it, the standard per-user folder. A plan never chooses it.",
+    )
+    describe.add_argument(
+        "--json", action="store_true", help="For the application: one line of JSON."
+    )
+    apply = commands.add_parser(
+        "admin-apply",
+        help="Apply a setup plan. Each issuer's fingerprint, as the issuer gave it, must match its key.",
+    )
+    apply.add_argument("plan", help="The setup plan file saved from the Prepare a setup plan page.")
+    apply.add_argument(
+        "--config-folder",
+        help="The configuration folder. Without it, the standard per-user folder. A plan never chooses it.",
+    )
+    apply.add_argument(
+        "--expect-fingerprint",
+        action="append",
+        default=[],
+        metavar="KEY_ID=FINGERPRINT",
+        help="The fingerprint the issuer gave you by another route, once for each issuer. "
+        "Without it, each one is asked on the terminal.",
+    )
+    apply.add_argument(
+        "--expect-plan-sha256",
+        help="Refuse unless the plan's content checksum is this one (the one admin-describe printed).",
+    )
     args = parser.parse_args(argv)
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
@@ -223,6 +259,17 @@ def main(argv: list[str] | None = None) -> int:
             return _serve_unavailable(args.port, identity.reason, identity.detail)
         sys.stderr.write(unavailable_message(identity.reason, identity.detail))
         return 3
+
+    if args.command in ("admin-describe", "admin-apply"):
+        # Only these two commands load the module that writes the administrator's files. The portal never does.
+        try:
+            from . import admin
+        except Exception as exc:  # a library the engine needs is missing: the same plain message
+            sys.stderr.write(
+                unavailable_message("ENGINE_UNLOADABLE", f"{type(exc).__name__}: {exc}")
+            )
+            return 3
+        return admin.run(args)
 
     if args.command == "demo-setup":
         try:
