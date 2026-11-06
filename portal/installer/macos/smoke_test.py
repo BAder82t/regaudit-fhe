@@ -51,6 +51,16 @@ def call(url: str, data: bytes | None = None, method: str | None = None, port: s
         return err.code, err.read()
 
 
+def call_full(url: str, port: str):
+    """Status, headers and body of a GET."""
+    req = urllib.request.Request(url, headers={"Host": f"127.0.0.1:{port}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, {k.lower(): v for k, v in err.headers.items()}, err.read()
+
+
 def start(launcher: Path, env: dict, extra: list[str]) -> tuple[subprocess.Popen, str]:
     p = subprocess.Popen(
         [str(launcher), "--no-browser", "--print-url", *extra],
@@ -147,6 +157,35 @@ def main(app_path: str) -> int:
             code == 200 and label and (want is None or verdict == want),
             f"{code} {verdict}",
         )
+    code, headers, body = call_full(url + "static/app.css", port)
+    csp = headers.get("content-security-policy", "")
+    check(
+        "the stylesheet is served under a policy that allows local fonts only",
+        code == 200 and "font-src 'self'" in csp and "http" not in csp,
+        csp[:80],
+    )
+    code, headers, body = call_full(url + "static/fonts/inter-latin-wght-normal.woff2", port)
+    check(
+        "a bundled font is served",
+        code == 200
+        and headers.get("content-type", "").startswith("font/woff2")
+        and body[:4] == b"wOF2",
+        f"{code} {headers.get('content-type')}",
+    )
+    code, headers, body = call_full(url + "static/vaultbytes-mark.svg", port)
+    check(
+        "the VaultBytes mark is served",
+        code == 200 and headers.get("content-type", "").startswith("image/svg+xml"),
+        str(code),
+    )
+    commands = json.loads(call(url + "api/setup", port=port)[1]).get("commands", {})
+    check(
+        "the setup page names the administrator programs by their path inside the application",
+        commands.get("in_application") is True
+        and "Resources/tools/regaudit-fhe" in json.dumps(commands)
+        and "Resources/tools/regaudit-portal" in json.dumps(commands),
+        json.dumps(commands)[:120],
+    )
     code, body = call(url + "api/verify", data=b"{}", port=port)
     check(
         "own-report verification is refused, with no verdict",
