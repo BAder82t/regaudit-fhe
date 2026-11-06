@@ -45,7 +45,9 @@ This adds no privilege. Anyone who can run the command can already enrol a key w
 
 The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up.
 
-A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or name. The portal then says it is not ready for your own reports, checks files against that list only as a demonstration, and labels every result and every saved result that way. `check-config` refuses it.
+Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. A trust list that holds one of the portal's bundled demonstration keys, recognised by its exact fingerprint, is a demonstration whatever the setting says. No issuer name or key id decides it. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
+
+Known limit: `demo-setup` makes new keys each time, and nothing can tell them apart from real keys. A copy of its trust list under a configuration without `"trust_mode": "demonstration"` is therefore treated as customer trust, and its sample reports then verify as trusted. That setting is the only control for those keys, so never copy the `demo-setup` files into a real configuration.
 
 Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
 

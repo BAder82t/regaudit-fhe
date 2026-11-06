@@ -41,7 +41,7 @@ You need an internet connection for the install. These steps use only made-up ke
 
 In the file chooser, press Cmd+Shift+G on a Mac (Ctrl+L on Linux), paste `~/portal-demo/sample-reports` and press Enter. The full path is `/Users/YOURNAME/portal-demo/sample-reports` on a Mac and `/home/YOURNAME/portal-demo/sample-reports` on Linux. Or open that folder in Finder or your file manager and drag a file onto the page.
 
-These files are a demonstration, and `demo-setup` marks its configuration as one. The portal checks them only as a demonstration: the page says so before you choose a file, every result and every saved result is labelled a demonstration, and the portal says your own reports are not set up.
+These files are a demonstration, and `demo-setup` writes `"trust_mode": "demonstration"` into its configuration. The portal checks them only as a demonstration: the page shows the mode and says so before you choose a file, every result and every saved result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, and the portal says your own reports are not set up.
 
 Press Ctrl-C in the terminal to stop the portal. It stops cleanly and prints one line. The sample reports are synthetic and show each outcome:
 
@@ -202,7 +202,7 @@ Without `--config`, the portal looks in the standard per-user folder (see [Where
 
 ### Guided administrator setup
 
-The setup page, `/setup`, shows each requirement and its state. For anything that is missing or failing, it shows what is missing, why it matters and what the next step is. A trust list that has one of the demo keys or names from the portal is also shown as a demo. This never counts as setting up trust.
+The setup page, `/setup`, shows each requirement and its state. For anything that is missing or failing, it shows what is missing, why it matters and what the next step is. It also shows the trust mode the portal is in. A configuration in demonstration mode is shown as a demo, and this never counts as setting up trust.
 
 The page `/setup/plan` prepares a setup plan. You can choose one of the three profiles and enter your verifier id, the oldest report you accept and the replay mode. For each issuer you need to enter the name, the key id, the public key and the fingerprint the issuer gave you through another route. The portal checks all of it and shows the fingerprint it computed from each key next to the one you typed. It shows exactly what applying the plan would write and gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing. It refuses anything that looks like a private key and does not show it back.
 
@@ -221,6 +221,7 @@ What `admin-apply` holds to:
 
 - It runs only if the engine is the published 0.2.1.
 - It enrols keys with the same code as `regaudit-fhe trust add`, so the trust list is the same file.
+- It always writes `"trust_mode": "customer"`, never adds issuers to a demonstration configuration, and refuses the bundled demonstration keys.
 - It refuses the portal's demonstration keys.
 - The plan never chooses where files go. They go to the standard folder, or to the folder you give with `--config-folder`.
 - It refuses a symbolic link anywhere on the way, and a folder or file that belongs to another account or that group or others can change. It does not run as root.
@@ -229,7 +230,9 @@ What `admin-apply` holds to:
 - Only one can run at a time for a folder.
 - It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
 
-A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or name. The portal then says it is not ready for your own reports, checks files against that list only as a demonstration, and labels every result and every saved result that way. `check-config` refuses it.
+Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. A trust list that holds one of the portal's bundled demonstration keys, recognised by its exact fingerprint, is a demonstration whatever the setting says. No issuer name or key id decides it. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
+
+Known limit: `demo-setup` makes new keys each time, and nothing can tell them apart from real keys. A copy of its trust list under a configuration without `"trust_mode": "demonstration"` is therefore treated as customer trust, and its sample reports then verify as trusted. That setting is the only control for those keys, so never copy the `demo-setup` files into a real configuration.
 
 What stays manual is getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
 
