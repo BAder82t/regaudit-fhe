@@ -145,3 +145,73 @@ def install_configuration(demo: Path, folder: Path, *, mode: int = 0o700) -> Pat
         shutil.copy(demo / name, folder / name)
         os.chmod(folder / name, 0o600)
     return folder / "portal-config.json"
+
+
+# ----------------------------------------------------------------------------- setup plans
+
+PLAN_VERIFIER = "northwind-verifier"
+
+
+def issuer_signer(issuer: str = "Northwind Ltd", key_id: str = "northwind-2026") -> rf.Signer:
+    return rf.Signer.generate(issuer=issuer, key_id=key_id)
+
+
+def fingerprint_of(signer: rf.Signer) -> str:
+    from regaudit_fhe._keys import spki_fingerprint
+
+    return spki_fingerprint(signer.public_key_pem())
+
+
+def plan_request(
+    signers: list[rf.Signer],
+    *,
+    mode: str = "first-setup",
+    profile: str = "confidential",
+    verifier_id: str = PLAN_VERIFIER,
+    max_age_days: Any = 30,
+    replay_mode: str = "check",
+    fingerprints: list[str] | None = None,
+) -> dict[str, Any]:
+    """What the prepare page sends for these issuers, each with the fingerprint of its own key unless told otherwise."""
+    typed = fingerprints if fingerprints is not None else [fingerprint_of(s) for s in signers]
+    request: dict[str, Any] = {
+        "mode": mode,
+        "issuers": [
+            {
+                "issuer": s.issuer,
+                "key_id": s.key_id,
+                "public_key": s.public_key_pem(),
+                "fingerprint": f,
+            }
+            for s, f in zip(signers, typed, strict=True)
+        ],
+    }
+    if mode == "first-setup":
+        request["configuration"] = {
+            "profile": profile,
+            "verifier_id": verifier_id,
+            "max_age_days": max_age_days,
+            "replay_mode": replay_mode,
+        }
+    return request
+
+
+def prepare_plan(signers: list[rf.Signer], **options: Any) -> str:
+    """A plan file's text, made by the same code the prepare route uses."""
+    from regaudit_portal.plan import prepared
+
+    status, body = prepared(json.dumps(plan_request(signers, **options)).encode())
+    assert status == 200, body
+    return body["plan_text"]
+
+
+def crafted_plan(content: dict[str, Any]) -> bytes:
+    """Any plan content with a checksum that matches it: what someone hostile can make without the portal."""
+    import hashlib
+
+    from regaudit_fhe.canonical import canonical_bytes
+
+    body = {k: v for k, v in content.items() if k != "content_sha256"}
+    return json.dumps(
+        {**body, "content_sha256": hashlib.sha256(canonical_bytes(body)).hexdigest()}
+    ).encode()
