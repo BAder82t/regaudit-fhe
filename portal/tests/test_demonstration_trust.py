@@ -344,3 +344,9 @@ def test_welcome_mode_says_no_trust_is_set_up(tmp_path, monkeypatch):
     fake_home(tmp_path, monkeypatch)
     status = client_for(None).get("/api/status").json()
     assert status["trust_mode"] == "none" and LABEL in status["trust_mode_text"]
+
+
+def test_the_setup_page_state_for_a_demonstration_trust_row_is_the_label_itself():
+    script = (STATIC / "setup.js").read_text()
+    assert f'demonstration: "{LABEL}"' in script
+    assert "Demonstration only" not in script

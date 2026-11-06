@@ -8,7 +8,7 @@ const STATES = {
   missing: "Not set up",
   problem: "Needs attention",
   not_checked: "Not checked yet",
-  demonstration: "Demonstration only, not trust",
+  demonstration: "DEMONSTRATION — NOT CUSTOMER-TRUSTED", // the one label, exactly
 };
 
 function line(label, text) {
