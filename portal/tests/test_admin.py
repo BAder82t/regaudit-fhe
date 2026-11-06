@@ -1151,6 +1151,76 @@ def test_killed_between_the_trust_list_and_the_configuration_the_portal_still_se
     assert code == 2 and "stopped part-way can leave this" in err
 
 
+_PENDING_STOP = """
+import os, signal, sys
+which = getattr(signal, sys.argv[1])
+signal.pthread_sigmask(signal.SIG_BLOCK, {which})
+os.kill(os.getpid(), which)  # held, as a stop that arrives in the first fraction of a second is
+from regaudit_portal.__main__ import main
+sys.exit(main(sys.argv[2:]))
+"""
+
+
+@pytest.mark.parametrize("sig", ["SIGTERM", "SIGINT", "SIGHUP"])
+@pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
+def test_a_stop_in_the_first_moment_is_quiet_and_exact(home, tmp_path, northwind, sig, command):
+    """A stop sent before the command could install its handlers is held, then taken when it does. It must end as a
+    plain stop that says nothing changed: no traceback and no death by signal."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    extra = _expect(northwind) if command == "admin-apply" else []
+    done = subprocess.run(  # noqa: S603 - this interpreter, fixed arguments
+        [sys.executable, "-c", _PENDING_STOP, sig, command, str(plan), *extra],
+        env=_env(home), cwd=PORTAL, capture_output=True, text=True, timeout=120, check=False,
+    )  # fmt: skip
+    assert done.returncode == 1, (done.returncode, done.stderr[-600:])
+    assert "Traceback" not in done.stderr and "KeyboardInterrupt" not in done.stderr, done.stderr[
+        -600:
+    ]
+    assert done.stderr.strip().splitlines()[-1] == "stopped: Nothing was changed."
+    assert done.stdout == "" and not default_config_folder().exists()
+
+
+def test_when_the_reader_of_its_output_goes_away_the_apply_still_finishes_cleanly(
+    home, tmp_path, northwind
+):
+    """The launcher reads the command's output through pipes. If it quits mid-way, writing fails: the files must still
+    be complete or untouched, and the command must end normally."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    proc = subprocess.Popen(  # noqa: S603 - this interpreter, fixed arguments
+        [sys.executable, "-m", "regaudit_portal", "admin-apply", str(plan), *_expect(northwind)],
+        env=_env(home), cwd=PORTAL, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )  # fmt: skip
+    proc.stdout.close()  # what the launcher's going away does to the pipes it held
+    proc.stderr.close()
+    assert proc.wait(timeout=120) == 0
+    folder = default_config_folder()
+    assert sorted(p.name for p in folder.iterdir()) == ["portal-config.json", "trust-store.json"]
+    read_trust_store(read_settings(folder / "portal-config.json"))
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_a_stop_between_the_two_files_by_either_signal_lands_after_both(
+    home, tmp_path, run, northwind, monkeypatch, sig
+):
+    folder = _private_folder(default_config_folder())
+    real_link, calls = os.link, []
+
+    def link_then_stop(*args, **kwargs):
+        done = real_link(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 1:
+            os.kill(os.getpid(), sig)
+            time.sleep(0.2)
+        return done
+
+    monkeypatch.setattr(os, "link", link_then_stop)
+    code, _, err = run(
+        "admin-apply", _plan_file(tmp_path, prepare_plan([northwind])), *_expect(northwind)
+    )
+    assert code == 4 and "stopped: The change is complete" in err, err
+    assert sorted(p.name for p in folder.iterdir()) == ["portal-config.json", "trust-store.json"]
+
+
 def test_while_another_apply_holds_the_folder_a_second_one_is_refused(
     home, tmp_path, run, northwind
 ):

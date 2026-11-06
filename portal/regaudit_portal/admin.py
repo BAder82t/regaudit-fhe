@@ -146,10 +146,20 @@ def _sync(fd: int) -> None:
 
 
 def _out(text: str, stream: TextIO | None = None) -> None:
-    """Print text with every control or invisible character made visible, line by line."""
+    """Print text with every control or invisible character made visible, line by line.
+
+    Printing never changes what happens to the files. If nobody reads the output any more, for example because the
+    launcher that started this command has quit, the rest of the output goes nowhere and the command carries on.
+    """
     target = stream if stream is not None else sys.stdout
-    target.write("\n".join(shown(line, 100_000) for line in text.split("\n")) + "\n")
-    target.flush()
+    try:
+        target.write("\n".join(shown(line, 100_000) for line in text.split("\n")) + "\n")
+        target.flush()
+    except OSError:
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            nowhere = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(nowhere, target.fileno())
+            os.close(nowhere)
 
 
 # ----------------------------------------------------------------------------- the plan file and the fingerprints
@@ -888,8 +898,7 @@ def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[st
 
 def describe(args: Any) -> int:
     """Print what a plan would do, computed from its content, and whether it could be applied here. Writes nothing."""
-    with _own_signal_handling(signal.SIG_DFL):
-        return _describe(args)
+    return _stoppable(lambda _progress: _describe(args))
 
 
 def _describe(args: Any) -> int:
@@ -943,8 +952,7 @@ def _own_signal_handling(stop: Any) -> Iterator[None]:
     """Decide what Ctrl-C, SIGTERM and SIGHUP do here, whatever this process was started with. A launcher that
     ignores them would otherwise pass that on, and then could not stop this command."""
     previous = {sig: signal.getsignal(sig) for sig in _STOPS}
-    signal.signal(signal.SIGINT, stop if stop is not signal.SIG_DFL else signal.default_int_handler)
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    for sig in _STOPS:
         signal.signal(sig, stop)
     # The entry point held these while the engine's libraries started their threads. Only this thread takes them.
     mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, _STOPS)
@@ -963,8 +971,23 @@ def apply(args: Any) -> int:
     stopped before the change, nothing changed (unless the message says otherwise); 4 applied, but a step after the
     change did not finish (the message says which).
     """
-    with _own_signal_handling(_stop_like_ctrl_c):
-        return _apply(args)
+    return _stoppable(lambda progress: _apply(args, progress))
+
+
+def _stoppable(command: Any) -> int:
+    """Run a command so that a stop ends it plainly, with what state the files are in, from its very first moment.
+
+    The entry point holds stops while the engine loads, so one sent then is taken as soon as the handlers are in
+    place, which is inside this ``try``.
+    """
+    progress = Progress()
+    try:
+        with _own_signal_handling(_stop_like_ctrl_c):
+            return int(command(progress))
+    except KeyboardInterrupt:
+        code, said = _after(progress, "")
+        _out(f"stopped: {said}", sys.stderr)
+        return code
 
 
 def _after(progress: Progress, what: str) -> tuple[int, str]:
@@ -975,8 +998,7 @@ def _after(progress: Progress, what: str) -> tuple[int, str]:
     return EXIT_FAILED, " ".join(part for part in (what, UNCHANGED) if part)
 
 
-def _apply(args: Any) -> int:
-    progress = Progress()
+def _apply(args: Any, progress: Progress) -> int:
     try:
         _engine_or_refuse()
         plan = _load_plan(args.plan)
