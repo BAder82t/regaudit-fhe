@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shlex
@@ -492,7 +493,7 @@ def test_the_page_uses_no_outside_resources_and_no_html_injection():
 
 
 def test_too_many_checks_are_refused(demo, monkeypatch):
-    import regaudit_portal.app as module
+    module = importlib.import_module("regaudit_portal.app")
 
     monkeypatch.setattr(module, "MAX_REQUESTS_PER_MINUTE", 2)
     client = client_for(demo / "portal-config.json")
@@ -510,7 +511,7 @@ def test_no_verdict_messages_say_to_treat_it_as_not_accepted(client, demo):
 
 
 def test_a_failure_inside_the_verifier_gives_no_verdict(demo, monkeypatch):
-    import regaudit_portal.app as module
+    module = importlib.import_module("regaudit_portal.app")
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("boom")

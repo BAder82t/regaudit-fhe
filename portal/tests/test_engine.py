@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib
 import importlib.metadata
 import importlib.util
 import io
@@ -19,9 +20,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-import regaudit_portal.app as portal_app
-import regaudit_portal.config as portal_config
-import regaudit_portal.engine as engine_module
 from helpers import client_for, post
 from regaudit_portal.config import EngineProblem, load_portal
 from regaudit_portal.engine import (
@@ -33,6 +31,12 @@ from regaudit_portal.engine import (
 )
 
 import regaudit_fhe
+
+# The portal's modules, reached by name for the tests that replace one of their functions. They are taken with
+# importlib so that each module is imported in one style only.
+portal_app = importlib.import_module("regaudit_portal.app")
+portal_config = importlib.import_module("regaudit_portal.config")
+engine_module = importlib.import_module("regaudit_portal.engine")
 
 PACKAGE = Path(regaudit_fhe.__file__).parent
 TESTS = Path(__file__).parent
@@ -686,6 +690,29 @@ def test_the_bytecode_cache_is_a_new_private_folder_that_is_removed_at_exit(tmp_
 # ----------------------------------------------------------------------------- development-time cross-check
 
 
+def _release_archive(git: str) -> bytes | None:
+    """``git archive`` of the engine at the release tag, or None when there is no checkout with that tag here."""
+    try:
+        root = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [git, "rev-parse", "--show-toplevel"],
+            cwd=TESTS,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        ).stdout.strip()
+        # Run at the top: inside a subfolder, git archive silently includes only that subfolder.
+        return subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [git, "archive", f"v{RELEASE}:src/regaudit_fhe"],
+            cwd=root,
+            capture_output=True,
+            timeout=60,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def test_the_release_digest_is_the_one_the_v021_tag_has(tmp_path):
     """A development-time cross-check, not a product behaviour. It needs a clone that has the v0.2.1 tag.
 
@@ -696,16 +723,8 @@ def test_the_release_digest_is_the_one_the_v021_tag_has(tmp_path):
     git = shutil.which("git")
     if git is None:
         pytest.skip("git is not installed")
-    try:
-        root = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [git, "rev-parse", "--show-toplevel"], cwd=TESTS, capture_output=True, text=True, timeout=60, check=True
-        ).stdout.strip()  # fmt: skip
-        # Run at the top: inside a subfolder, git archive silently includes only that subfolder.
-        archive = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [git, "archive", f"v{RELEASE}:src/regaudit_fhe"],
-            cwd=root, capture_output=True, timeout=60, check=True,
-        ).stdout  # fmt: skip
-    except (OSError, subprocess.SubprocessError):
+    archive = _release_archive(git)
+    if archive is None:
         pytest.skip(f"no git checkout with the v{RELEASE} tag here (expected in an exported copy)")
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(tmp_path, filter="data")
