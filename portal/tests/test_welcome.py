@@ -100,6 +100,7 @@ def test_the_portal_listens_on_this_computer_only_and_port_zero_takes_a_free_por
         other = _bind_loopback(0)
         assert other.getsockname()[1] != port
         other.close()
+        sock.listen()  # as the server does: only a listening port counts as taken on every system
         with pytest.raises(OSError):
             _bind_loopback(port)  # taken
     finally:

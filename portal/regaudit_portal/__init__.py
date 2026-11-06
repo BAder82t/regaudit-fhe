@@ -75,10 +75,12 @@ def _is_the_program() -> bool:
 def _stop_quietly_while_starting() -> None:
     if not _is_the_program():  # never a program that merely imports this package
         return
+    # The launcher's option says this portal must always be stoppable, so it takes SIGTERM even if its parent had it
+    # ignored. Without the option an inherited "ignore" is left as it is.
+    launcher = "--exit-when-input-closes" in sys.argv
     try:
-        if (
-            signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
-        ):  # an inherited "ignore" is left as it is
+        term = signal.getsignal(signal.SIGTERM)
+        if term == signal.SIG_DFL or (launcher and term == signal.SIG_IGN):
             signal.signal(signal.SIGTERM, _stop_while_starting)
         if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
             signal.signal(signal.SIGINT, _stop_while_starting)
@@ -98,6 +100,7 @@ def _use_a_private_bytecode_cache() -> str:
     # A stop that arrives between making the folder and remembering it would leave it behind: hold such a request
     # over those few steps. It is delivered, and handled with the folder known, when they are done.
     held = {signal.SIGTERM, signal.SIGINT}
+    program = _is_the_program()
     before = (
         signal.pthread_sigmask(signal.SIG_BLOCK, held)
         if hasattr(signal, "pthread_sigmask")
@@ -113,9 +116,11 @@ def _use_a_private_bytecode_cache() -> str:
         atexit.register(shutil.rmtree, folder, ignore_errors=True)
     finally:
         if before is not None:
-            # Put back exactly what was blocked before, not "nothing": a program that imports this package with a stop
-            # request held (as a command that wants to take it later does) must still have it held.
-            signal.pthread_sigmask(signal.SIG_SETMASK, before)
+            # A program that merely imports this package may have a stop request held on purpose (a command that wants
+            # to take it later does), so the mask is put back exactly as it was. The portal itself is a server that must
+            # always be stoppable: if its parent started it with these two blocked, it unblocks them, or nothing but
+            # SIGKILL could end it.
+            signal.pthread_sigmask(signal.SIG_SETMASK, (before - held) if program else before)
     return folder
 
 

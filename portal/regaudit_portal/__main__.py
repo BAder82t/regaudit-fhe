@@ -127,12 +127,22 @@ def _leaving() -> None:
 
 
 class _DropCancelledRequests(logging.Filter):
-    """uvicorn logs a traceback for each request it had to cancel because the portal was asked to stop. That is the
-    stop working as intended, so only that record is dropped; any other error is still shown."""
+    """uvicorn logs a traceback for each request, and for the lifespan task, that it had to cancel because the portal
+    was asked to stop (and again for a second request). That is the stop working as intended, so only those records are
+    dropped; any other error is still shown. Starlette hands the lifespan failure on as a text, so that one is
+    recognised by its text."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         error = record.exc_info[1] if record.exc_info else None
-        return not isinstance(error, asyncio.CancelledError)
+        if isinstance(error, asyncio.CancelledError):
+            return False
+        text = record.msg if isinstance(record.msg, str) else ""
+        cancelled_lifespan = (
+            text.lstrip().startswith("Traceback (most recent call last)")
+            and "uvicorn/lifespan/on.py" in text
+            and text.rstrip().endswith("asyncio.exceptions.CancelledError")
+        )
+        return not cancelled_lifespan
 
 
 def _hand_over_from_the_early_stop(serving: bool) -> None:
@@ -155,10 +165,10 @@ def _stop_when_input_closes() -> None:
     A launcher that holds the write end of a pipe on the portal's standard input closes it when it quits, crashes or is
     killed, even by SIGKILL. The portal then stops cleanly instead of running on with nothing to stop it.
     """
-    if (
-        signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
-    ):  # the package's early handler, or an "ignore", stays
-        signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    # A portal started with this option is one that a launcher must always be able to stop, and the watcher below stops
+    # it by signalling itself: so SIGTERM is taken even if the parent had it ignored. The package's early handler stays.
+    if signal.getsignal(signal.SIGTERM) in (signal.SIG_DFL, signal.SIG_IGN):
+        signal.signal(signal.SIGTERM, _stop_while_starting)
 
     def watch() -> None:
         # Read the descriptor itself, never sys.stdin. A daemon thread waiting inside the buffered reader holds its
