@@ -8,6 +8,12 @@ It is a **local evaluation build**. It is signed ad hoc, which is enough to run 
 
 Opening the application for the first time, with nothing configured, shows the portal's welcome screen: try a synthetic sample (a demonstration with made-up data and a demonstration trust list), verify your own report (not available until an administrator has set up trust, and the portal says so), or read the administrator setup page. The application creates nothing in the account's own folders. While it runs it keeps a private temporary folder (about 13 MB) for Python's bytecode, which is removed when the portal stops. An administrator's configuration, when there is one, is read from `~/Library/Application Support/Evidence Verification Portal/portal-config.json`. Setting up trust still needs the existing `regaudit-fhe trust add` commands and a configuration file written by hand, run in Terminal. The application carries them as two small programs, `Contents/Resources/tools/regaudit-fhe` and `Contents/Resources/tools/regaudit-portal`, which the administrator setup page shows by their full path. Guided setup in the browser is not built.
 
+## Install from the disk image
+
+To install it from the disk image, we just need to drag Evidence Verification Portal onto the Applications folder in the same window and open it from Applications. This opens the browser and we are taken to the portal. The first screen offers a synthetic sample report. We would not need to use Terminal for this. The disk image also contains `READ ME FIRST.txt`, which says what to do if macOS refuses to open a copy that is not notarized.
+
+A Mac that did not build it would refuse to open this build at first, because it is signed ad hoc and not notarized. The person would need to open System Settings, choose Privacy & Security, choose Open Anyway and type their password. Many people would not be comfortable with this, and this is why this build is only for evaluation under direction. The checksum check in `READ ME FIRST.txt` is done in Terminal. A person who does not use Terminal can skip it, and then they depend on knowing where the file came from.
+
 ## What is inside
 
 Everything the application runs is inside the bundle:
@@ -33,6 +39,14 @@ It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS`, `READ ME F
 
     python3 smoke_test.py "/path/to/Evidence Verification Portal.app"
 
+## Signing for distribution (not done)
+
+Before sending this application to anyone else we need a Developer ID Application certificate, with its private key in the Keychain of the Mac where we do the build. The only code signing certificate on the build Mac today is an Apple Development one. That cannot be used for this. A Developer ID certificate comes from an Apple Developer Program account, and the account holder needs to confirm that this team is allowed to create it. Nothing has been created or bought.
+
+The signing would need to change in several ways. The bundled Python, all the libraries and extension modules inside it, and the launcher would each need to be signed with this certificate, starting with the files inside. The signature will use the hardened runtime and a secure timestamp. It is not known if the hardened runtime would also need the entitlement that turns off library validation. With all files signed by one team it may not need it, so this has to be tested with the real certificate. The disk image is signed as well.
+
+Afterwards the disk image is notarized with Apple's notary tool, using credentials stored in the Keychain. The ticket is stapled to the disk image and the result is checked with the stapler, with spctl and with syspolicy_check on a quarantined copy. Submitting the application uploads all of it to Apple. This step is done only when the build is meant to leave this Mac. None of these steps has been run for this application.
+
 ## Updating the pinned wheels
 
 Resolve with the bundled runtime's pip (`pip install --dry-run --ignore-installed --only-binary=:all: --report report.json 'regaudit-fhe[server]==0.2.1'`), write each name, version and `sha256` into `requirements.lock`, and review the diff. The engine line must stay at 0.2.1.
@@ -40,7 +54,7 @@ Resolve with the bundled runtime's pip (`pip install --dry-run --ignore-installe
 ## Limits
 
 - Apple silicon only, and macOS 14 or newer (the pinned numpy wheel needs it). No Intel build, no Linux, no Windows.
-- No Developer ID signature and no notarization. Both are needed before the application can go to anyone else, and the hardened runtime then needs the library-validation entitlement for the bundled compiled libraries.
+- No Developer ID signature and no notarization. Both are needed before the application can go to anyone else (see "Signing for distribution" above).
 - If the launcher is killed with SIGKILL the portal stops by itself within a few seconds (it sees its standard input close), but a kill of the portal process alone is not detected by anything except the launcher, which then reports it and quits.
 - The check that the engine is the published 0.2.1 covers the engine's installed source files. It does not cover the Python interpreter, the standard library, the other libraries or the portal's own files. Changing those inside the bundle is not detected, although it breaks the bundle's code signature and macOS may then refuse to open it.
 - A launcher that opens a browser is still a local web page. Another account on the same Mac can reach it on `127.0.0.1`.
