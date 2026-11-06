@@ -34,7 +34,7 @@ def _env(tmp: Path, home: Path) -> dict:
     return {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "PYTHONPATH": str(PORTAL)}
 
 
-def _start(extra, stdin=subprocess.PIPE, config=None):
+def _start(extra, stdin=subprocess.PIPE, config=None, preexec=None):
     work = Path(tempfile.mkdtemp(prefix="portal-early-"))
     os.chmod(work, 0o700)
     home, tmp = work / "home", work / "tmp"
@@ -51,7 +51,7 @@ def _start(extra, stdin=subprocess.PIPE, config=None):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        preexec_fn=_default_signals,
+        preexec_fn=preexec or _default_signals,
     )
     return proc, tmp
 
@@ -409,3 +409,75 @@ def test_demo_setup_stopped_early_leaves_nothing_and_is_not_success(sig, wait, t
     assert "Traceback" not in out and STOPPED not in out, out[-400:]
     assert "stopped" in out
     assert list(tmp.glob(FOLDER)) == []
+
+
+def _blocked_stop_signals() -> None:
+    """A parent that started the portal with the two stop signals blocked in its mask (blocked signals survive exec)."""
+    _default_signals()
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
+
+
+def _ignored_sigterm() -> None:
+    """A parent that started the portal with SIGTERM ignored (ignored signals survive exec)."""
+    _default_signals()
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+@pytest.mark.parametrize("how", ["SIGTERM", "SIGINT", "stdin-close"])
+def test_a_parent_that_blocked_the_stop_signals_cannot_make_the_portal_unstoppable(how):
+    """Blocked signals are inherited. A server that cannot be stopped by SIGTERM, SIGINT or its launcher closing its
+    input would run until it is killed hard, so the portal unblocks them."""
+    proc, tmp = _start(["--exit-when-input-closes"], preexec=_blocked_stop_signals)
+    try:
+        _wait_listening(proc)
+        if how == "stdin-close":
+            proc.stdin.close()
+            proc.stdin = None
+        else:
+            proc.send_signal(getattr(signal, how))
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    _assert_quiet_stop(proc, out, tmp)
+
+
+@pytest.mark.parametrize("how", ["stdin-close", "SIGTERM"])
+@pytest.mark.parametrize("wait", [0.0, 0.2, 0.4, 1.0, 1.8])
+def test_a_launcher_can_stop_a_portal_whose_parent_ignored_sigterm(how, wait):
+    """The watcher stops the portal by signalling itself, and a launcher stops it with SIGTERM. With the launcher's
+    option, SIGTERM is taken even if the parent had it ignored, from the first moment, or a launcher that dies would
+    leave the portal running."""
+    proc, tmp = _start(["--exit-when-input-closes"], preexec=_ignored_sigterm)
+    try:
+        _wait_for_folder(tmp, proc)
+        time.sleep(wait)
+        if how == "stdin-close":
+            proc.stdin.close()
+            proc.stdin = None
+        else:
+            proc.send_signal(signal.SIGTERM)
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    _assert_quiet_stop(proc, out, tmp)
+
+
+def test_a_second_stop_with_the_other_signal_prints_no_traceback():
+    """SIGTERM and then SIGINT: uvicorn takes the second as a request to force the exit and logs the cancelled lifespan
+    task. That is the stop working as intended and must not show as an error."""
+    for gap in (0.001, 0.003, 0.03, 0.3):
+        proc, tmp = _start(["--exit-when-input-closes"])
+        try:
+            _wait_listening(proc)
+            time.sleep(0.3)
+            proc.send_signal(signal.SIGTERM)
+            time.sleep(gap)
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+            out = proc.communicate(timeout=30)[0]
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        _assert_quiet_stop(proc, out, tmp)
