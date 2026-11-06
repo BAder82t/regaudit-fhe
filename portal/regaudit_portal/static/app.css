@@ -79,6 +79,8 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+/* Hidden means hidden, also for elements whose own style sets display (buttons do). */
+[hidden] { display: none !important; }
 img, svg { max-width: 100%; height: auto; }
 
 body {

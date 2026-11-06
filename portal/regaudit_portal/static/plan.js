@@ -6,8 +6,9 @@
 const $ = (id) => document.getElementById(id);
 const MAX_ISSUERS = 10;
 // Text that only private or secret key material carries. The portal checks this too; checking here first means such
-// text is never sent at all. In the public key box any mention of PRIVATE or SECRET is enough.
-const SECRET = /-----BEGIN[^\n-]*(PRIVATE|SECRET)|(PRIVATE|SECRET)\s+KEY\s*(BLOCK\s*)?-----|PuTTY-User-Key-File|Private-Lines\s*:|AGE-SECRET-KEY-|openssh-key-v1|b3BlbnNzaC1rZXktdjE/i;
+// text is never sent at all, including the bare body of an Ed25519 private key (its fixed start, MC4CAQAw...). In the
+// public key box any mention of PRIVATE or SECRET is enough.
+const SECRET = /-----BEGIN[^\n-]*(PRIVATE|SECRET)|(PRIVATE|SECRET)\s+KEY\s*(BLOCK\s*)?-----|PuTTY-User-Key-File|Private-Lines\s*:|AGE-SECRET-KEY-|openssh-key-v1|b3BlbnNzaC1rZXktdjE|MC4CAQAwBQYDK2VwBCIEI/i;
 const SECRET_IN_KEY_BOX = /PRIVATE|SECRET/i;
 let prepared = null;
 

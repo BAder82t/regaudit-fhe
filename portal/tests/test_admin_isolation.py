@@ -369,3 +369,47 @@ def test_the_plan_page_says_what_it_does_not_do():
         "Signature verification does not verify that any FHE (encrypted) computation was executed.",
     ):
         assert said in html, said
+
+
+def test_hidden_means_hidden_even_for_buttons_whose_style_sets_display():
+    """A browser run found the plan page's 'Remove this issuer' button visible, and reachable by Tab, with one issuer:
+    the style's display for buttons overrode the hidden attribute."""
+    css = (PACKAGE / "static" / "app.css").read_text()
+    assert "[hidden] { display: none !important; }" in css
+    assert re.search(r"(?m)^button \{\n  display: inline-flex;", css), (
+        "the rule that needed the override is still there"
+    )
+    script = (PACKAGE / "static" / "plan.js").read_text()
+    assert 'set.querySelector("button").hidden = sets.length === 1;' in script
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node is not installed")
+def test_the_plan_page_never_sends_a_bare_ed25519_private_key_body():
+    """The page's own check, run as the page runs it: a private key body without its header lines is caught too."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key = Ed25519PrivateKey.generate()
+    body = "".join(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        .decode()
+        .strip()
+        .splitlines()[1:-1]
+    )
+    public = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
+    script = (PACKAGE / "static" / "plan.js").read_text()
+    line = next(line for line in script.splitlines() if line.startswith("const SECRET = "))
+    done = subprocess.run(  # noqa: S603 - Node, evaluating the page's own expression on fixed inputs
+        [shutil.which("node"), "-e", line + "\nconst i = JSON.parse(process.argv[1]);"
+         "process.stdout.write(JSON.stringify(i.map((t) => SECRET.test(t))));", json.dumps([body, public, "Northwind Ltd"])],
+        capture_output=True, text=True, timeout=60, check=True,
+    )  # fmt: skip
+    assert json.loads(done.stdout) == [True, False, False]
