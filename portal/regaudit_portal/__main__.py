@@ -28,7 +28,7 @@ import sys
 import threading
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
-from . import STOPPED, _stop_while_starting
+from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _stop_while_starting
 from .engine import REINSTALL, check_engine
 from .paths import default_config_path, display_path
 
@@ -98,15 +98,21 @@ GRACEFUL_SHUTDOWN_SECONDS = 3
 
 
 _stop_requested = False
+_serving = False  # set when the portal starts to serve; before that, the package's own handler takes the stop
 
 
 def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
     """One stop is enough. A second request while the first is being handled (a signal, and then the launcher's input
-    closing) must not raise again in the middle of the clean-up."""
+    closing) must not raise again in the middle of the clean-up. If something between here and the top of the program
+    swallows the interrupt, the portal still leaves: a timer ends it after STOP_DEADLINE_SECONDS."""
     global _stop_requested
     if _stop_requested:
         return
     _stop_requested = True
+    if _serving:
+        deadline = threading.Timer(STOP_DEADLINE_SECONDS, _leave_now)
+        deadline.daemon = True
+        deadline.start()
     raise KeyboardInterrupt
 
 
@@ -130,13 +136,17 @@ class _DropCancelledRequests(logging.Filter):
 
 
 def _hand_over_from_the_early_stop(serving: bool) -> None:
-    """The package's early handler covers the program from its first line to here. From here on, a stop while serving
-    is a KeyboardInterrupt that ``main`` catches, and any other command stops the ordinary way. Handlers that are not
-    the early one (an inherited "ignore", or one a command sets for itself) are left alone."""
+    """The package's early handler covers the program from its first line to here, and it never raises: it removes the
+    private folder and ends the process. From here on a stop is a KeyboardInterrupt, taken by ``main`` (or by uvicorn
+    when it is serving). The portal hands over just before it starts to serve; any other command hands over as soon
+    as its arguments are read. Handlers that are not the early one (an inherited "ignore", or one a command sets for
+    itself) are left alone."""
+    global _serving
+    _serving = serving or _serving
     if signal.getsignal(signal.SIGINT) == _stop_while_starting:
         signal.signal(signal.SIGINT, signal.default_int_handler)
     if signal.getsignal(signal.SIGTERM) == _stop_while_starting:
-        signal.signal(signal.SIGTERM, _stop_like_ctrl_c if serving else signal.SIG_DFL)
+        signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
 
 
 def _stop_when_input_closes() -> None:
@@ -145,7 +155,10 @@ def _stop_when_input_closes() -> None:
     A launcher that holds the write end of a pipe on the portal's standard input closes it when it quits, crashes or is
     killed, even by SIGKILL. The portal then stops cleanly instead of running on with nothing to stop it.
     """
-    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    if (
+        signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
+    ):  # the package's early handler, or an "ignore", stays
+        signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
 
     def watch() -> None:
         # Read the descriptor itself, never sys.stdin. A daemon thread waiting inside the buffered reader holds its
@@ -169,6 +182,8 @@ def _run(app: object, sock: socket.socket, mode: str) -> None:
     which removes the private bytecode folder.
     """
     import uvicorn
+
+    _hand_over_from_the_early_stop(True)
 
     class Announcing(uvicorn.Server):
         async def startup(self, sockets: list | None = None) -> None:
@@ -219,15 +234,18 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
         sys.stderr.write(f"cannot listen on {HOST}:{port}: {exc.strerror or exc}\n")
         return 1
     port = server.server_address[1]  # the real port, also when 0 asked for any free one
-    print(listening_line(port, "unavailable"), flush=True)
-    print(
-        f"open http://{HOST}:{port} in a browser. It will say that verification is unavailable. "
-        "Press Ctrl-C to stop.",
-        flush=True,
-    )
-    # SIGTERM ends the page the way Ctrl-C does, so the private bytecode folder is removed on the way out.
+    # Hand over from the package's early stop handler BEFORE the listening line is printed: whoever waits for that line
+    # (a test, a launcher) may stop the portal the moment it appears. SIGTERM ends the page the way Ctrl-C does, so the
+    # private bytecode folder is removed on the way out.
+    _hand_over_from_the_early_stop(True)
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
     try:
+        print(listening_line(port, "unavailable"), flush=True)
+        print(
+            f"open http://{HOST}:{port} in a browser. It will say that verification is unavailable. "
+            "Press Ctrl-C to stop.",
+            flush=True,
+        )
         server.serve_forever()
     except KeyboardInterrupt:
         _leaving()
@@ -242,10 +260,13 @@ def main(argv: list[str] | None = None) -> int:
         return _main(argv)
     except KeyboardInterrupt:
         _leaving()
-        # A stop asked for after the portal set up its own handlers and before the server was running: for example
-        # SIGTERM, or the launcher's input closing, while the engine is still being checked. Nothing was served.
-        print(STOPPED, flush=True)
-        return 0
+        # A stop asked for after the early handler was handed over. The portal says so and ends with status 0. Any
+        # other command (demo-setup, check-config) stops with status 1, so that a script never takes it for success.
+        if _serving or sys.argv[1:2] == ["serve"]:
+            print(STOPPED, flush=True)
+            return 0
+        print("stopped.", flush=True)
+        return 1
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -275,7 +296,8 @@ def _main(argv: list[str] | None = None) -> int:
     )
     demo.add_argument("directory")
     args = parser.parse_args(argv)
-    _hand_over_from_the_early_stop(args.command == "serve")
+    if args.command != "serve":
+        _hand_over_from_the_early_stop(False)
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
 

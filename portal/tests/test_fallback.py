@@ -659,6 +659,17 @@ def test_the_unavailable_page_stops_cleanly_too_and_exits_with_3(tmp_path, demo,
         _stopped_cleanly(running, running.stop(sig), 3)
 
 
+def test_a_stop_the_moment_the_unavailable_page_announces_itself_still_exits_with_3(tmp_path, demo):
+    """Whoever waits for the listening line (a test, a launcher) may stop the portal the instant it appears. The early
+    stop handler must already have been handed over by then, or the exit status would be 0 and not 3."""
+    _damaged_copy(tmp_path, "modified")
+    for sig in (signal.SIGINT, signal.SIGTERM) * 4:
+        with Running(
+            tmp_path, ["serve", "--config", str(demo / "portal-config.json")], path_first=tmp_path
+        ) as running:
+            _stopped_cleanly(running, running.stop(sig), 3)
+
+
 def test_a_hard_kill_is_the_one_stop_that_can_leave_the_folder_and_the_documents_say_so(
     tmp_path, demo
 ):

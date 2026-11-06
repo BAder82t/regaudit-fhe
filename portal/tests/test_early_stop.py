@@ -23,6 +23,13 @@ STOPPED = "the portal has stopped."
 FOLDER = "regaudit-portal-pyc-*"
 
 
+def _default_signals() -> None:
+    """The macOS launcher starts the portal with the default signal behaviour. A test run from a background job
+    (nohup, a trailing &) would otherwise hand its own "ignore" on to the portal and test nothing."""
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
+        signal.signal(sig, signal.SIG_DFL)
+
+
 def _env(tmp: Path, home: Path) -> dict:
     return {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "PYTHONPATH": str(PORTAL)}
 
@@ -44,6 +51,7 @@ def _start(extra, stdin=subprocess.PIPE, config=None):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        preexec_fn=_default_signals,
     )
     return proc, tmp
 
@@ -134,7 +142,7 @@ def test_the_earliest_stop_handler_removes_the_folder_and_leaves_quietly(sig, tm
     home.mkdir(mode=0o700)
     tmp.mkdir(mode=0o700)
     code = (
-        "import sys; sys.argv[0] = '-m'\n"
+        "import sys; sys.argv[:] = ['-m', 'serve']\n"
         "import regaudit_portal, os, signal, time\n"
         f"os.kill(os.getpid(), signal.{sig})\n"
         "time.sleep(20)\n"
@@ -148,6 +156,7 @@ def test_the_earliest_stop_handler_removes_the_folder_and_leaves_quietly(sig, tm
         text=True,
         timeout=60,
         check=False,
+        preexec_fn=_default_signals,
     )
     out = done.stdout + done.stderr
     assert done.returncode == 0, f"exit {done.returncode}: {out[-400:]}"
@@ -241,3 +250,162 @@ def test_a_second_stop_request_while_the_portal_is_stopping_changes_nothing(firs
             if proc.poll() is None:
                 proc.kill()
         _assert_quiet_stop(proc, out, tmp)
+
+
+def test_importing_the_package_keeps_a_stop_request_that_was_being_held():
+    """A command that holds a stop request while its libraries load must still be holding it after the import."""
+    code = (
+        "import signal\n"
+        "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
+        "import regaudit_portal\n"
+        "held = signal.pthread_sigmask(signal.SIG_BLOCK, set())\n"
+        "print('HELD' if signal.SIGTERM in held else 'RELEASED')\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [sys.executable, "-B", "-c", code],
+            env={**os.environ, "TMPDIR": tmp, "PYTHONPATH": str(PORTAL)},
+            cwd=PORTAL,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    assert done.stdout.strip() == "HELD", done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("command", ["admin-apply", "admin-describe", "check-config", "demo-setup"])
+def test_the_earliest_stop_of_another_command_says_nothing_changed_and_is_not_success(
+    command, tmp_path
+):
+    """Before such a command has done anything, a stop ends it with status 1, never 0: a script must not take it for success."""
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    home.mkdir(mode=0o700)
+    tmp.mkdir(mode=0o700)
+    code = (
+        f"import sys; sys.argv[:] = ['-m', {command!r}, 'x']\n"
+        "import regaudit_portal, os, signal, time\n"
+        "os.kill(os.getpid(), signal.SIGTERM)\n"
+        "time.sleep(20)\n"
+        "print('NOT STOPPED')\n"
+    )
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-B", "-c", code],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    out = done.stdout + done.stderr
+    assert done.returncode == 1, f"exit {done.returncode}: {out[-300:]}"
+    assert "stopped: Nothing was changed." in out and "NOT STOPPED" not in out
+    assert list(tmp.glob(FOLDER)) == []
+
+
+_SCRIPT = "import sys\nfrom regaudit_portal.__main__ import main\nsys.exit(main())\n"
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+@pytest.mark.parametrize("wait", [0.0, 0.4, 1.0])
+def test_the_console_script_is_covered_as_well(sig, wait, tmp_path):
+    """README tells people to run ``regaudit-portal serve``: a script, not ``python -m``. The argument list then starts
+    with the script's path, and the early handler must be in place there too."""
+    work = tmp_path / "w"
+    home, tmp, bin_dir = work / "home", work / "tmp", work / "bin"
+    for folder in (home, tmp, bin_dir):
+        folder.mkdir(parents=True, mode=0o700)
+    script = bin_dir / "regaudit-portal"
+    script.write_text(_SCRIPT)
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(script), "serve", "--port", "0"],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        preexec_fn=_default_signals,
+    )
+    try:
+        _wait_for_folder(tmp, proc)
+        time.sleep(wait)
+        proc.send_signal(sig)
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    _assert_quiet_stop(proc, out, tmp)
+
+
+def test_a_stop_that_something_swallows_still_ends_the_portal(tmp_path):
+    """A library can catch the interrupt that a stop raises (pydantic turned it into a SchemaError, and the portal
+    carried on). The portal must end anyway, by its own deadline."""
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    home.mkdir(mode=0o700)
+    tmp.mkdir(mode=0o700)
+    code = (
+        "import sys; sys.argv[:] = ['-m', 'serve']\n"
+        "import regaudit_portal\n"
+        "from regaudit_portal import __main__ as entry\n"
+        "entry.STOP_DEADLINE_SECONDS = 1.0\n"
+        "entry._hand_over_from_the_early_stop(True)\n"
+        "import os, signal, time\n"
+        "sent = False\n"
+        "while True:\n"
+        "    try:\n"
+        "        if not sent:\n"
+        "            sent = True\n"
+        "            os.kill(os.getpid(), signal.SIGTERM)\n"
+        "        time.sleep(0.1)\n"
+        "    except KeyboardInterrupt:\n"
+        "        pass  # whatever swallowed the stop\n"
+    )
+    started = time.time()
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-B", "-c", code],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        preexec_fn=_default_signals,
+    )
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, f"exit {done.returncode}: {out[-400:]}"
+    assert STOPPED in out and "Traceback" not in out, out[-400:]
+    assert time.time() - started < 10
+    assert list(tmp.glob(FOLDER)) == []
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+@pytest.mark.parametrize("wait", [0.0, 0.3])
+def test_demo_setup_stopped_early_leaves_nothing_and_is_not_success(sig, wait, tmp_path):
+    work = tmp_path / "w"
+    home, tmp = work / "home", work / "tmp"
+    for folder in (home, tmp):
+        folder.mkdir(parents=True, mode=0o700)
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-m", "regaudit_portal", "demo-setup", str(work / "demo")],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        preexec_fn=_default_signals,
+    )
+    try:
+        _wait_for_folder(tmp, proc)
+        time.sleep(wait)
+        proc.send_signal(sig)
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == 1, f"exit {proc.returncode}: {out[-400:]}"
+    assert "Traceback" not in out and STOPPED not in out, out[-400:]
+    assert "stopped" in out
+    assert list(tmp.glob(FOLDER)) == []

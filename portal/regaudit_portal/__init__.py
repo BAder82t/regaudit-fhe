@@ -15,36 +15,65 @@ Licensed under AGPL-3.0-or-later.
 # already imported before this package was are not affected.
 #
 # A stop request that arrives while the portal is still starting (SIGTERM, which is what a launcher sends when the
-# application quits, or SIGINT) must neither leave that folder behind nor end in a traceback. When this package is the
-# program itself (``python -m regaudit_portal``), the handler below is put in place before the folder is made, so there
-# is no moment when the folder exists and a stop would skip removing it. The portal replaces the handler with its own
-# once it is serving. A program that merely imports this package keeps its own signal handling.
-import atexit
-import contextlib
+# application quits, or SIGINT) must neither leave that folder behind nor end in a traceback, and it must not be lost.
+# While the portal is starting, nothing is being served, so a stop is handled here without raising anything: the
+# handler removes the folder and ends the process at once. (Raising KeyboardInterrupt in the middle of the engine's
+# libraries is not safe: pydantic, for one, catches it and turns it into a SchemaError, and the portal then carried on
+# instead of stopping.) When this package is the program itself (``python -m regaudit_portal``, or the
+# ``regaudit-portal`` script), the handler is put in place as the first thing, before the folder is made and before
+# anything but ``os``, ``signal`` and ``sys`` is imported, so there is no moment when the folder exists and a stop would
+# skip removing it. The portal replaces the handler just before it starts to serve. A program that merely imports this
+# package keeps its own signal handling.
 import os
-import shutil
 import signal
 import sys
-import tempfile
 
 STOPPED = "the portal has stopped."
+
+# Once the portal is serving, a stop is a KeyboardInterrupt (or uvicorn's own graceful shutdown). If the portal has not
+# gone this many seconds after the first stop request, whatever swallowed it is bypassed and the portal leaves at once.
+# This is less than the six seconds the macOS launcher waits before it kills the portal.
+STOP_DEADLINE_SECONDS = 5.0
 
 _folder: str | None = None
 
 
+_rmtree = None  # shutil.rmtree, once shutil has been imported; the handler must not import anything itself
+
+
+def _leave_now() -> None:
+    """Remove the private folder, say so and end the process at once. Safe in a signal handler or a timer thread.
+
+    It imports nothing: a stop can arrive while a module is half imported, and importing it again from here would find
+    it only partly made. The portal itself stops with status 0 and says so. Any other command (check-config,
+    demo-setup, the administrator commands) has not done anything yet when this runs, so it says that, and leaves with
+    status 1: a script that runs it must never take a stop for success.
+    """
+    folder, rmtree = _folder, _rmtree
+    if folder is not None and rmtree is not None:
+        try:  # noqa: SIM105 - contextlib is not imported here: nothing may be imported by this handler
+            rmtree(folder, ignore_errors=True)
+        except Exception:  # noqa: S110 - nothing may get in the way of leaving
+            pass
+    serving = sys.argv[1:2] == ["serve"]
+    try:  # noqa: SIM105 - contextlib is not imported here: nothing may be imported by this handler
+        print(STOPPED if serving else "stopped: Nothing was changed.", flush=True)
+    except Exception:  # noqa: S110 - nothing may get in the way of leaving
+        pass
+    os._exit(0 if serving else 1)
+
+
 def _stop_while_starting(_signum: int, _frame: object) -> None:
-    """Nothing is being served and nothing is half-written: remove the private folder, say so and leave with status 0."""
-    if _folder is not None:
-        shutil.rmtree(_folder, ignore_errors=True)
-    with contextlib.suppress(Exception):  # nothing may get in the way of leaving
-        print(STOPPED, flush=True)
-    os._exit(0)
+    _leave_now()
+
+
+def _is_the_program() -> bool:
+    first = sys.argv[0] if sys.argv else ""
+    return first == "-m" or os.path.basename(first) in ("regaudit-portal", "regaudit-portal.exe")
 
 
 def _stop_quietly_while_starting() -> None:
-    if (
-        not sys.argv or sys.argv[0] != "-m"
-    ):  # only the program itself, never a program that imports this package
+    if not _is_the_program():  # never a program that merely imports this package
         return
     try:
         if (
@@ -58,13 +87,22 @@ def _stop_quietly_while_starting() -> None:
 
 
 def _use_a_private_bytecode_cache() -> str:
-    global _folder
-    _stop_quietly_while_starting()
+    global _folder, _rmtree
+    _stop_quietly_while_starting()  # first, before the heavier imports below
+    import atexit
+    import shutil
+    import tempfile
+
+    _rmtree = shutil.rmtree
+
     # A stop that arrives between making the folder and remembering it would leave it behind: hold such a request
     # over those few steps. It is delivered, and handled with the folder known, when they are done.
     held = {signal.SIGTERM, signal.SIGINT}
-    if hasattr(signal, "pthread_sigmask"):
+    before = (
         signal.pthread_sigmask(signal.SIG_BLOCK, held)
+        if hasattr(signal, "pthread_sigmask")
+        else None
+    )
     try:
         folder = tempfile.mkdtemp(
             prefix="regaudit-portal-pyc-"
@@ -74,8 +112,10 @@ def _use_a_private_bytecode_cache() -> str:
         sys.pycache_prefix = folder
         atexit.register(shutil.rmtree, folder, ignore_errors=True)
     finally:
-        if hasattr(signal, "pthread_sigmask"):
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, held)
+        if before is not None:
+            # Put back exactly what was blocked before, not "nothing": a program that imports this package with a stop
+            # request held (as a command that wants to take it later does) must still have it held.
+            signal.pthread_sigmask(signal.SIG_SETMASK, before)
     return folder
 
 
