@@ -8,7 +8,11 @@ from pathlib import Path
 from regaudit_portal.engine import RELEASE_FILES_SHA256
 
 _TEXT_FILES = [
-    *(Path(__file__).parents[1] / "regaudit_portal" / "static").glob("*"),
+    *(
+        p
+        for p in (Path(__file__).parents[1] / "regaudit_portal" / "static").glob("*")
+        if p.is_file()
+    ),
     *(Path(__file__).parents[1] / "regaudit_portal").glob("*.py"),
     Path(__file__).parents[1] / "README.md",
     Path(__file__).parents[1] / "SECURITY.md",

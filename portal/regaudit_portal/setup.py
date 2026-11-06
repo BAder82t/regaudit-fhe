@@ -23,13 +23,54 @@ from .config import (
     read_trust_store,
 )
 from .engine import Identity
-from .paths import CONFIG_NAME, default_config_folder, default_config_path, display_path, hide_paths
+from .paths import (
+    CONFIG_NAME,
+    bundled_command,
+    default_config_folder,
+    default_config_path,
+    display_path,
+    hide_paths,
+    shell_path,
+)
 
 HOST = "127.0.0.1"
 
 
 def _row(row_id: str, title: str, state: str, detail: str) -> dict[str, Any]:
     return {"id": row_id, "title": title, "state": state, "ok": state == "ok", "detail": detail}
+
+
+_TRUST_INTRO = (
+    "Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. "
+    "It refuses a key whose fingerprint does not match the one you received."
+)
+_APPLICATION_INTRO = (
+    "This portal is running from the application, which does not install these commands on your computer under their "
+    "usual names. Each one is run by the full path of its program inside the application, as shown here. For now they "
+    "are run in Terminal, in the folder above. Run the command below once for each issuer key. It refuses a key whose "
+    "fingerprint does not match the one you received."
+)
+
+
+def commands() -> dict[str, Any]:
+    """How to type the two commands on this computer: by plain name in a normal install, by full path in the application.
+
+    The only places this can show are the two wrapper programs, and only when they are there. It looks and creates nothing.
+    """
+    trust = bundled_command("regaudit-fhe")
+    check = bundled_command("regaudit-portal")
+    program = shell_path(trust) if trust is not None else "regaudit-fhe"
+    check_config = (shell_path(check) if check is not None else "regaudit-portal") + " check-config"
+    inside = trust is not None or check is not None
+    return {
+        "in_application": inside,
+        "intro": _APPLICATION_INTRO if inside else _TRUST_INTRO,
+        "trust_add": (
+            f'{program} trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \\\n'
+            "  --public-key issuer.pub --fingerprint FINGERPRINT"
+        ),
+        "check_config": check_config,
+    }
 
 
 def _replay_text(mode: str) -> str:
@@ -177,4 +218,5 @@ def readiness(
         "configuration_in_use": display_path(location),
         "own_reports": {"ready": own_state == "ready", "state": own_state, "message": own_message},
         "rows": [engine, configuration, trust, replay, files, network],
+        "commands": commands(),
     }

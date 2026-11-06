@@ -9,6 +9,7 @@ Licensed under AGPL-3.0-or-later.
 from __future__ import annotations
 
 import contextlib
+import shlex
 import sys
 from pathlib import Path
 
@@ -50,3 +51,31 @@ def hide_paths(text: str, *paths: Path) -> str:
     with contextlib.suppress(RuntimeError):  # no home folder to hide
         shown = shown.replace(str(Path.home()), "~")
     return shown
+
+
+def bundled_command(name: str) -> Path | None:
+    """The wrapper for a command, when this portal runs inside the macOS application. Otherwise ``None``.
+
+    The application's Python is ``<app>/Contents/Resources/python/bin/python3``, and the wrappers that run the commands
+    with it are in ``<app>/Contents/Resources/tools``. A normal install has no such folder next to its interpreter and
+    its commands are on the search path under their plain names. Only the running interpreter's own place is looked at:
+    nothing is read from the environment, and nothing is created.
+    """
+    if not sys.executable:
+        return None
+    try:
+        wrapper = Path(sys.executable).resolve().parents[2] / "tools" / name
+        return wrapper if wrapper.is_file() else None
+    except (IndexError, OSError, RuntimeError):
+        return None
+
+
+def shell_path(place: Path) -> str:
+    """A place as it can be typed into Terminal. ``~/...`` under the home folder, otherwise the full path.
+
+    The part that has spaces or other special characters is quoted, and the leading ``~`` is not, so it still means the
+    home folder.
+    """
+    with contextlib.suppress(ValueError, RuntimeError):
+        return "~/" + shlex.quote(place.relative_to(Path.home()).as_posix())
+    return shlex.quote(str(place))

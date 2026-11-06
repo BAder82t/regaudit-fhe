@@ -4,15 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Evidence Verification Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/vaultbytes-mark.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header>
-    <h1>Evidence Verification Portal</h1>
-    <p>Check a signed report against your organization's trust rules.</p>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <header class="navbar">
+    <div class="container nav-wrapper">
+      <a class="logo" href="/"><img class="logo-icon" src="/static/vaultbytes-mark.svg" alt="" width="40" height="40"><span class="logo-text">VaultBytes</span></a>
+      <nav aria-label="Portal">
+        <ul class="nav-menu">
+          <li><a href="/" aria-current="page">Portal</a></li>
+          <li><a href="/setup">Setup</a></li>
+          <li><a href="/security">Security</a></li>
+        </ul>
+      </nav>
+    </div>
   </header>
 
-  <main>
+  <main id="main">
+    <div class="page-title">
+      <h1>Evidence Verification Portal</h1>
+      <p class="lead">Check a signed report against your organization's trust rules.</p>
+      <div class="title-underline"></div>
+    </div>
+
     <div id="limitation" class="notice-line">
       <p><strong>Security limitation.</strong> Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
       <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
@@ -130,9 +146,12 @@
     </section>
   </main>
 
-  <footer>
-    <p id="claim"></p>
-    <p id="policy" class="fine"></p>
+  <footer class="site-footer">
+    <div class="container">
+      <p id="claim"></p>
+      <p id="policy" class="fine"></p>
+      <p class="copyright">&copy; 2026 VaultBytes Innovations Ltd.</p>
+    </div>
   </footer>
   <script src="/static/app.js"></script>
 </body>

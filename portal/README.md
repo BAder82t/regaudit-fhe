@@ -72,7 +72,7 @@ The first screen offers three choices. All of them sit behind the same engine ch
 - **Verify your own report.** This uses the administrator's trust policy, as before. If none is set up, the page says "Verification of your own reports is not set up yet. An administrator has to set up trust first.", links to the administrator setup page and offers no upload, and the upload endpoint refuses without a verdict. A sample report uploaded here is checked against the administrator's policy, never against the demonstration's, so a demonstration key can never be taken for a trusted issuer.
 - **Administrator setup.** A separate page, `/setup`, with plain instructions and a read-only readiness status: the engine, the configuration, the trust list, the replay setting, the file ownership and permission check, and the port. It creates nothing and changes nothing, and it never accepts or shows a signing key. It shows places only as `~/...`, and never on the verification pages. It says what an administrator has to prepare (the trust list and the issuers' fingerprints received by another route than the report), where the files go and the existing commands that make a trust list.
 
-Making the trust list still needs those existing commands (`regaudit-fhe trust add`, below). Creating it in the browser would be a separate change that has to be designed and reviewed on its own. The setup page does not do it.
+Making the trust list still needs those existing commands (`regaudit-fhe trust add`, below; run them in Terminal for now, and inside the macOS application by their full path, which the setup page shows). Creating it in the browser would be a separate change that has to be designed and reviewed on its own. The setup page does not do it.
 
 ### Where the configuration is looked for
 
@@ -205,6 +205,19 @@ If the page says your own reports cannot be checked, nothing of yours can be ver
 ```
 
 `serve` and `check-config` also print the engine line.
+
+### Running these commands from the macOS application
+
+The macOS application does not put console commands on your computer's search path. Inside it, in `Contents/Resources/tools`, there is a small program for each of the two commands above, `regaudit-fhe` and `regaudit-portal`, which runs it with the application's own Python. For now they are run in Terminal, by their full path, with the same arguments as everywhere else in this section. For an application in `/Applications`:
+
+```
+'/Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-fhe' trust add \
+  --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
+  --public-key issuer.pub --fingerprint FINGERPRINT
+'/Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-portal' check-config
+```
+
+The name has spaces, so the path is in quotes. For an application under your home folder, write `~/` first and quote the rest, so the `~` still means your home folder: `~/'Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-fhe'`. `check-config` without `--config` looks in the standard location (see above). The setup page, `/setup`, shows both commands ready to copy, with the right path for the copy you are running, and the plain command names when the portal is not running from the application. It only shows them and runs nothing. Guided creation of the trust list in the browser is not built.
 
 ## Deployment
 

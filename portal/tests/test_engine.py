@@ -410,7 +410,9 @@ def test_nothing_describes_a_verdict_shown_from_an_unrecognised_engine():
     """The warn-and-continue behaviour is gone: no code, text or flag for it remains."""
     package = Path(__file__).parents[1] / "regaudit_portal"
     text = "\n".join(
-        p.read_text() for p in [*package.glob("*.py"), *(package / "static").glob("*")]
+        p.read_text()
+        for p in [*package.glob("*.py"), *(package / "static").glob("*")]
+        if p.is_file()
     )
     for gone in (
         "ENGINE_NOT_PUBLISHED_RELEASE",

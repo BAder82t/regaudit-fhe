@@ -545,8 +545,11 @@ def test_the_setup_page_explains_what_to_prepare_where_it_goes_and_the_existing_
 
 def test_the_setup_page_is_linked_from_the_start_and_from_the_not_set_up_note():
     html = (STATIC / "index.html").read_text()
-    assert 'id="choose-setup" href="/setup"' in html
-    assert html.count('href="/setup"') == 2
+    main = html[html.index("<main") : html.index("</main>")]
+    assert 'id="choose-setup" href="/setup"' in main
+    assert (
+        main.count('href="/setup"') == 2
+    )  # the start, and the note that your own reports are not set up
 
 
 def test_when_the_engine_stops_passing_the_setup_answer_is_the_unavailable_one(client, monkeypatch):

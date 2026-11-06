@@ -779,8 +779,9 @@ def test_the_unavailable_panel_and_the_saving_check_are_on_the_normal_page():
         script.index("async function download()") : script.index("async function start()")
     ]
     assert (
-        'fetch("/api/status")' in saving and "status.ready" in saving
+        'fetch("/api/status")' in saving and "savePermitted(status, lastSaved.body)" in saving
     )  # no export unless the engine passes now
+    assert 'status.state === "unavailable" || !status.engine' in script
 
 
 def test_when_the_page_learns_the_engine_has_stopped_passing_it_clears_every_identity_and_policy_text():
