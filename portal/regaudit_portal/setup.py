@@ -108,7 +108,7 @@ _STATE_NEXT = {
         "your issuers' real keys."
     ),
     "development": (
-        "For reports you will rely on, change the profile in the configuration to confidential or high-assurance "
+        "To have the replay and format checks enforced, change the profile in the configuration to confidential or high-assurance "
         "and restart the portal."
     ),
     "engine": "Reinstall the published regaudit-fhe 0.2.1, as the portal's terminal output says.",

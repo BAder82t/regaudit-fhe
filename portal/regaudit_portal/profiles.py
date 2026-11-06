@@ -28,7 +28,10 @@ COMMON = (
 _PROFILES: dict[str, dict[str, Any]] = {
     "confidential": {
         "title": "Confidential",
-        "summary": "For reports you will rely on.",
+        "summary": (
+            "Between the other two: stricter than development, less strict than high-assurance about who a "
+            "report is addressed to."
+        ),
         "does": (
             "A report that names its intended recipients is refused unless your verifier id is one of them. A report "
             "that names no recipient is not refused for that reason.",
@@ -41,7 +44,7 @@ _PROFILES: dict[str, dict[str, Any]] = {
     },
     "high-assurance": {
         "title": "High-assurance",
-        "summary": "Like confidential, and every report must be addressed to your verifier id.",
+        "summary": "The strictest of the three: like confidential, and every report must be addressed to your verifier id.",
         "does": (
             "Everything the confidential profile does.",
             "A report is refused unless it names your verifier id among its intended recipients. A report that names "

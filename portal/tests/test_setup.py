@@ -283,7 +283,8 @@ def test_the_trust_policy_row_says_which_profile_and_what_it_means(
     body = client_for(_installed(issuer_config)).get("/api/setup").json()
     row = next(r for r in body["rows"] if r["id"] == "trust_policy")
     assert row["state"] == "ok" and row["detail"].startswith(
-        "Profile confidential: For reports you will rely on."
+        "Profile confidential: Between the other two: stricter than development, less strict than "
+        "high-assurance about who a report is addressed to."
     )
     assert "Maximum report age 30 days." in row["detail"]
     assert [p["name"] for p in body["guide"]["profiles"]] == [

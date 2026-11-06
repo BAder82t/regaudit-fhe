@@ -327,3 +327,11 @@ def test_the_replay_texts_name_both_modes_and_only_those():
     assert [m["name"] for m in profiles.guide()["replay_modes"]] == ["check", "record"]
     assert "nothing new is recorded" in profiles.replay_text("check")
     assert "refused as a repeat" in profiles.replay_text("record")
+
+
+def test_no_profile_summary_invites_reliance_and_each_says_where_it_stands():
+    for name in profiles.PROFILE_NAMES:
+        summary = profiles.explain(name)["summary"]
+        assert "rely on" not in summary.replace("Do not rely on", ""), name
+    assert profiles.explain("confidential")["summary"].startswith("Between the other two")
+    assert profiles.explain("high-assurance")["summary"].startswith("The strictest of the three")
