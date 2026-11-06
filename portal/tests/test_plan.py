@@ -856,3 +856,63 @@ def test_the_prepare_answer_shows_the_notices_first(signer):
         plan_request([signer], profile="development", max_age_days=3650, replay_mode="check")
     )
     assert status == 200 and len(body["notices"]) == 3 and body["summary"][:3] == body["notices"]
+
+
+# ----------------------------------------------------------------------------- a private seed in the wrong box
+
+
+def _seed(signer) -> bytes:
+    return signer.private_key.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()
+    )
+
+
+def test_the_private_seed_of_the_plans_own_key_is_refused_in_any_box_and_not_shown_back(
+    signer, request_body
+):
+    seed = _seed(signer)
+    public = signer.public_key.public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    forms = [seed.hex(), base64.urlsafe_b64encode(seed).decode().rstrip("="), (seed + public).hex()]
+    for value in forms:
+        for member in ("key_id", "fingerprint"):
+            status, body = _send(_with(request_body, **{member: value}))
+            assert status == 422 and body["error"] == "secret_key_material", (member, value, body)
+            assert "private key of one of the public keys in this plan" in body["message"]
+            assert value not in json.dumps(body)
+        bad = json.loads(json.dumps(request_body))
+        bad["configuration"]["verifier_id"] = value
+        status, body = _send(bad)
+        assert (
+            body["error"] == "secret_key_material" and body["where"] == "configuration, verifier id"
+        )
+
+
+def test_a_plan_file_whose_key_id_is_its_own_private_seed_is_refused(signer):
+    content = json.loads(prepare_plan([signer]))
+    content["issuers"][0]["key_id"] = _seed(signer).hex()
+    with pytest.raises(PlanProblem) as caught:
+        read_plan(crafted_plan(content))
+    assert caught.value.code == "secret_key_material"
+
+
+def test_ids_that_only_look_like_secret_bytes_are_accepted(signer, request_body):
+    """A key id derived from a key is hexadecimal or base64url, so its form alone cannot be refused."""
+    import hashlib
+
+    der = signer.public_key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    for key_id in (
+        fingerprint_of(signer),  # the SHA-256 fingerprint as the key id: 64 hexadecimal characters
+        hashlib.sha512(der).hexdigest(),  # 128 hexadecimal characters
+        base64.urlsafe_b64encode(hashlib.sha256(der).digest())
+        .decode()
+        .rstrip("="),  # a JWK thumbprint: 43
+        _seed(issuer_signer()).hex(),  # random bytes that are not this plan's key
+    ):
+        assert _send(_with(request_body, key_id=key_id))[0] == 200, key_id
+    ok = json.loads(json.dumps(request_body))
+    ok["configuration"]["verifier_id"] = "ab" * 32
+    assert _send(ok)[0] == 200

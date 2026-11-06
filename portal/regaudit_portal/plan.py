@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from regaudit_fhe._keys import load_ed25519_public_key, spki_fingerprint
 from regaudit_fhe.canonical import CanonicalError, canonical_bytes, loads_strict
@@ -100,6 +101,10 @@ RAW_KEY_MESSAGE = (
 NAME_KEY_MESSAGE = (
     "This looks like raw key bytes, which could be a secret key, so it was refused and not shown back. A name is "
     "never key material."
+)
+OWN_SEED_MESSAGE = (
+    "This is the private key of one of the public keys in this plan, so it was refused and not shown back. A private "
+    "key belongs only on the issuer's own system and never in a plan."
 )
 HEX_KEY_MESSAGE = (
     "This is 64 hexadecimal characters. It could be a fingerprint or a raw secret key, so it was refused and not "
@@ -437,6 +442,28 @@ def typed_fingerprint(value: Any, where: str) -> str:
     return text.lower()
 
 
+def _refuse_own_private_keys(issuers: list[Issuer], values: list[tuple[str, Any]]) -> None:
+    """Refuse a value that is the raw private seed of one of the plan's own public keys, in whatever box it was put.
+
+    Any other hexadecimal or base64 id is accepted: an id derived from a key's fingerprint looks exactly like random
+    secret bytes, so only this exact match can be refused without refusing real ids. The check derives the public
+    key from the candidate with the cryptography library and compares it with the plan's keys.
+    """
+    publics = {
+        load_ed25519_public_key(i.public_key_pem).public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        for i in issuers
+    }
+    for where, value in values:
+        raw = _raw_bytes(value) if isinstance(value, str) and len(value) <= 400 else None
+        if raw is None or len(raw) not in (32, 64):
+            continue
+        public = Ed25519PrivateKey.from_private_bytes(raw[:32]).public_key()
+        if public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) in publics:
+            raise SecretMaterial(OWN_SEED_MESSAGE, where)
+
+
 def fingerprints_match(typed: str, computed: str) -> bool:
     return hmac.compare_digest(typed.encode("ascii"), computed.encode("ascii"))
 
@@ -541,6 +568,17 @@ def _issuer(
     return Issuer(name, key_id, pem, fingerprint), found
 
 
+def _id_values(
+    issuers: list[Issuer], configuration: tuple | None, more: list[tuple[str, Any]]
+) -> list[tuple[str, Any]]:
+    """Every box a private seed could be pasted into by mistake, with where it is."""
+    found = [(f"issuer {n}, key id", i.key_id) for n, i in enumerate(issuers, start=1)]
+    found += [(f"issuer {n}, name", i.issuer) for n, i in enumerate(issuers, start=1)]
+    if configuration is not None:
+        found.append(("configuration, verifier id", configuration[1]))
+    return found + more
+
+
 def _checked(mode: str, issuers: list[Issuer], configuration: tuple | None) -> Plan:
     key_ids = [i.key_id for i in issuers]
     if len(set(key_ids)) != len(key_ids):
@@ -614,6 +652,7 @@ def read_plan(data: bytes) -> Plan:
         _issuer(item, n, "public_key_pem", _PLAN_ISSUER_MEMBERS)[0]
         for n, item in enumerate(_issuer_list(raw["issuers"]), start=1)
     ]
+    _refuse_own_private_keys(issuers, _id_values(issuers, configuration, []))
     plan = _checked(mode, issuers, configuration)
     if plan.content() != {k: v for k, v in raw.items() if k != "content_sha256"}:
         raise PlanProblem(
@@ -646,11 +685,14 @@ def read_request(data: bytes) -> tuple[Plan, list[dict[str, Any]]]:
     expected = _REQUEST_MEMBERS | ({"configuration"} if mode == FIRST_SETUP else set())
     _members(raw, expected, "request")
     configuration = _configuration(raw["configuration"]) if mode == FIRST_SETUP else None
-    issuers, checks = [], []
+    issuers, checks, typed_values = [], [], []
     for number, item in enumerate(_issuer_list(raw["issuers"]), start=1):
         issuer, found = _issuer(item, number, "public_key", _REQUEST_ISSUER_MEMBERS)
-        typed = typed_fingerprint(found["fingerprint"], f"issuer {number}, fingerprint")
         issuers.append(issuer)
+        typed_values.append((f"issuer {number}, fingerprint", found["fingerprint"]))
+    _refuse_own_private_keys(issuers, _id_values(issuers, configuration, typed_values))
+    for number, (issuer, item) in enumerate(zip(issuers, raw["issuers"], strict=True), start=1):
+        typed = typed_fingerprint(item["fingerprint"], f"issuer {number}, fingerprint")
         checks.append(
             {
                 "number": number,
