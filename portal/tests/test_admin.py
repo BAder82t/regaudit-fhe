@@ -782,7 +782,7 @@ def test_adding_issuers_with_no_configuration_or_to_a_demonstration_is_refused(
         (folder / name).write_bytes((demo / name).read_bytes())
         os.chmod(folder / name, 0o600)
     code, _, err = run("admin-apply", plan, *_expect(northwind))
-    assert code == 2 and "existing trust list is a demonstration" in err
+    assert code == 2 and "existing configuration is a demonstration" in err
 
 
 @pytest.mark.parametrize("place", ["../outside.json", "/etc/outside.json", "sub/inner.json"])
@@ -1326,3 +1326,28 @@ def test_every_message_is_free_of_control_characters(home, tmp_path, run, northw
     ]
     for _, out, err in outputs:
         _no_control_characters(out, err)
+
+
+def test_admin_apply_always_writes_customer_trust_mode(home, tmp_path, run, northwind):
+    folder = _first_setup(tmp_path, run, northwind)
+    assert json.loads((folder / "portal-config.json").read_text())["trust_mode"] == "customer"
+    portal = load_portal(folder / "portal-config.json")
+    assert portal.trust_mode == "customer" and portal.demonstration is False
+
+
+def test_issuers_are_never_added_to_a_configuration_marked_demonstration(
+    home, tmp_path, run, northwind
+):
+    folder = _first_setup(tmp_path, run, northwind)
+    config = folder / "portal-config.json"
+    data = json.loads(config.read_text())
+    data["trust_mode"] = "demonstration"
+    config.write_text(json.dumps(data))
+    before = (folder / "trust-store.json").read_bytes()
+    later = issuer_signer("Later Ltd", "later-1")
+    plan = _plan_file(tmp_path, prepare_plan([later], mode="add-issuers"))
+    code, out, _ = run("admin-describe", plan)
+    assert code == 2 and "existing configuration is a demonstration" in out
+    code, _, err = run("admin-apply", plan, *_expect(later))
+    assert code == 2 and "existing configuration is a demonstration" in err
+    assert (folder / "trust-store.json").read_bytes() == before

@@ -31,6 +31,7 @@ from . import __version__ as PORTAL_VERSION
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
 from .explain import (
+    DEMONSTRATION_LABEL,
     DEMONSTRATION_NOTICE,
     DEMONSTRATION_TRUST_NOTICE,
     FHE_NOTICE,
@@ -206,6 +207,35 @@ def _own_message(state: str) -> str:
     return _NOT_SET_UP if state == "not_set_up" else _NOT_READY
 
 
+_NO_TRUST_MODE = (
+    "Trust mode: none. No trust is set up, so only the bundled demonstration samples can be checked, and each of "
+    f"their results is labelled {DEMONSTRATION_LABEL}."
+)
+_CUSTOMER_MODE = "Trust mode: customer. Reports are checked against the trust set up in this portal's configuration."
+
+
+def trust_mode_fields(portal: Portal | None, own_state: str) -> dict[str, Any]:
+    """Which mode the portal is in, for the status and the setup page. It comes from the configuration the portal
+    was started with, and only a different configuration at the next start can change it."""
+    if portal is not None and own_state == "demonstration":
+        return {
+            "trust_mode": "demonstration",
+            "demonstration_label": DEMONSTRATION_LABEL,
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": (
+                f"Trust mode: demonstration. {DEMONSTRATION_LABEL}. The portal was started with a demonstration "
+                f"configuration ({portal.trust_mode_reason}), so files are checked only as a demonstration."
+            ),
+        }
+    if portal is not None and own_state == "ready":
+        return {
+            "trust_mode": "customer",
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": _CUSTOMER_MODE,
+        }
+    return {"trust_mode": "none", "trust_mode_text": _NO_TRUST_MODE}
+
+
 def _status_body(
     portal: Portal | None,
     engine: dict[str, Any],
@@ -214,11 +244,13 @@ def _status_body(
 ) -> dict[str, Any]:
     """Whether your own reports can be checked, which samples there are, and which engine would check them."""
     listing = samples.listing() if samples is not None else []
+    mode = trust_mode_fields(portal, own_state)
     if portal is not None and own_state == "demonstration":
         # Never "ready": a demonstration trust list is not trust set up by an administrator.
         return {
             "ready": False,
             "state": "demonstration",
+            **mode,
             "message": _DEMONSTRATION_ONLY,
             "demonstration_checks": True,
             "samples": listing,
@@ -231,6 +263,7 @@ def _status_body(
         return {
             "ready": False,
             "state": own_state,
+            **mode,
             "message": _own_message(own_state),
             "samples": listing,
             "engine": engine,
@@ -240,6 +273,7 @@ def _status_body(
     return {
         "ready": True,
         "state": "ready",
+        **mode,
         "samples": listing,
         "policy_id": policy.policy_id,
         "policy_text": f"Policy {policy.policy_id}, {approved_entries(portal.approved_count)}.",
@@ -273,9 +307,14 @@ def _result_body(
         "portal_version": PORTAL_VERSION,
         "not_a_claim": NOT_A_CLAIM,
         "synthetic_demonstration": sample is not None or demonstration_trust,
+        "trust_mode": "demonstration" if sample is not None or demonstration_trust else "customer",
     }
+    if sample is not None or demonstration_trust:
+        # Inside the result, so it is inside every saved file too. The verdict and the reason codes stay as they are.
+        body["demonstration_label"] = DEMONSTRATION_LABEL
     if sample is not None:
         body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
             "notice": DEMONSTRATION_NOTICE,
             "sample": {"id": sample.id, "title": sample.title},
             "issuer": DEMONSTRATION_ISSUER,
@@ -283,6 +322,7 @@ def _result_body(
         }
     elif demonstration_trust:
         body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
             "notice": DEMONSTRATION_TRUST_NOTICE,
             "sample": None,
             "issuer": None,
@@ -388,6 +428,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _unavailable_status()
         return readiness(
             configured,
+            mode=trust_mode_fields(portal, own_state),
             port=port,
             identity=identity,
             own_state=own_state,

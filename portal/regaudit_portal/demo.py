@@ -1,8 +1,9 @@
 """A synthetic demonstration: a trust store, a configuration and sample reports. Nothing here is real evidence.
 
 The private keys exist only while this runs and are not written anywhere. The configuration says it is a
-demonstration ("demonstration": true), so the portal never takes its trust list for trust set up by an administrator:
-it checks files against it only as a demonstration and labels every result that way.
+demonstration ("trust_mode": "demonstration"), so the portal keeps its trust list apart from customer trust: it
+checks files against it only as a demonstration and labels every result that way. Its keys are new each time, so that
+explicit setting is the only thing that marks them: a copy of the trust list without it is not recognised.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -66,7 +67,7 @@ def create(directory: str | Path) -> Path:
         "max_age_days": 30,
         "replay_mode": "check",
         "replay_db": "replay.db",
-        "demonstration": True,
+        "trust_mode": "demonstration",
     }
     (root / "portal-config.json").write_text(json.dumps(config, indent=2) + "\n")
     good = _report(issuer)

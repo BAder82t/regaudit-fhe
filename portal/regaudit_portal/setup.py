@@ -5,9 +5,10 @@ it never reads, accepts or shows a signing key. It has no way to write: nothing 
 folder, renames, deletes or changes permissions, and the replay file is not even opened. Places are shown relative to
 the home folder (``~/...``) and never as full paths.
 
-For each requirement that is missing or fails, a row says what is missing, why it matters and the one next step. A trust
-list that holds one of the portal's demonstration keys or names is labelled a demonstration and is never counted as
-trust being set up.
+For each requirement that is missing or fails, a row says what is missing, why it matters and the one next step. A
+configuration that says ``"trust_mode": "demonstration"``, or a trust list that holds one of the portal's bundled
+demonstration keys (by fingerprint), is labelled a demonstration and is never counted as trust being set up. The page
+also shows which trust mode the running portal is in.
 
 Copyright (C) 2026 VaultBytes Innovations Ltd
 Licensed under AGPL-3.0-or-later.
@@ -23,9 +24,9 @@ from .config import (
     Settings,
     approved_entries,
     check_replay_location,
-    is_demonstration_trust,
     read_settings,
     read_trust_store,
+    trust_mode_of,
 )
 from .engine import Identity
 from .paths import (
@@ -167,7 +168,13 @@ _AFTER_CONFIGURATION = "Not checked until the configuration is found and valid."
 
 
 def readiness(
-    config_path: Path | None, *, port: int, identity: Identity, own_state: str, own_message: str
+    config_path: Path | None,
+    *,
+    port: int,
+    identity: Identity,
+    own_state: str,
+    own_message: str,
+    mode: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Look at the configuration, the trust list and the replay setting without changing anything."""
     location = config_path if config_path is not None else default_config_path()
@@ -254,15 +261,15 @@ def readiness(
             policy = _row("trust_policy", _POLICY, "ok", described)
         try:
             store = read_trust_store(settings)
-            demonstration = is_demonstration_trust(settings, store)
+            kind, reason = trust_mode_of(settings, store)
+            demonstration = kind == "demonstration"
             if demonstration:
                 trust = _row(
                     "trust_list",
                     _TRUST,
                     "demonstration",
-                    "This is a demonstration trust list: it was made by demo-setup, or it holds a key or a name "
-                    "that the portal's made-up samples use. It does not count as trust being set up. The portal "
-                    "checks files against it only as a demonstration, and every result says so.",
+                    f"This is demonstration trust, because {reason}. It does not count as trust being set up. The "
+                    "portal checks files against it only as a demonstration, and every result says so.",
                     _WHY["demonstration"],
                     _STATE_NEXT["demonstration"],
                 )
@@ -355,6 +362,8 @@ def readiness(
     required = ("engine", "configuration", "trust_list", "replay", "file_check")
     return {
         "read_only": True,
+        # The mode the running portal is in, from the configuration it was started with.
+        **(mode or {"trust_mode": "none"}),
         "location_for_this_computer": display_path(default_config_folder()) + "/",
         "config_file_name": CONFIG_NAME,
         "configuration_in_use": display_path(location),

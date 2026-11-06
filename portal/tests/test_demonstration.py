@@ -32,7 +32,7 @@ def test_the_pinned_fingerprints_are_exactly_the_keys_in_the_bundled_samples():
 
 def test_every_bundled_demonstration_key_is_recognised(monkeypatch):
     for pem in _bundled_keys():
-        assert demonstration.is_demonstration_entry("anything", "Anyone Ltd", pem)
+        assert demonstration.is_demonstration_entry(pem)
         assert demonstration.is_demonstration_key(spki_fingerprint(pem).upper())
 
 
@@ -45,40 +45,38 @@ def test_the_pinned_list_still_works_if_the_sample_files_could_not_be_read(monke
         demonstration.fingerprints.cache_clear()
 
 
-def test_demo_setup_keys_are_recognised_by_the_names_it_always_writes(tmp_path):
-    made = json.loads((create(tmp_path / "d") / "trust-store.json").read_text())
-    for key_id, entry in made["entries"].items():
-        assert demonstration.is_demonstration_entry(
-            key_id, entry["issuer"], entry["public_key_pem"]
-        )
-        assert not demonstration.is_demonstration_key(spki_fingerprint(entry["public_key_pem"]))
+def test_demo_setup_keys_are_not_recognised_by_their_keys_only_its_configuration_says_so(tmp_path):
+    """Its keys are new each time, so nothing can tell them apart from real keys. Its configuration's trust_mode is
+    the control (see test_demonstration_trust.py)."""
+    root = create(tmp_path / "d")
+    made = json.loads((root / "trust-store.json").read_text())
+    for entry in made["entries"].values():
+        assert not demonstration.is_demonstration_entry(entry["public_key_pem"])
+    assert json.loads((root / "portal-config.json").read_text())["trust_mode"] == "demonstration"
 
 
 @pytest.mark.parametrize(
-    "name",
+    "issuer, key_id",
     [
-        "DEMO-ONLY synthetic issuer",
-        "demo-only unenrolled signer",
-        "Example Synthetic Issuer",
-        " EXAMPLE SYNTHETIC ISSUER ",
+        ("DEMO-ONLY synthetic issuer", "demo-only-synthetic-key"),
+        ("Example Synthetic Issuer", "synthetic-issuer-key"),
+        ("Demo Analytics Ltd", "demo-2026"),
+        ("Synthetic Data Works", "synthetic-1"),
     ],
 )
-def test_demonstration_names_are_recognised_without_regard_to_case(name):
-    assert demonstration.is_demonstration_name(name)
+def test_no_name_or_key_id_makes_a_key_a_demonstration(issuer, key_id):
+    """Only the exact bundled keys are demonstration keys. A legitimate issuer is never one because of its name."""
+    signer = rf.Signer.generate(issuer=issuer, key_id=key_id)
+    assert not demonstration.is_demonstration_entry(signer.public_key_pem())
 
 
-@pytest.mark.parametrize(
-    "key_id",
-    ["demo-only-synthetic-key", "DEMO-ONLY-X", "synthetic-issuer-key", "synthetic-outsider-key"],
-)
-def test_demonstration_key_ids_are_recognised(key_id):
-    assert demonstration.is_demonstration_key_id(key_id)
-
-
-def test_an_ordinary_issuer_is_not_a_demonstration():
-    signer = rf.Signer.generate(issuer="Northwind Ltd", key_id="nw-1")
-    assert not demonstration.is_demonstration_entry(
-        "nw-1", "Northwind Ltd", signer.public_key_pem()
-    )
-    assert not demonstration.is_demonstration_name("Demonstrably Real Ltd")
-    assert not demonstration.is_demonstration_key_id("demo-2026")
+def test_the_module_has_no_rule_about_names_or_key_ids():
+    source = (Path(demonstration.__file__)).read_text()
+    for gone in (
+        "is_demonstration_name",
+        "is_demonstration_key_id",
+        "_NAMES",
+        "_KEY_IDS",
+        "_NAME_PREFIXES",
+    ):
+        assert gone not in source, gone

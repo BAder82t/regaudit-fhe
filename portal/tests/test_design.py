@@ -314,7 +314,9 @@ def test_the_verdict_is_told_by_its_words_and_a_shape_and_not_by_colour_alone():
     )
     for state in ("ok", "problem", "missing", "not_checked"):
         assert f'dd strong[data-state="{state}"]' in css, state
-    assert css.count("DEMONSTRATION") == 1 and "border: 2px dashed var(--color-demo-text)" in css
+    # The demonstration label comes from the portal, in one wording; the style adds no label text of its own.
+    assert "DEMONSTRATION" not in css and "border: 2px dashed var(--color-demo-text)" in css
+    assert ".demo-label {" in css
     assert '$("result").classList.toggle("demonstration", demonstration);' in script
 
 

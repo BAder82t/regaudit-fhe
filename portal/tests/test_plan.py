@@ -366,13 +366,28 @@ def test_the_bundled_demonstration_keys_are_refused_by_fingerprint_whatever_they
     [
         ("issuer", "DEMO-ONLY synthetic issuer"),
         ("issuer", "Example Synthetic Issuer"),
+        ("issuer", "Demo Analytics Ltd"),
         ("key_id", "demo-only-synthetic-key"),
         ("key_id", "synthetic-issuer-key"),
     ],
 )
-def test_the_demonstration_names_and_key_ids_are_refused(request_body, member, value):
+def test_names_and_key_ids_that_contain_demo_or_synthetic_are_ordinary(request_body, member, value):
+    """No name or key id makes an issuer a demonstration: only the bundled keys, by fingerprint, are refused."""
     status, body = _send(_with(request_body, **{member: value}))
-    assert status == 422 and body["error"] == "demonstration_key", body
+    assert status == 200, body
+
+
+def test_a_plan_cannot_ask_for_demonstration_trust(signer):
+    content = json.loads(prepare_plan([signer]))
+    content["configuration"]["trust_mode"] = "demonstration"
+    with pytest.raises(PlanProblem):
+        read_plan(crafted_plan(content))
+    request = plan_request([signer])
+    request["configuration"]["trust_mode"] = "demonstration"
+    assert _send(request)[0] == 422
+    request = plan_request([signer])
+    request["trust_mode"] = "demonstration"
+    assert _send(request)[0] == 422
 
 
 # ----------------------------------------------------------------------------- fingerprints as typed
@@ -777,6 +792,10 @@ def test_the_configuration_shown_is_one_the_portal_reads_as_the_plan_says(tmp_pa
     assert settings.allow_self_signed is False and list(read_trust_store(settings).entries) == [
         signer.key_id
     ]
+    assert (
+        settings.trust_mode == "customer"
+        and '"trust_mode": "customer"' in plan.configuration_text()
+    )
 
 
 # ----------------------------------------------------------------------------- showing text safely

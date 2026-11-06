@@ -54,8 +54,14 @@ from regaudit_fhe import (
 from regaudit_fhe.canonical import CanonicalError, loads_strict
 from regaudit_fhe.trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
 
-from .config import ConfigProblem, Settings, read_settings, read_trust_store
-from .demonstration import is_demonstration_entry
+from .config import (
+    CUSTOMER,
+    ConfigProblem,
+    Settings,
+    read_settings,
+    read_trust_store,
+    trust_mode_of,
+)
 from .engine import REINSTALL, check_engine
 from .paths import CONFIG_NAME, default_config_folder
 from .plan import (
@@ -462,12 +468,11 @@ class Destination:
             store = read_trust_store(settings)
         except ConfigProblem as exc:
             raise Refused(f"The existing trust list cannot be used: {exc}") from exc
-        if any(
-            is_demonstration_entry(k, e.issuer, e.public_key_pem) for k, e in store.entries.items()
-        ):
+        mode, reason = trust_mode_of(settings, store)
+        if mode != CUSTOMER:
             raise Refused(
-                "The existing trust list is a demonstration. Real issuers are not added to it. Move it and the "
-                "configuration away, then apply a first-setup plan."
+                f"The existing configuration is a demonstration ({reason}). Real issuers are not added to "
+                "demonstration trust. Move it and the trust list away, then apply a first-setup plan."
             )
         data, identity = self._read_store(name)
         try:
@@ -763,13 +768,14 @@ def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
         raise Refused(
             f"The new files do not pass the portal's own check: {exc}. {UNCHANGED}"
         ) from exc
-    wanted = (plan.profile, plan.verifier_id, plan.max_age_days, plan.replay_mode, False)
+    wanted = (plan.profile, plan.verifier_id, plan.max_age_days, plan.replay_mode, False, CUSTOMER)
     found = (
         settings.profile,
         settings.verifier_id,
         settings.max_age_days,
         settings.replay_mode,
         settings.allow_self_signed,
+        trust_mode_of(settings, store)[0],
     )
     if found != wanted or settings.store_path != staging_path / TRUST_LIST_NAME:
         raise Refused(f"The new configuration does not say what the plan says. {UNCHANGED}")

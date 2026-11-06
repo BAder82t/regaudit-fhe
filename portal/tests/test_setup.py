@@ -242,9 +242,7 @@ def test_a_demonstration_trust_list_is_labelled_and_never_counted_as_trust(tmp_p
     body = client.get("/api/setup").json()
     row = next(r for r in body["rows"] if r["id"] == "trust_list")
     assert row["state"] == "demonstration" and row["ok"] is False
-    assert (
-        "demonstration trust list" in row["detail"] and "does not count as trust" in row["detail"]
-    )
+    assert "demonstration trust" in row["detail"] and "does not count as trust" in row["detail"]
     assert body["trust_configured"] is False and body["demonstration_trust_list"] is True
     assert "Example Synthetic Issuer" not in json.dumps(
         body
@@ -569,6 +567,7 @@ def test_the_two_setup_routes_only_look():
         "_unavailable_status",
         "readiness",
         "_own_message",
+        "trust_mode_fields",
     }, called
 
 

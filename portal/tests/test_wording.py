@@ -225,22 +225,29 @@ def test_the_readme_and_the_security_document_describe_administrator_setup_and_w
     ):
         assert said in part, said
     for text in (section, part):
-        assert "—" not in text and "owner" not in text.lower() and "round" not in text.lower()
+        # The exact demonstration label has a dash of its own; no other text in these sections does.
+        text = text.replace("DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED", "")
+        assert "\u2014" not in text and "owner" not in text.lower() and "round" not in text.lower()
 
 
-def test_the_docs_state_that_a_demonstration_trust_list_is_never_treated_as_trust_set_up_by_an_administrator():
-    said = (
-        "A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made "
-        "with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or "
-        "name. The portal then says it is not ready for your own reports, checks files against that list only as a "
-        "demonstration, and labels every result and every saved result that way. `check-config` refuses it."
-    )
-    assert said in README.read_text()
-    assert said in (README.parent / "SECURITY.md").read_text()
+def test_the_docs_describe_the_explicit_trust_mode_the_label_and_the_limit_of_demo_setup_keys():
     for text in (README.read_text(), (README.parent / "SECURITY.md").read_text()):
+        for said in (
+            "Demonstration trust is kept apart from customer trust.",
+            "The mode is an explicit setting in the configuration, `trust_mode`",
+            "recognised by its exact fingerprint, is a demonstration whatever the setting says",
+            "No issuer name or key id decides it.",
+            "labels every result and every saved result `DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED`",
+            "next to the verifier's own verdict and reason codes",
+            "Known limit: `demo-setup` makes new keys each time, and nothing can tell them apart from real keys.",
+            "That setting is the only control for those keys",
+        ):
+            assert said in text, said
         assert "is still accepted for verification" not in text
-    assert "`demonstration` (the trust list is a demonstration" in README.read_text()
-    assert "The portal checks them only as a demonstration" in README.read_text()
+        assert "key or name" not in text and "keys or names" not in text
+    readme = README.read_text()
+    assert "`demonstration` (the trust list is a demonstration" in readme
+    assert 'It always writes `"trust_mode": "customer"`' in readme
 
 
 def test_the_docs_say_which_ids_that_look_like_secret_bytes_are_refused_and_why_the_others_are_not():

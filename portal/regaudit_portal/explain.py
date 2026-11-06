@@ -27,6 +27,10 @@ DEMONSTRATION_NOTICE = (
     "trust list. It says nothing about any real report or issuer."
 )
 
+# The one label every demonstration result carries, exactly as written here: on the page, in the banner, in the result's
+# own members and in every saved file. It never changes, and it is never left out.
+DEMONSTRATION_LABEL = "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED"
+
 # On every result checked against a demonstration trust list that is in the configuration, and in every saved one.
 DEMONSTRATION_TRUST_NOTICE = (
     "This portal is set up with a demonstration trust list, so this file was checked only as a demonstration. The "

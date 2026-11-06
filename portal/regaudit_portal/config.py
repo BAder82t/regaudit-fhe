@@ -30,10 +30,13 @@ _MEMBERS = {
     "replay_mode",
     "replay_db",
     "allow_self_signed",
-    "demonstration",
+    "trust_mode",
 }
 _REQUIRED = {"trust_store", "profile", "verifier_id", "max_age_days"}
 _PROFILES = ("confidential", "high-assurance", "development")
+CUSTOMER = "customer"
+DEMONSTRATION = "demonstration"
+TRUST_MODES = (CUSTOMER, DEMONSTRATION)
 
 
 class ConfigProblem(Exception):
@@ -62,8 +65,13 @@ class Portal:
     replay_mode: str
     approved_count: int
     engine: dict[str, Any]
-    # A demonstration trust list is never trust set up by an administrator: see is_demonstration_trust.
-    demonstration: bool = False
+    # Demonstration trust is kept apart from customer trust: see trust_mode_of.
+    trust_mode: str = CUSTOMER
+    trust_mode_reason: str = ""
+
+    @property
+    def demonstration(self) -> bool:
+        return self.trust_mode == DEMONSTRATION
 
 
 @dataclass(frozen=True)
@@ -78,9 +86,9 @@ class Settings:
     allow_self_signed: bool
     store_path: Path
     replay_path: Path
-    demonstration: bool = (
-        False  # the configuration says so itself: demo-setup writes "demonstration": true
-    )
+    # Which kind of trust this configuration says it is: "customer", "demonstration" (demo-setup writes it), or ""
+    # when it says nothing, which is customer trust. Chosen with the configuration when the portal starts, never later.
+    trust_mode: str = ""
 
 
 def _directory_problem(directory: Path, what: str) -> ConfigProblem | None:
@@ -170,7 +178,9 @@ def read_settings(config_path: str | Path) -> Settings:
     if replay_mode not in ("check", "record"):
         raise ConfigProblem("replay_mode must be 'check' or 'record'")
     allow_self_signed = _member(raw, "allow_self_signed", bool, False)
-    demonstration = _member(raw, "demonstration", bool, False)
+    trust_mode = _member(raw, "trust_mode", str, "")
+    if "trust_mode" in raw and trust_mode not in TRUST_MODES:
+        raise ConfigProblem("trust_mode must be 'customer' or 'demonstration'")
     store_path = path.parent / _member(raw, "trust_store", str)
     replay_path = path.parent / _member(raw, "replay_db", str, "replay.db")
     return Settings(
@@ -182,22 +192,32 @@ def read_settings(config_path: str | Path) -> Settings:
         allow_self_signed,
         store_path,
         replay_path,
-        demonstration,
+        trust_mode,
+    )
+
+
+def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
+    """The kind of trust this is, and why: demonstration trust is kept apart from customer trust.
+
+    It is a demonstration if the configuration says ``"trust_mode": "demonstration"`` (demo-setup writes it), or if
+    the trust list holds one of the portal's bundled demonstration keys, recognised by exact fingerprint. A missing
+    or ``"customer"`` setting cannot make a list with a bundled key into customer trust. Nothing else decides it: no
+    issuer name or key id. A configuration without the setting and without a bundled key is customer trust.
+    """
+    if any(is_demonstration_entry(entry.public_key_pem) for entry in store.entries.values()):
+        return DEMONSTRATION, "the trust list holds one of the portal's bundled demonstration keys"
+    if settings.trust_mode == DEMONSTRATION:
+        return DEMONSTRATION, 'the configuration says "trust_mode": "demonstration"'
+    if settings.trust_mode == CUSTOMER:
+        return CUSTOMER, 'the configuration says "trust_mode": "customer"'
+    return (
+        CUSTOMER,
+        "the configuration does not say demonstration, and the trust list holds no bundled key",
     )
 
 
 def is_demonstration_trust(settings: Settings, store: TrustStore) -> bool:
-    """Is this trust list a demonstration, which must never be taken for trust set up by an administrator?
-
-    Yes if the configuration carries demo-setup's marker, or if any entry holds one of the portal's demonstration
-    keys (by fingerprint: the bundled samples' keys) or a demonstration name or key id (demo-setup's own keys, which
-    are new each time). Renaming a demo-setup key to avoid the names makes it useless: every report it signed names
-    the old issuer and key id, and its private key was thrown away, so it can sign nothing new.
-    """
-    return settings.demonstration or any(
-        is_demonstration_entry(key_id, entry.issuer, entry.public_key_pem)
-        for key_id, entry in store.entries.items()
-    )
+    return trust_mode_of(settings, store)[0] == DEMONSTRATION
 
 
 def read_trust_store(settings: Settings) -> TrustStore:
@@ -261,11 +281,7 @@ def load_portal(config_path: str | Path) -> Portal:
         )
     except (ReplayStateError, PolicyError) as exc:
         raise ConfigProblem(f"policy: {exc}") from exc
+    mode, reason = trust_mode_of(settings, store)
     return Portal(
-        policy,
-        settings.profile,
-        settings.replay_mode,
-        len(store.keys),
-        engine,
-        is_demonstration_trust(settings, store),
+        policy, settings.profile, settings.replay_mode, len(store.keys), engine, mode, reason
     )

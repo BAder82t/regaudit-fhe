@@ -194,6 +194,7 @@ class Plan:
             "max_age_days": self.max_age_days,
             "replay_mode": self.replay_mode,
             "replay_db": REPLAY_NAME,
+            "trust_mode": "customer",  # written out, so the mode is explicit; a plan can never choose another
         }
         return json.dumps(settings, indent=2) + "\n"
 
@@ -500,12 +501,6 @@ def _key_id(value: Any, where: str) -> str:
             "letter or a digit, and must not contain two dots in a row. It must not look like a file path.",
             where=where,
         )
-    if demonstration.is_demonstration_key_id(key_id):
-        raise PlanProblem(
-            "This key id is one the portal's demonstration uses. Choose the key id the issuer gave you.",
-            "demonstration_key",
-            where,
-        )
     return key_id
 
 
@@ -560,12 +555,6 @@ def _issuer(
     where = f"issuer {number}"
     found = _members(raw, members, "issuer", where)
     name = _text(found["issuer"], "issuer name", MAX_NAME, f"{where}, name")
-    if demonstration.is_demonstration_name(name):
-        raise PlanProblem(
-            "This issuer name is one the portal's demonstration uses. Use the issuer's real name.",
-            "demonstration_key",
-            f"{where}, name",
-        )
     key_id = _key_id(found["key_id"], f"{where}, key id")
     pem, fingerprint = public_key(found[key_member], f"{where}, public key")
     return Issuer(name, key_id, pem, fingerprint), found

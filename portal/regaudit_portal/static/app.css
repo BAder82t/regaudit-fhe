@@ -362,7 +362,7 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--color-acc
 #limitation-full { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-text); border-left-width: 6px; }
 #limitation-full h2, #limitation-full p { color: inherit; }
 
-/* A sample is a demonstration. It looks different from a real result: dashed edges and a label. */
+/* A demonstration result looks different from a customer result: dashed edges, and the label the portal sends. */
 .demo-banner {
   margin: 0 0 var(--spacing-sm);
   padding: var(--spacing-sm);
@@ -372,13 +372,17 @@ input:focus-visible, textarea:focus-visible { outline: 3px solid var(--color-acc
   border-radius: var(--radius);
   font-weight: 600;
 }
-.demo-banner::before {
-  content: "DEMONSTRATION";
-  display: block;
-  margin-bottom: 0.25rem;
+.demo-label {
+  display: inline-block;
+  margin: 0 0 var(--spacing-xs);
+  padding: 0.25rem 0.6rem;
+  background: var(--color-demo-bg);
+  color: var(--color-demo-text);
+  border: 2px dashed var(--color-demo-text);
+  border-radius: var(--radius);
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  letter-spacing: 2px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 .panel.demonstration { border: 2px dashed var(--color-demo-text); }
 

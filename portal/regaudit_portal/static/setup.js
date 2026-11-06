@@ -27,6 +27,9 @@ function statement(body) {
 function render(body) {
   $("folder").textContent = body.location_for_this_computer;
   $("file-name").textContent = body.config_file_name;
+  // Which mode the running portal is in, from the configuration it was started with.
+  $("trust-mode").textContent = body.trust_mode_text || "";
+  $("trust-mode").className = body.trust_mode === "demonstration" ? "statement demo-banner" : "statement";
   $("own-reports").textContent = statement(body);
   const list = $("rows");
   list.replaceChildren();
