@@ -198,6 +198,39 @@ The configuration file, trust store, replay file and the folders holding them mu
 
 Without `--config`, the portal looks in the standard per-user folder (see [Where the configuration is looked for](#where-the-configuration-is-looked-for)). The setup page, `/setup`, shows what is in place and what is not, read-only.
 
+### Guided administrator setup
+
+The setup page, `/setup`, shows each requirement and its state. For anything missing or failing, it says what is missing, why it matters and the one next step. A trust list that holds one of the portal's demonstration keys or names is labelled a demonstration. It never counts as trust being set up.
+
+The page `/setup/plan` prepares a setup plan. You choose one of the three profiles, your verifier id, the oldest report you accept and the replay mode. For each issuer you enter the name, the key id, the issuer's public key and the fingerprint the issuer gave you by another route. The portal checks all of it and shows the fingerprint it computed from each key next to the one you typed. It shows exactly what applying the plan would write and gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing. It refuses anything that looks like a private key and does not show it back.
+
+The page explains each profile by what published 0.2.1 does with it. Confidential refuses a report that names its recipients without your verifier id, a report in the older v1 format, and any report when the replay file cannot be used. High-assurance also refuses a report that does not name your verifier id at all. Development does not refuse a report because the replay file cannot be used, and every result says not to rely on it. In 0.2.1, high-assurance does not authenticate the trust list, share the replay record or ask for a verified timestamp.
+
+You apply a plan yourself, outside the browser:
+
+```
+.venv/bin/regaudit-portal admin-describe setup-plan.json
+.venv/bin/regaudit-portal admin-apply setup-plan.json --expect-fingerprint KEY_ID=FINGERPRINT
+```
+
+`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
+
+What `admin-apply` holds to:
+
+- It runs only if the engine is the published 0.2.1.
+- It enrols keys with the same code as `regaudit-fhe trust add`, so the trust list is the same file.
+- It refuses the portal's demonstration keys.
+- The plan never chooses where files go. They go to the standard folder, or to the folder you give with `--config-folder`.
+- It refuses a symbolic link anywhere on the way, and a folder or file that belongs to another account or that group or others can change. It does not run as root.
+- A first setup refuses to replace an existing configuration or trust list. A plan can also add issuers to an existing trust list. Nothing is ever removed, revoked or replaced.
+- It makes the folder with mode 0700 and the files with mode 0600, and moves them into place in one step. If it stops part-way, nothing has changed.
+- Only one can run at a time for a folder.
+- It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
+
+What stays manual: getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
+
+The plan's checksum only shows that the file is intact. Anyone can compute it, so it says nothing about who made the plan. A web page can make a browser download a file that looks like a plan. The fingerprint you type when you apply it is the check that matters, so type it from what the issuer gave you, never from the plan or from this computer.
+
 If the page says your own reports cannot be checked, nothing of yours can be verified. To see why, run:
 
 ```

@@ -189,3 +189,36 @@ def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_
         "never creates the per-user configuration folder by itself",
     ):
         assert said in text, said
+
+
+def test_the_readme_and_the_security_document_describe_administrator_setup_and_what_stays_manual():
+    readme = README.read_text()
+    section = readme[readme.index("### Guided administrator setup") : readme.index("### Running these commands")]
+    for said in (
+        "It writes nothing, keeps nothing and enrols nothing",
+        "It refuses anything that looks like a private key and does not show it back",
+        "It shows no fingerprint, on purpose",
+        "It refuses unless each one equals the fingerprint computed from the key in the plan",
+        "It enrols keys with the same code as `regaudit-fhe trust add`",
+        "The plan never chooses where files go",
+        "Nothing is ever removed, revoked or replaced",
+        "What stays manual",
+        "says nothing about who made the plan",
+        "never from the plan or from this computer",
+        "does not authenticate the trust list",
+    ):
+        assert said in section, said
+    security = (README.parent / "SECURITY.md").read_text()
+    part = security[security.index("## Administrator setup") : security.index("## Reporting a problem")]
+    for said in (
+        "No page or request can write, change or enrol trust",
+        "The portal process never loads the code that applies a plan",
+        "There is no option, setting or file that skips the typed fingerprint",
+        "This adds no privilege",
+        "It does not authenticate the administrator",
+        "does not add the protections that the limitation above says published v0.2.1 lacks",
+        "stay manual",
+    ):
+        assert said in part, said
+    for text in (section, part):
+        assert "—" not in text and "owner" not in text.lower() and "round" not in text.lower()

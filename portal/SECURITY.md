@@ -31,8 +31,19 @@ The check hashes the installed source files before the engine is imported, refus
 - Verdicts and reason codes are exactly what the verifier returned.
 - The bundled samples are made-up reports checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else. A report that is uploaded is checked against the administrator's policy, or refused if there is none, so a demonstration key can never be taken for a trusted issuer. Every sample result is labelled a synthetic demonstration. The package holds the demonstration issuer's public key and no private key.
 - The administrator setup page only reads. It creates and changes nothing, enrols no key and never accepts or shows a signing key. Without a configuration the portal starts in welcome mode, where only the samples work, and it never creates the per-user configuration folder by itself.
+- The page that prepares a setup plan only computes an answer. It writes nothing, keeps nothing and enrols nothing.
 
 It does not make the published engine enforce anything. It makes a basic start-up check of the file ownership and permission bits of its own configuration, trust store and replay file, and that check is not the protection described in the limitation above.
+
+## Administrator setup
+
+The browser can prepare a setup plan and nothing more. The one route that does it computes an answer from what it is sent and keeps nothing. No page or request can write, change or enrol trust. The portal process never loads the code that applies a plan.
+
+A person applies a plan outside the browser: with `regaudit-portal admin-apply` in Terminal, or with Administrator setup in the macOS application's menu. The application shows a native file chooser and a native dialog, which no web page can reach. Applying a plan needs, for each issuer, the fingerprint the administrator received from that issuer by another route, typed by that person. It is refused unless each one matches the key in the plan. The plan holds no fingerprint, and its checksum only shows that the file is intact. There is no option, setting or file that skips the typed fingerprint.
+
+This adds no privilege. Anyone who can run the command can already enrol a key with `regaudit-fhe trust add`. It does not authenticate the administrator, and it does not add the protections that the limitation above says published v0.2.1 lacks.
+
+The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up. Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
 
 ## Reporting a problem
 
