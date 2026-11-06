@@ -212,11 +212,19 @@ function listSamples(samples) {
   }
 }
 
+// May this result be saved now, given what the portal says about itself at this moment? Nothing is saved unless the
+// engine passes its check. A demonstration sample needs nothing more, because it is checked against the bundled
+// demonstration policy. A result for your own report also needs the administrator's policy to be loaded.
+function savePermitted(status, result) {
+  if (status.state === "unavailable" || !status.engine) return false;
+  return result.synthetic_demonstration === true || status.ready === true;
+}
+
 async function download() {
   if (lastSaved === null) return;
-  // No saved result is produced unless the engine passes its check at this moment.
+  // The engine is checked again here, so no saved result is produced unless it passes at this moment.
   const status = await (await fetch("/api/status")).json();
-  if (!status.ready) {
+  if (!savePermitted(status, lastSaved.body)) {
     if (status.state === "unavailable") unavailable();
     else fail("This portal cannot save a result right now. Contact your administrator.");
     return;
