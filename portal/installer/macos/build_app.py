@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -33,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +92,80 @@ def fetch_runtime(runtime: dict, cache: Path) -> Path:
     return target
 
 
+def tree_digest(root: Path) -> str:
+    """One SHA-256 over every file under ``root`` (path and content), links by their target."""
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        rel = str(p.relative_to(root)).encode()
+        if p.is_symlink():
+            h.update(b"L" + rel + b"\0" + os.readlink(p).encode() + b"\0")
+        elif p.is_file():
+            h.update(b"F" + rel + b"\0" + sha256_file(p).encode() + b"\0")
+    return h.hexdigest()
+
+
+TOOL_TEMPLATE = """#!/bin/sh
+# Runs {what} from inside the application, with the bundled Python and nothing from the user's environment.
+here="$(cd "$(dirname "$0")" && pwd -P)"
+exec "$here/../python/bin/python3" -I -B -m {module} "$@"
+"""
+
+TOOLS = {
+    "regaudit-fhe": ("regaudit-fhe", "regaudit_fhe.cli"),
+    "regaudit-portal": ("regaudit-portal", "regaudit_portal"),
+}
+
+
+def approved_limitation() -> str:
+    """The approved security limitation text, taken from the portal's own module so it cannot drift."""
+    spec = importlib.util.spec_from_file_location(
+        "portal_engine_text", PORTAL_DIR / "regaudit_portal" / "engine.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses in that module look themselves up here
+    spec.loader.exec_module(module)
+    return module.SECURITY_LIMITATION
+
+
+def read_me_first(portal_version: str) -> str:
+    return f"""Evidence Verification Portal {portal_version}  (local evaluation build)
+
+WHAT THIS IS
+A local app that checks signed regaudit-fhe reports on your own Mac. It opens in your web
+browser and works only on this computer. It is made by VaultBytes Innovations Ltd.
+It is an evaluation build and not a finished product. It is not a regulatory certification
+and not proof of encrypted computation. A valid signature does not show that any FHE
+(encrypted) computation took place.
+
+YOU NEED
+A Mac with Apple silicon (M1 or newer) running macOS 14 or newer.
+
+INSTALL
+1. Drag "Evidence Verification Portal" onto the Applications folder next to it.
+2. Open it from Applications. Your browser opens at the portal.
+3. Choose "Try a sample report". The samples are made-up demonstration data.
+
+IF MACOS WILL NOT OPEN IT
+This build is signed only ad hoc. It is not notarized by Apple, so macOS blocks a copy that
+was downloaded or sent to you. This build is for evaluation under VaultBytes' direction.
+Only continue if it came to you from VaultBytes and its SHA-256 matches the value you were
+given (in Terminal: shasum -a 256 <the .dmg file>). Then open System Settings, Privacy &
+Security, scroll to the message about "Evidence Verification Portal", choose "Open Anyway"
+and enter your password.
+
+TO STOP IT
+Right-click its icon in the Dock and choose Quit, or press Command-Q while it is in front.
+Closing the browser tab does not stop it.
+
+YOUR OWN REPORTS
+Checking your own reports needs an administrator to set up trust first. The "Administrator
+setup" page in the portal explains how. Nothing is set up automatically, and the samples are
+never trusted for your own reports.
+
+{approved_limitation()}
+"""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
@@ -120,12 +196,14 @@ def main() -> int:
         tf.extractall(resources, filter="data")
     py = resources / "python" / "bin" / "python3"
     before = {p.name for p in (resources / "python" / "bin").iterdir()}
+    known_bytecode = {p for p in (resources / "python").rglob("*.pyc")}
 
     # 2. The locked wheels, nothing else
     run(
         [
             str(py),
             "-I",
+            "-B",
             "-m",
             "pip",
             "install",
@@ -153,6 +231,9 @@ def main() -> int:
 
     # 3. The portal's own source (pure Python), file by file so every file can be listed
     site = next((resources / "python" / "lib").glob("python3*/site-packages"))
+    # The runtime brings pip and nothing in the bundle needs it. Leaving it would let the bundle install more.
+    for leftover in [site / "pip", *site.glob("pip-*.dist-info")]:
+        shutil.rmtree(leftover)
     shutil.copytree(
         PORTAL_DIR / "regaudit_portal",
         site / "regaudit_portal",
@@ -192,6 +273,55 @@ def main() -> int:
         ]
     )
 
+    # 5b. The commands an administrator runs (trust-list creation and checking), as programs that need no setup
+    tools = resources / "tools"
+    tools.mkdir()
+    for name, (what, module) in TOOLS.items():
+        script = tools / name
+        script.write_text(TOOL_TEMPLATE.format(what=what, module=module))
+        script.chmod(0o755)
+
+    # 5c. The icon: the VaultBytes mark on a white tile
+    with tempfile.TemporaryDirectory() as tmp:
+        maker = Path(tmp) / "make_icon"
+        run(
+            [
+                "swiftc",
+                "-O",
+                "-o",
+                str(maker),
+                str(HERE / "icon" / "make_icon.swift"),
+                "-framework",
+                "AppKit",
+            ]
+        )
+        run(
+            [
+                str(maker),
+                str(HERE / "icon" / "vaultbytes-mark.svg"),
+                str(Path(tmp) / "AppIcon.iconset"),
+            ]
+        )
+        run(
+            [
+                "iconutil",
+                "-c",
+                "icns",
+                "-o",
+                str(resources / "AppIcon.icns"),
+                str(Path(tmp) / "AppIcon.iconset"),
+            ]
+        )
+
+    # 5d. Nothing in the bundle may carry bytecode that this build created: it records the build machine's paths,
+    # and the portal never loads bytecode from inside the bundle.
+    for pyc in list((resources / "python").rglob("*.pyc")):
+        if pyc not in known_bytecode:
+            pyc.unlink()
+    for cache in sorted((resources / "python").rglob("__pycache__"), reverse=True):
+        if cache.is_dir() and not any(cache.iterdir()):
+            cache.rmdir()
+
     # 6. Info.plist
     portal_version = "0.0.1"
     for line in (PORTAL_DIR / "pyproject.toml").read_text().splitlines():
@@ -202,11 +332,11 @@ def main() -> int:
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": BUNDLE_ID,
         "CFBundleExecutable": "launcher",
+        "CFBundleIconFile": "AppIcon",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": portal_version,
         "CFBundleVersion": git("rev-parse", "--short=12", "HEAD") or portal_version,
         "LSMinimumSystemVersion": MIN_MACOS,
-        "LSMultipleInstancesProhibited": True,
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.utilities",
         "NSHumanReadableCopyright": "Copyright (C) 2026 VaultBytes Innovations Ltd. AGPL-3.0-or-later.",
@@ -232,7 +362,7 @@ def main() -> int:
         "portal_files_sha256": hashlib.sha256(
             json.dumps(portal_files, sort_keys=True).encode()
         ).hexdigest(),
-        "launcher_sha256": sha256_file(launcher),
+        "launcher_sha256_before_signing": sha256_file(launcher),
         "built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "built_on": {
             "macos": platform.mac_ver()[0],
@@ -242,6 +372,8 @@ def main() -> int:
             ).stdout.splitlines()[0],
         },
         "signing": "ad hoc only. Not signed for distribution and not notarized.",
+        "reproducible_build": False,
+        "note": "The signed hashes of the launcher and of the whole application are in the BUILD_MANIFEST.json next to the disk image: they cannot be recorded inside a bundle that the signature seals.",
         "minimum_macos": MIN_MACOS,
     }
     (resources / "BUILD_MANIFEST.json").write_text(
@@ -251,12 +383,20 @@ def main() -> int:
     # 8. Seal the bundle (ad hoc)
     run(["codesign", "--force", "--deep", "--sign", "-", str(app)])
     run(["codesign", "--verify", "--deep", "--strict", str(app)])
+    # The hashes of what was actually produced, after signing. They live here, outside the bundle, because a
+    # bundle's signature seals its own files and cannot contain its own final hash.
+    manifest["signed"] = {
+        "launcher_sha256": sha256_file(launcher),
+        "application_tree_sha256": tree_digest(app),
+    }
+    (out / "READ ME FIRST.txt").write_text(read_me_first(portal_version))
 
     if not args.no_dmg:
         stage = out / "dmg-staging"
         stage.mkdir()
         shutil.copytree(app, stage / app.name, symlinks=True)
         os.symlink("/Applications", stage / "Applications")
+        (stage / "READ ME FIRST.txt").write_text(read_me_first(portal_version))
         dmg = out / f"Evidence-Verification-Portal-{portal_version}-macos-arm64-LOCAL-BUILD.dmg"
         run(
             [
@@ -276,9 +416,7 @@ def main() -> int:
         shutil.rmtree(stage)
         (out / "SHA256SUMS").write_text(f"{sha256_file(dmg)}  {dmg.name}\n")
         manifest["dmg"] = {"name": dmg.name, "sha256": sha256_file(dmg)}
-        (out / "BUILD_MANIFEST.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-        )
+    (out / "BUILD_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print("built", app, flush=True)
     return 0
 

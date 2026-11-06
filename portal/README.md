@@ -222,7 +222,7 @@ The same text is in [SECURITY.md](SECURITY.md), on the portal's own page behind 
 
 ## What it does not do
 
-There is no sign-in, no accounts, no billing, no hosted version, no installer and no licensing check. It is not a production deployment. Uploads are not stored, and the page loads nothing from outside this computer. The replay file holds only identifiers of recorded reports. It does not tell you whether a report's findings are correct, whether anything was encrypted, or whether a key has been withdrawn since your trust list was made: the trust list is a local file.
+There is no sign-in, no accounts, no billing, no hosted version, no public installer and no licensing check. A macOS application for local evaluation can be built from `installer/macos` (see its README); it is not signed for distribution. It is not a production deployment. Uploads are not stored, and the page loads nothing from outside this computer. The replay file holds only identifiers of recorded reports. It does not tell you whether a report's findings are correct, whether anything was encrypted, or whether a key has been withdrawn since your trust list was made: the trust list is a local file.
 
 ## Tests
 

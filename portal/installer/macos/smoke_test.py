@@ -189,6 +189,76 @@ def main(app_path: str) -> int:
             str((result.get("verification") or {}).get("trust_status")),
         )
     stop(p, port, tmp)
+    print("--- the launcher is killed: the portal must not be left running")
+    work, home, tmp, env = fresh("portal-smoke-kill-")
+    p, url = start(launcher, env, [])
+    port = url.rsplit(":", 1)[1].strip("/")
+    kids = subprocess.run(
+        ["pgrep", "-P", str(p.pid)], capture_output=True, text=True
+    ).stdout.split()
+    check("the launcher has the portal as its child", len(kids) == 1, str(kids))
+    p.kill()
+    p.wait(timeout=10)
+    stopped = False
+    for _ in range(40):
+        time.sleep(0.25)
+        if listening(port) == "":
+            stopped = True
+            break
+    check(
+        "the portal stopped by itself after the launcher was killed (SIGKILL)",
+        stopped,
+        listening(port)[-60:],
+    )
+    time.sleep(0.5)
+    check("and removed its private bytecode folder", not list(tmp.glob("regaudit-portal-pyc-*")))
+
+    print("--- what is in the bundle")
+    tools = app / "Contents" / "Resources" / "tools"
+    for name in ("regaudit-fhe", "regaudit-portal"):
+        r = subprocess.run(
+            [str(tools / name), "--help"],
+            env={"PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        check(
+            f"the administrator command {name} runs from inside the app",
+            r.returncode == 0 and "usage" in r.stdout.lower(),
+            r.stderr.strip()[-80:],
+        )
+    r = subprocess.run(
+        [str(tools / "regaudit-fhe"), "trust", "add", "--help"],
+        env={"PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    check("trust add is reachable through it", r.returncode == 0 and "--fingerprint" in r.stdout)
+    site = next((app / "Contents" / "Resources" / "python" / "lib").glob("python3*/site-packages"))
+    check(
+        "pip is not shipped", not (site / "pip").exists() and not list(site.glob("pip-*.dist-info"))
+    )
+    check("no bytecode is shipped for the installed packages", not list(site.rglob("__pycache__")))
+    leaks = subprocess.run(
+        ["grep", "-r", "-a", "-l", "-E", "baderissaei|claude-501|scratchpad", str(app)],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    check(
+        "no build machine paths or user names anywhere in the bundle", leaks == [], str(leaks[:2])
+    )
+    plist = (app / "Contents" / "Info.plist").read_bytes()
+    check(
+        "the application has an icon",
+        (app / "Contents" / "Resources" / "AppIcon.icns").is_file() and b"AppIcon" in plist,
+    )
+    check(
+        "the application does not forbid a second launch record",
+        b"LSMultipleInstancesProhibited" not in plist,
+    )
+
     sealed = subprocess.run(
         ["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True
     )

@@ -24,6 +24,7 @@ import shutil
 import signal
 import socket
 import sys
+import threading
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
 from .engine import REINSTALL, check_engine
@@ -96,6 +97,25 @@ STOPPED = "the portal has stopped."
 
 def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
     raise KeyboardInterrupt
+
+
+def _stop_when_input_closes() -> None:
+    """For a launcher: stop like Ctrl-C when the other end of standard input closes.
+
+    A launcher that holds the write end of a pipe on the portal's standard input closes it when it quits, crashes or is
+    killed, even by SIGKILL. The portal then stops cleanly instead of running on with nothing to stop it.
+    """
+    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+
+    def watch() -> None:
+        try:
+            while sys.stdin.buffer.read(4096):
+                pass
+        except (OSError, ValueError):
+            pass
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=watch, name="launcher-watch", daemon=True).start()
 
 
 def _run(app: object, sock: socket.socket, mode: str) -> None:
@@ -175,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument(
         "--port", type=int, default=8765, help="The port on this computer. 0 takes any free port."
     )
+    serve.add_argument(
+        "--exit-when-input-closes",
+        action="store_true",
+        help="For a launcher: stop when standard input is closed, for example because the launcher was killed.",
+    )
     check = commands.add_parser(
         "check-config", help="Say whether a configuration can be used, and why not."
     )
@@ -186,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     demo.add_argument("directory")
     args = parser.parse_args(argv)
+    if args.command == "serve" and args.exit_when_input_closes:
+        _stop_when_input_closes()
 
     # Before anything imports the engine: only the recognised release may be loaded and used.
     identity = check_engine()

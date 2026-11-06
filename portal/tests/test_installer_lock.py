@@ -49,3 +49,37 @@ def test_the_build_script_refuses_what_the_portal_would_refuse():
 def test_the_build_ships_no_compiled_files_for_the_installed_packages():
     text = (HERE / "build_app.py").read_text()
     assert "--no-compile" in text and '"__pycache__"' in text
+
+
+def test_the_launcher_hands_the_portal_a_pipe_and_the_portal_watches_it():
+    swift = (HERE / "launcher" / "main.swift").read_text()
+    assert (
+        "--exit-when-input-closes" in swift
+        and "Pipe()" in swift
+        and "standardInput = input" in swift
+    )
+    assert '"-I", "-B"' in swift
+    assert (
+        "exit-when-input-closes"
+        in (HERE.parents[1] / "regaudit_portal" / "__main__.py").read_text()
+    )
+
+
+def test_the_build_ships_the_administrator_programs_the_icon_and_a_read_me():
+    text = (HERE / "build_app.py").read_text()
+    assert "regaudit_fhe.cli" in text and "regaudit_portal" in text and '"tools"' in text
+    assert "AppIcon" in text and "iconutil" in text
+    assert "READ ME FIRST.txt" in text and "approved_limitation" in text
+    assert "LSMultipleInstancesProhibited" not in text
+
+
+def test_the_build_keeps_the_bundle_free_of_what_it_created():
+    text = (HERE / "build_app.py").read_text()
+    assert '"-I",\n            "-B",' in text.replace("\r", "") or '"-B"' in text
+    assert "known_bytecode" in text and "pip-*.dist-info" in text
+    assert "launcher_sha256_before_signing" in text and "application_tree_sha256" in text
+
+
+def test_the_icon_sources_are_there():
+    assert (HERE / "icon" / "vaultbytes-mark.svg").read_text().lstrip().startswith("<svg")
+    assert (HERE / "icon" / "make_icon.swift").is_file()

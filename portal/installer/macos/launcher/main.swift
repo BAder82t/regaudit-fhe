@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var quitting = false
     let tail = OutputTail()
     var signalSources: [DispatchSourceSignal] = []
+    var inputPipe: Pipe?  // the portal stops by itself when this closes, which it does if this program is killed
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -111,12 +112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // -I: ignore PYTHON* variables and the user site, and do not put the working directory on the path.
         // -B: write no bytecode. The portal compiles its own package before it redirects the bytecode cache, and
         // anything written inside the bundle would break its signature.
-        p.arguments = ["-I", "-B", "-m", "regaudit_portal", "serve", "--port", String(port)] + options.extra
+        p.arguments =
+            ["-I", "-B", "-m", "regaudit_portal", "serve", "--port", String(port), "--exit-when-input-closes"]
+            + options.extra
         let env = ProcessInfo.processInfo.environment
         var childEnv: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": env["LANG"] ?? "en_US.UTF-8"]
         for key in ["HOME", "USER", "TMPDIR"] { if let v = env[key] { childEnv[key] = v } }
         p.environment = childEnv
-        p.standardInput = FileHandle.nullDevice
+        let input = Pipe()
+        inputPipe = input
+        p.standardInput = input
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe

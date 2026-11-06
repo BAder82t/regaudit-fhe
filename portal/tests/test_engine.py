@@ -354,7 +354,15 @@ def test_no_option_flag_or_environment_variable_can_change_which_engine_is_accep
         text = path.read_text()
         assert "os.environ" not in text and "getenv" not in text, path.name
     flags = set(re.findall(r'add_argument\(\s*"(-[-a-z]+)"', (package / "__main__.py").read_text()))
-    assert flags == {"--config", "--port"}
+    # --exit-when-input-closes is about shutdown only (a launcher that dies takes the portal with it). The assertion
+    # below keeps it that way: its code must not mention the engine, its check or its identity.
+    assert flags == {"--config", "--port", "--exit-when-input-closes"}
+    import inspect
+
+    from regaudit_portal import __main__ as entry
+
+    watcher = inspect.getsource(entry._stop_when_input_closes).lower()
+    assert "engine" not in watcher and "digest" not in watcher and "identity" not in watcher
     monkeypatch.setattr(engine_module, "files_digest", _crashes)
     for name in (
         "REGAUDIT_PORTAL_ALLOW_ANY_ENGINE",
