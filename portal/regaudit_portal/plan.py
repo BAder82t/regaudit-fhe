@@ -460,7 +460,10 @@ def _refuse_own_private_keys(issuers: list[Issuer], values: list[tuple[str, Any]
         if raw is None or len(raw) not in (32, 64):
             continue
         public = Ed25519PrivateKey.from_private_bytes(raw[:32]).public_key()
-        if public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) in publics:
+        if (
+            public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            in publics
+        ):
             raise SecretMaterial(OWN_SEED_MESSAGE, where)
 
 

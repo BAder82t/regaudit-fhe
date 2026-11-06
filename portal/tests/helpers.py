@@ -266,7 +266,9 @@ def make_synthetic_portal(directory: Path) -> Path:
     (reports / "5-not-a-report.json").write_text('{"hello": "this is not a signed report"}\n')
     (reports / "6-too-large.json").write_text(" " * (demo_module.MAX_REPORT_BYTES + 1))
     declares = ParameterSet(backend="tenseal-ckks", poly_modulus_degree=8192, security_bits=192)
-    (reports / "7-declares-encrypted-backend.json").write_text(demo_module._report(issuer, declares))
+    (reports / "7-declares-encrypted-backend.json").write_text(
+        demo_module._report(issuer, declares)
+    )
     for path in (root / "trust-store.json", root / "portal-config.json"):
         os.chmod(path, 0o600)
     return root
