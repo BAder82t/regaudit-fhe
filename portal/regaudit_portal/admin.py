@@ -48,6 +48,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, TextIO
 
+from regaudit_fhe import (
+    cli,
+)  # the code behind regaudit-fhe trust add, loaded here and never by the portal
 from regaudit_fhe.canonical import CanonicalError, loads_strict
 from regaudit_fhe.trust import MAX_TRUST_STORE_BYTES, TrustStore, TrustStoreError
 
@@ -70,7 +73,7 @@ from .plan import (
     typed_fingerprint,
 )
 
-EXIT_DONE, EXIT_FAILED, EXIT_REFUSED, EXIT_ENGINE = 0, 1, 2, 3
+EXIT_DONE, EXIT_FAILED, EXIT_REFUSED, EXIT_ENGINE, EXIT_DONE_BUT = 0, 1, 2, 3, 4
 STAGING_PREFIX = ".regaudit-admin-"
 _DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _RESTART = (
@@ -78,6 +81,8 @@ _RESTART = (
     "application's Administrator setup does this for you."
 )
 UNCHANGED = "Nothing was changed."
+COMPLETE = "The change is complete: the new files are in place."
+_STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 class Refused(Exception):
@@ -86,6 +91,53 @@ class Refused(Exception):
 
 class Failed(Exception):
     """Something went wrong while writing. The message says what state the files are in."""
+
+
+class Progress:
+    """Whether the step that puts the new files in place has happened. Set in the same breath as that step."""
+
+    committed = False
+
+
+class _Stops:
+    """A stop asked for while files are being put in place waits until they are. Python runs signal handlers in the
+    main thread only, so this works whichever thread the signal reached."""
+
+    holding = False
+    pending = False
+
+
+def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
+    if _Stops.holding:
+        _Stops.pending = True
+        return
+    raise KeyboardInterrupt
+
+
+@contextlib.contextmanager
+def _held_signals() -> Iterator[None]:
+    """Hold Ctrl-C, SIGTERM and SIGHUP for the few calls that put files in place, so that a stop lands before them or
+    after them and never between them. A held stop takes effect as soon as this ends. SIGKILL and a power cut cannot
+    be held."""
+    _Stops.holding, _Stops.pending = True, False
+    try:
+        yield
+    finally:
+        _Stops.holding = False
+        stop, _Stops.pending = _Stops.pending, False
+    if stop:
+        raise KeyboardInterrupt
+
+
+def _sync(fd: int) -> None:
+    """Flush a file or folder to the disk itself. On macOS fsync stops at the drive's cache, F_FULLFSYNC does not."""
+    if hasattr(fcntl, "F_FULLFSYNC"):
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except OSError:
+            pass
+    os.fsync(fd)
 
 
 # ----------------------------------------------------------------------------- output
@@ -157,7 +209,10 @@ def ask_on_terminal(question: str) -> str:
     """Ask on the terminal itself, never through standard input. Raises ``OSError`` when there is no terminal."""
     fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY | os.O_CLOEXEC)
     # A terminal cannot seek, so it is read and written through one unbuffered file, as getpass does.
-    with io.FileIO(fd, "w+") as raw, io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as tty:
+    with (
+        io.FileIO(fd, "w+") as raw,
+        io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as tty,
+    ):
         tty.write(question)
         tty.flush()
         return tty.readline(1024)
@@ -310,22 +365,27 @@ class Destination:
     def __enter__(self) -> Destination:
         if os.geteuid() == 0:
             raise Refused("Run this as the account that runs the portal, not as root.")
-        self.parent_fd = _open_parent(self.folder)
-        info = _entry(self.parent_fd, self.folder.name)
-        if info is not None:
-            _refuse_entry(self.folder, info, folder=True)
-            fd = os.open(self.folder.name, _DIR, dir_fd=self.parent_fd)
-            self.folder_fd = fd
-            opened = os.fstat(fd)
-            if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
-                raise Refused(f"{self.folder} changed while it was being checked.")
-            _check_own(opened, self.folder)
+        try:
+            self.parent_fd = _open_parent(self.folder)
+            info = _entry(self.parent_fd, self.folder.name)
+            if info is not None:
+                _refuse_entry(self.folder, info, folder=True)
+                fd = os.open(self.folder.name, _DIR, dir_fd=self.parent_fd)
+                self.folder_fd = fd
+                opened = os.fstat(fd)
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    raise Refused(f"{self.folder} changed while it was being checked.")
+                _check_own(opened, self.folder)
+        except BaseException:
+            self.__exit__()
+            raise
         return self
 
     def __exit__(self, *_exc: object) -> None:
         for fd in (self.folder_fd, self.parent_fd):
             if fd is not None and fd >= 0:
                 os.close(fd)
+        self.folder_fd, self.parent_fd = None, -1
 
     def lock(self) -> None:
         """Only one apply at a time for this folder. The lock goes when this process ends, however it ends."""
@@ -445,7 +505,7 @@ def _write_new(dir_fd: int, name: str, data: bytes) -> None:
         view = memoryview(data)
         while view:
             view = view[os.write(fd, view) :]
-        os.fsync(fd)
+        _sync(fd)
     finally:
         os.close(fd)
 
@@ -461,7 +521,7 @@ def _seal(dir_fd: int, name: str) -> bytes:
         data = bytearray()
         while chunk := os.read(fd, 65536):
             data += chunk
-        os.fsync(fd)
+        _sync(fd)
         return bytes(data)
     finally:
         os.close(fd)
@@ -502,8 +562,6 @@ def _enrol(
     The same command a person types, with the same fingerprint check and the same file format. Its own fingerprint
     check runs again here, on the value the person typed.
     """
-    from regaudit_fhe import cli
-
     for number, issuer in enumerate(plan.issuers, start=1):
         key_file = f"issuer-{number}.pub"
         _write_new(staging_fd, key_file, issuer.public_key_pem.encode("ascii"))
@@ -569,7 +627,9 @@ def _written(name: str, data: bytes) -> str:
     return f"Wrote {name} (mode 0600, {len(data)} bytes, SHA-256 {_sha(data)}):\n{data.decode('utf-8').rstrip()}"
 
 
-def _apply_first_setup(place: Destination, plan: Plan, typed: dict[str, str]) -> list[str]:
+def _apply_first_setup(
+    place: Destination, plan: Plan, typed: dict[str, str], progress: Progress
+) -> list[str]:
     place.check_first_setup()
     config_text = (plan.configuration_text() or "").encode("utf-8")
     expected_store = plan.trust_list_text().encode("utf-8")
@@ -587,22 +647,27 @@ def _apply_first_setup(place: Destination, plan: Plan, typed: dict[str, str]) ->
         _write_new(staging_fd, CONFIG_NAME, config_text)
         _check_staged_first_setup(staging_path, plan)
         _expect_only(staging_fd, {CONFIG_NAME, TRUST_LIST_NAME})
-        os.fsync(staging_fd)
+        _sync(staging_fd)
         _engine_still_recognised()
         if fresh:
             # The whole folder appears at once, holding both files, or not at all.
-            try:
-                os.rename(
-                    name, place.folder.name, src_dir_fd=place.parent_fd, dst_dir_fd=place.parent_fd
-                )
-            except OSError as exc:
-                raise Refused(
-                    f"{place.folder} could not be created: {exc.strerror}. Something else may have made it "
-                    f"meanwhile. {UNCHANGED}"
-                ) from exc
-            os.fsync(place.parent_fd)
+            with _held_signals():
+                try:
+                    os.rename(
+                        name,
+                        place.folder.name,
+                        src_dir_fd=place.parent_fd,
+                        dst_dir_fd=place.parent_fd,
+                    )
+                except OSError as exc:
+                    raise Refused(
+                        f"{place.folder} could not be created: {exc.strerror}. Something else may have made it "
+                        f"meanwhile. {UNCHANGED}"
+                    ) from exc
+                progress.committed = True
+            _sync(place.parent_fd)
         else:
-            _link_both(place, staging_fd)
+            _link_both(place, staging_fd, progress)
     made = (
         f"Created {place.folder}, readable and writable by this account only (mode 0700)."
         if fresh
@@ -614,14 +679,25 @@ def _apply_first_setup(place: Destination, plan: Plan, typed: dict[str, str]) ->
     ]
 
 
-def _link_both(place: Destination, staging_fd: int) -> None:
+def _link_both(place: Destination, staging_fd: int, progress: Progress) -> None:
     """Into an existing folder: the trust list, then the configuration, each refusing to replace anything.
 
     The configuration is what the portal reads, so until it is in place the setup is not in use. If putting it there
-    fails, the trust list just added is taken away again, so nothing has changed.
+    fails, the trust list just added is taken away again, so nothing has changed. Stops are held for these steps. Only
+    SIGKILL or a power cut at the exact moment between the two can leave the trust list without the configuration:
+    the portal does not use it, and the next apply says so.
     """
     assert place.folder_fd is not None
     staged = os.stat(TRUST_LIST_NAME, dir_fd=staging_fd, follow_symlinks=False)
+    with _held_signals():
+        _link_both_held(place, staging_fd, staged, progress)
+    _sync(place.folder_fd)
+
+
+def _link_both_held(
+    place: Destination, staging_fd: int, staged: os.stat_result, progress: Progress
+) -> None:
+    assert place.folder_fd is not None
     try:
         os.link(
             TRUST_LIST_NAME,
@@ -647,7 +723,7 @@ def _link_both(place: Destination, staging_fd: int) -> None:
             now = os.stat(TRUST_LIST_NAME, dir_fd=place.folder_fd, follow_symlinks=False)
             if (now.st_dev, now.st_ino) == (staged.st_dev, staged.st_ino):
                 os.unlink(TRUST_LIST_NAME, dir_fd=place.folder_fd)
-            os.fsync(place.folder_fd)
+            _sync(place.folder_fd)
         except OSError as undo:
             raise Failed(
                 f"The trust list was written to {place.folder} but the configuration was not, and taking the trust "
@@ -663,7 +739,7 @@ def _link_both(place: Destination, staging_fd: int) -> None:
                 f"The configuration could not be written: {exc.strerror}. {UNCHANGED}"
             ) from exc
         raise
-    os.fsync(place.folder_fd)
+    progress.committed = True
 
 
 def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
@@ -689,7 +765,9 @@ def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
         raise Refused(f"The new trust list does not hold exactly the plan's issuers. {UNCHANGED}")
 
 
-def _apply_add_issuers(place: Destination, plan: Plan, typed: dict[str, str]) -> list[str]:
+def _apply_add_issuers(
+    place: Destination, plan: Plan, typed: dict[str, str], progress: Progress
+) -> list[str]:
     existing = place.read_existing()
     already = [i for i in plan.issuers if i.key_id in existing.payload["entries"]]
     if already:
@@ -701,7 +779,9 @@ def _apply_add_issuers(place: Destination, plan: Plan, typed: dict[str, str]) ->
     try:  # the engine's own rules for a trust list, before anything is written
         TrustStore.from_dict(json.loads(expected))
     except TrustStoreError as exc:
-        raise Refused(f"The engine refuses the trust list this would make: {shown(str(exc))}. {UNCHANGED}") from exc
+        raise Refused(
+            f"The engine refuses the trust list this would make: {shown(str(exc))}. {UNCHANGED}"
+        ) from exc
     assert place.folder_fd is not None
     with _staging(place.folder_fd, place.folder) as (_name, staging_fd, staging_path):
         _write_new(staging_fd, existing.store_name, existing.data)
@@ -727,17 +807,19 @@ def _apply_add_issuers(place: Destination, plan: Plan, typed: dict[str, str]) ->
         ) != set(before.entries) | {i.key_id for i in plan.issuers}:
             raise Refused(f"The new trust list would change an existing entry. {UNCHANGED}")
         _expect_only(staging_fd, {existing.store_name})
-        os.fsync(staging_fd)
+        _sync(staging_fd)
         _engine_still_recognised()
-        _same_trust_list(place.folder_fd, existing.store_name, existing)
-        # One step: the old trust list or the new one, never half of either.
-        os.rename(
-            existing.store_name,
-            existing.store_name,
-            src_dir_fd=staging_fd,
-            dst_dir_fd=place.folder_fd,
-        )
-        os.fsync(place.folder_fd)
+        with _held_signals():
+            _same_trust_list(place.folder_fd, existing.store_name, existing)
+            # One step: the old trust list or the new one, never half of either.
+            os.rename(
+                existing.store_name,
+                existing.store_name,
+                src_dir_fd=staging_fd,
+                dst_dir_fd=place.folder_fd,
+            )
+            progress.committed = True
+        _sync(place.folder_fd)
     added = len(plan.issuers)
     return [
         f"Added {added} issuer{'' if added == 1 else 's'} to the trust list. The configuration was not changed.",
@@ -804,6 +886,11 @@ def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[st
 
 def describe(args: Any) -> int:
     """Print what a plan would do, computed from its content, and whether it could be applied here. Writes nothing."""
+    with _own_signal_handling(signal.SIG_DFL):
+        return _describe(args)
+
+
+def _describe(args: Any) -> int:
     try:
         _engine_or_refuse()
         plan = _load_plan(args.plan)
@@ -832,10 +919,10 @@ def describe(args: Any) -> int:
     if args.json:
         body = {
             "ok": problem is None,
-            "problem": problem,
+            "problem": None if problem is None else shown(problem, 4000),
             "plan_sha256": plan.content_sha256,
             "mode": plan.mode,
-            "summary": "\n".join(lines),
+            "summary": "\n".join(shown(line, 4000) for line in lines),
             "issuers": [
                 {"number": n, "issuer": i.issuer, "key_id": i.key_id}
                 for n, i in enumerate(plan.issuers, 1)
@@ -847,14 +934,45 @@ def describe(args: Any) -> int:
     return EXIT_DONE if problem is None else EXIT_REFUSED
 
 
-def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
-    raise KeyboardInterrupt
+@contextlib.contextmanager
+def _own_signal_handling(stop: Any) -> Iterator[None]:
+    """Decide what Ctrl-C, SIGTERM and SIGHUP do here, whatever this process was started with. A launcher that
+    ignores them would otherwise pass that on, and then could not stop this command."""
+    previous = {sig: signal.getsignal(sig) for sig in _STOPS}
+    signal.signal(signal.SIGINT, stop if stop is not signal.SIG_DFL else signal.default_int_handler)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, stop)
+    # The entry point held these while the engine's libraries started their threads. Only this thread takes them.
+    mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, _STOPS)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        for sig, handler in previous.items():
+            signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
 
 
 def apply(args: Any) -> int:
-    """Apply a plan, after every typed fingerprint matches. Says exactly what was written, or why nothing was."""
-    previous = signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
-    done = False
+    """Apply a plan, after every typed fingerprint matches. Says exactly what was written, or why nothing was.
+
+    Exit status: 0 applied; 2 refused, nothing changed; 3 the engine is not the recognised release; 1 failed or
+    stopped before the change, nothing changed (unless the message says otherwise); 4 applied, but a step after the
+    change did not finish (the message says which).
+    """
+    with _own_signal_handling(_stop_like_ctrl_c):
+        return _apply(args)
+
+
+def _after(progress: Progress, what: str) -> tuple[int, str]:
+    """The exit status, and the words for what state the files are in after a stop or failure."""
+    if progress.committed:
+        state = f"{COMPLETE} Restart the portal, and run check-config."
+        return EXIT_DONE_BUT, " ".join(part for part in (what, state) if part)
+    return EXIT_FAILED, " ".join(part for part in (what, UNCHANGED) if part)
+
+
+def _apply(args: Any) -> int:
+    progress = Progress()
     try:
         _engine_or_refuse()
         plan = _load_plan(args.plan)
@@ -873,36 +991,32 @@ def apply(args: Any) -> int:
         with Destination(folder) as place:
             place.lock()
             if plan.mode == ADD_ISSUERS:
-                report = _apply_add_issuers(place, plan, checked)
+                report = _apply_add_issuers(place, plan, checked, progress)
             else:
-                report = _apply_first_setup(place, plan, checked)
-            done = True
+                report = _apply_first_setup(place, plan, checked, progress)
         _final_check(folder, plan)
     except Refused as exc:
         _out(f"refused: {exc}", sys.stderr)
-        return EXIT_REFUSED
+        return EXIT_DONE_BUT if progress.committed else EXIT_REFUSED
     except Failed as exc:
         _out(f"failed: {exc}", sys.stderr)
-        return EXIT_FAILED
+        return EXIT_DONE_BUT if progress.committed else EXIT_FAILED
     except KeyboardInterrupt:
-        state = "The change was already complete." if done else UNCHANGED
-        _out(f"stopped: {state}", sys.stderr)
-        return EXIT_FAILED
+        code, said = _after(progress, "")
+        _out(f"stopped: {said}", sys.stderr)
+        return code
     except OSError as exc:
-        state = "The change was already complete." if done else UNCHANGED
-        _out(
-            f"failed: {exc.strerror or exc} ({errno.errorcode.get(exc.errno or 0, 'error')}). {state}",
-            sys.stderr,
+        code, said = _after(
+            progress, f"{exc.strerror or exc} ({errno.errorcode.get(exc.errno or 0, 'error')})."
         )
-        return EXIT_FAILED
+        _out(f"failed: {said}", sys.stderr)
+        return code
     except (
         Exception
     ) as exc:  # only the kind is printed: the text of an unexpected error is not shown
-        state = "The change was already complete." if done else UNCHANGED
-        _out(f"failed: an unexpected {type(exc).__name__}. {state}", sys.stderr)
-        return EXIT_FAILED
-    finally:
-        signal.signal(signal.SIGTERM, previous)
+        code, said = _after(progress, f"An unexpected {type(exc).__name__}.")
+        _out(f"failed: {said}", sys.stderr)
+        return code
     enrolled = [
         f"  {n}. {quoted(i.issuer)}, key id {i.key_id}, fingerprint {i.fingerprint}"
         for n, i in enumerate(plan.issuers, start=1)

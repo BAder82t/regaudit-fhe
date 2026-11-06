@@ -223,7 +223,7 @@ What `admin-apply` holds to:
 - The plan never chooses where files go. They go to the standard folder, or to the folder you give with `--config-folder`.
 - It refuses a symbolic link anywhere on the way, and a folder or file that belongs to another account or that group or others can change. It does not run as root.
 - A first setup refuses to replace an existing configuration or trust list. A plan can also add issuers to an existing trust list. Nothing is ever removed, revoked or replaced.
-- It makes the folder with mode 0700 and the files with mode 0600, and moves them into place in one step. If it stops part-way, nothing has changed.
+- It makes the folder with mode 0700 and the files with mode 0600, and moves them into place in one step. If it fails or is stopped before that step, nothing has changed, and it says so. If something after that step fails, it says the change is complete and exits with status 4. When the folder already exists, the trust list and the configuration go in one after the other. Only a hard kill or a power cut at that exact moment can leave the trust list without the configuration. The portal does not use it, and the next apply says what to move away.
 - Only one can run at a time for a folder.
 - It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
 

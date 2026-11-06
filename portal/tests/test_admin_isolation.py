@@ -151,7 +151,8 @@ def test_only_the_command_line_entry_point_imports_the_apply_module():
         assert loads_cli is (path.name == "admin.py"), path.name
     main = (PACKAGE / "__main__.py").read_text()
     assert main.count("from . import admin") == 1
-    block = main[main.index('if args.command in ("admin-describe", "admin-apply"):') :]
+    assert '_ADMIN_COMMANDS = ("admin-describe", "admin-apply")' in main
+    block = main[main.index("if args.command in _ADMIN_COMMANDS:\n        # Only these two") :]
     assert block.index("from . import admin") < block.index("return admin.run(args)")
     assert main.index("identity = check_engine()") < main.index("from . import admin")
 

@@ -861,6 +861,113 @@ def test_a_stop_while_enrolling_leaves_nothing_behind(home, tmp_path, run, north
     assert list(default_config_folder().parent.iterdir()) == []
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_a_failure_after_the_files_are_in_place_says_they_are_and_exits_4(
+    home, tmp_path, run, northwind, monkeypatch, existing
+):
+    """Syncing the folder to disk is the step after the move. If it fails the setup is in use: say so, never
+    'nothing was changed', and give the launcher the status that tells it to restart the portal."""
+    if existing:
+        _private_folder(default_config_folder())
+    real, folders = admin._sync, []
+
+    target = default_config_folder() if existing else default_config_folder().parent
+
+    def sync(fd):
+        """Fail the sync of the folder that the files were just moved into, once."""
+        if not folders and os.path.samestat(os.fstat(fd), os.stat(target)):
+            folders.append(fd)
+            raise OSError(5, "Input/output error")
+        return real(fd)
+
+    monkeypatch.setattr(admin, "_sync", sync)
+    code, _, err = run(
+        "admin-apply", _plan_file(tmp_path, prepare_plan([northwind])), *_expect(northwind)
+    )
+    assert code == 4 and "The change is complete" in err and "Nothing was changed" not in err, err
+    assert (default_config_folder() / "portal-config.json").is_file()
+
+
+def test_a_stop_asked_for_while_files_are_put_in_place_waits_until_they_are():
+    with admin._own_signal_handling(admin._stop_like_ctrl_c):
+        reached = []
+        with pytest.raises(KeyboardInterrupt), admin._held_signals():
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.2)  # the handler has run by now, and did not stop this block
+            reached.append("after the stop")
+        assert reached == ["after the stop"]
+        with pytest.raises(KeyboardInterrupt):
+            os.kill(os.getpid(), signal.SIGHUP)
+            time.sleep(1)
+
+
+def test_a_stop_between_the_two_links_lands_after_both_and_is_reported_as_complete(
+    home, tmp_path, run, northwind, monkeypatch
+):
+    folder = _private_folder(default_config_folder())
+    real_link, calls = os.link, []
+
+    def link_then_stop(*args, **kwargs):
+        done = real_link(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 1:
+            os.kill(
+                os.getpid(), signal.SIGTERM
+            )  # arrives between the trust list and the configuration
+            time.sleep(0.2)
+        return done
+
+    monkeypatch.setattr(os, "link", link_then_stop)
+    code, _, err = run(
+        "admin-apply", _plan_file(tmp_path, prepare_plan([northwind])), *_expect(northwind)
+    )
+    assert len(calls) == 2 and code == 4 and "stopped: The change is complete" in err, err
+    assert sorted(p.name for p in folder.iterdir()) == ["portal-config.json", "trust-store.json"]
+    read_trust_store(read_settings(folder / "portal-config.json"))
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP, signal.SIGINT])
+def test_a_command_started_with_stops_ignored_can_still_be_stopped(home, tmp_path, northwind, sig):
+    """A launcher that ignores SIGTERM passes that on to what it starts. The command sets its own handling."""
+    import select
+    import termios
+
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    master, slave = os.openpty()
+
+    def start() -> None:
+        for each in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(each, signal.SIG_IGN)
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    proc = subprocess.Popen(  # noqa: S603 - this interpreter, fixed arguments
+        [sys.executable, "-m", "regaudit_portal", "admin-apply", str(plan)],
+        env=_env(home), cwd=PORTAL, stdin=slave, stdout=slave, stderr=slave, preexec_fn=start,
+    )  # fmt: skip
+    os.close(slave)
+    seen = b""
+    try:
+        deadline = time.monotonic() + 60
+        while b"by another route: " not in seen and time.monotonic() < deadline:
+            if select.select([master], [], [], 1)[0]:
+                seen += os.read(master, 4096)
+        proc.send_signal(sig)
+        # Keep reading: a process that exits waits for what it wrote to its terminal to be read.
+        while proc.poll() is None and time.monotonic() < deadline:
+            if select.select([master], [], [], 0.2)[0]:
+                try:
+                    seen += os.read(master, 4096)
+                except OSError:
+                    break
+        assert proc.wait(timeout=10) == 1, seen.decode(errors="replace")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)
+    assert b"stopped: Nothing was changed." in seen and not default_config_folder().exists()
+
+
 def test_a_failure_while_replacing_the_trust_list_leaves_the_old_one(
     home, tmp_path, run, northwind, monkeypatch
 ):

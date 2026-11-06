@@ -249,6 +249,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Refuse unless the plan's content checksum is this one (the one admin-describe printed).",
     )
     args = parser.parse_args(argv)
+    if args.command not in _ADMIN_COMMANDS:
+        return _dispatch(args)
+    # Hold Ctrl-C, SIGTERM and SIGHUP while the engine and its libraries load, so that no thread they start can take a
+    # stop meant for this command. The admin module lets them through again in the main thread only.
+    held = signal.pthread_sigmask(signal.SIG_BLOCK, _STOPS)
+    try:
+        return _dispatch(args)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, held)
+
+
+_ADMIN_COMMANDS = ("admin-describe", "admin-apply")
+_STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
 
@@ -260,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(unavailable_message(identity.reason, identity.detail))
         return 3
 
-    if args.command in ("admin-describe", "admin-apply"):
+    if args.command in _ADMIN_COMMANDS:
         # Only these two commands load the module that writes the administrator's files. The portal never does.
         try:
             from . import admin

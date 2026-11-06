@@ -193,7 +193,9 @@ def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_
 
 def test_the_readme_and_the_security_document_describe_administrator_setup_and_what_stays_manual():
     readme = README.read_text()
-    section = readme[readme.index("### Guided administrator setup") : readme.index("### Running these commands")]
+    section = readme[
+        readme.index("### Guided administrator setup") : readme.index("### Running these commands")
+    ]
     for said in (
         "It writes nothing, keeps nothing and enrols nothing",
         "It refuses anything that looks like a private key and does not show it back",
@@ -209,7 +211,9 @@ def test_the_readme_and_the_security_document_describe_administrator_setup_and_w
     ):
         assert said in section, said
     security = (README.parent / "SECURITY.md").read_text()
-    part = security[security.index("## Administrator setup") : security.index("## Reporting a problem")]
+    part = security[
+        security.index("## Administrator setup") : security.index("## Reporting a problem")
+    ]
     for said in (
         "No page or request can write, change or enrol trust",
         "The portal process never loads the code that applies a plan",
