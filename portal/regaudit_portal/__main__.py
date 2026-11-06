@@ -108,10 +108,12 @@ def _stop_when_input_closes() -> None:
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
 
     def watch() -> None:
+        # Read the descriptor itself, never sys.stdin. A daemon thread waiting inside the buffered reader holds its
+        # lock, and when the interpreter shuts down and cannot take that lock to close the stream, Python aborts.
         try:
-            while sys.stdin.buffer.read(4096):
+            while os.read(0, 4096):
                 pass
-        except (OSError, ValueError):
+        except OSError:
             pass
         os.kill(os.getpid(), signal.SIGTERM)
 

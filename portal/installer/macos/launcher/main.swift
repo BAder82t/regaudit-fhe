@@ -98,10 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source.resume()
             signalSources.append(source)
         }
-        guard let resources = Bundle.main.resourcePath else { return fail("The application is damaged (no resources folder).") }
+        guard let resources = Bundle.main.resourcePath else { return fail("The application is damaged (no resources folder). Copy the application from the disk image again.") }
         let python = resources + "/python/bin/python3"
         guard FileManager.default.isExecutableFile(atPath: python) else {
-            return fail("The application is damaged: the bundled Python is missing. Download it again.")
+            return fail("The application is damaged: the bundled Python is missing. Copy the application from the disk image again.")
         }
         guard let port = freeLoopbackPort() else { return fail("Could not find a free local port.") }
         let target = URL(string: "http://127.0.0.1:\(port)/")!

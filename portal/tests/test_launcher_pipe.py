@@ -1,6 +1,7 @@
 """A launcher can make the portal stop when the launcher goes away, even if the launcher is killed."""
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -71,3 +72,34 @@ def test_without_the_option_an_open_or_closed_input_changes_nothing():
     finally:
         proc.terminate()
         proc.communicate(timeout=30)
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_a_signal_while_the_portal_watches_its_input_is_a_clean_stop(sig):
+    """The watcher must not leave the interpreter aborting when it shuts down with the watcher still waiting."""
+    proc, tmp = _start(
+        ["--exit-when-input-closes"], subprocess.PIPE
+    )  # the pipe stays open, as a live launcher's does
+    try:
+        _wait_listening(proc)
+        proc.send_signal(sig)
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == 0, f"exit {proc.returncode}: {out[-400:]}"
+    assert "Fatal Python error" not in out and "Traceback" not in out, out[-400:]
+    assert "the portal has stopped." in out
+    assert list(tmp.glob("regaudit-portal-pyc-*")) == []
+
+
+def test_the_watcher_reads_the_descriptor_and_never_the_buffered_standard_input():
+    """Waiting inside sys.stdin's buffered reader makes Python abort at shutdown, intermittently. Check it by construction."""
+    import inspect
+
+    from regaudit_portal import __main__ as entry
+
+    source = inspect.getsource(entry._stop_when_input_closes)
+    code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
+    assert "os.read(0" in code
+    assert "sys.stdin" not in code and ".buffer" not in code

@@ -106,7 +106,15 @@ def tree_digest(root: Path) -> str:
 
 TOOL_TEMPLATE = """#!/bin/sh
 # Runs {what} from inside the application, with the bundled Python and nothing from the user's environment.
-here="$(cd "$(dirname "$0")" && pwd -P)"
+self="$0"
+while [ -L "$self" ]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *) self="$(dirname "$self")/$target" ;;
+  esac
+done
+here="$(cd "$(dirname "$self")" && pwd -P)"
 exec "$here/../python/bin/python3" -I -B -m {module} "$@"
 """
 
@@ -222,8 +230,9 @@ def main() -> int:
     ):  # scripts pip wrote carry the build path
         if p.name not in before:
             p.unlink()
-    # The portal never loads bytecode from inside the bundle (it points Python's cache at a private folder), and
-    # compiled files record the build machine's paths, so none are shipped for the installed packages.
+    # Compiled files record the build machine's paths, so none are shipped for the installed packages. The portal
+    # does not need them: it points Python's bytecode cache at a private folder before the engine and its own modules
+    # are imported (modules the interpreter loads before that are not covered by this).
     for cache in list(
         next((resources / "python" / "lib").glob("python3*/site-packages")).rglob("__pycache__")
     ):
@@ -314,7 +323,7 @@ def main() -> int:
         )
 
     # 5d. Nothing in the bundle may carry bytecode that this build created: it records the build machine's paths,
-    # and the portal never loads bytecode from inside the bundle.
+    # and the portal does not rely on bytecode from inside the bundle.
     for pyc in list((resources / "python").rglob("*.pyc")):
         if pyc not in known_bytecode:
             pyc.unlink()

@@ -132,7 +132,9 @@ function render(body, fileName) {
   $("raw").textContent = d.technical_details;
   show("failure", false);
   show("result", true);
-  $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  // Respect the reader's setting: no animated scroll when they have asked their system for less motion.
+  const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("result").scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
 }
 
 async function verifyChosen() {

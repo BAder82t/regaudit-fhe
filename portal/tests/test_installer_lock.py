@@ -83,3 +83,13 @@ def test_the_build_keeps_the_bundle_free_of_what_it_created():
 def test_the_icon_sources_are_there():
     assert (HERE / "icon" / "vaultbytes-mark.svg").read_text().lstrip().startswith("<svg")
     assert (HERE / "icon" / "make_icon.swift").is_file()
+
+
+def test_the_administrator_programs_find_the_application_through_a_symbolic_link():
+    text = (HERE / "build_app.py").read_text()
+    assert 'while [ -L "$self" ]' in text and "readlink" in text
+
+
+def test_the_launcher_does_not_tell_a_local_copy_to_be_downloaded_again():
+    swift = (HERE / "launcher" / "main.swift").read_text()
+    assert "Download it again" not in swift and "disk image again" in swift

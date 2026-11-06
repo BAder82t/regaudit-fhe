@@ -275,6 +275,20 @@ def main(app_path: str) -> int:
         timeout=60,
     )
     check("trust add is reachable through it", r.returncode == 0 and "--fingerprint" in r.stdout)
+    link_dir = Path(tempfile.mkdtemp(prefix="portal-smoke-link-"))
+    (link_dir / "regaudit-fhe").symlink_to(tools / "regaudit-fhe")
+    r = subprocess.run(
+        [str(link_dir / "regaudit-fhe"), "--help"],
+        env={"PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    check(
+        "an administrator program works when reached through a symbolic link",
+        r.returncode == 0 and "usage" in r.stdout.lower(),
+        r.stderr.strip()[-80:],
+    )
     site = next((app / "Contents" / "Resources" / "python" / "lib").glob("python3*/site-packages"))
     check(
         "pip is not shipped", not (site / "pip").exists() and not list(site.glob("pip-*.dist-info"))

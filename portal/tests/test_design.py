@@ -471,3 +471,11 @@ def test_the_unavailable_page_has_the_look_and_loads_nothing(fallback_page):
 @pytest.fixture
 def fallback_page() -> str:
     return fallback_module.PAGE.decode()
+
+
+def test_the_script_respects_reduced_motion_when_it_scrolls():
+    script = (
+        Path(__file__).resolve().parents[1] / "regaudit_portal" / "static" / "app.js"
+    ).read_text()
+    assert "prefers-reduced-motion" in script and "scrollIntoView" in script
+    assert 'behavior: "smooth"' not in script.replace('reduceMotion ? "auto" : "smooth"', "")
