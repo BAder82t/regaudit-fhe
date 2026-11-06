@@ -38,6 +38,7 @@ def listening_line(port: int, mode: str) -> str:
     """One line a launcher can read: where the portal is and which mode it is in.
 
     ``mode`` is ``ready`` (your own reports can be checked), ``welcome`` (no configuration: the samples work),
+    ``demonstration`` (the trust list is a demonstration: files are checked only as a demonstration),
     ``needs-attention`` (a configuration that cannot be used: the samples work) or ``unavailable`` (the engine check
     failed: only a page saying so is served).
     """
@@ -56,6 +57,11 @@ def started_message(mode: str, port: int) -> str:
         return (
             f"{opening} The samples work, but your own reports cannot be checked until the configuration is fixed. "
             "Run check-config with the same --config to see why. Press Ctrl-C to stop."
+        )
+    if mode == "demonstration":
+        return (
+            f"{opening} The trust list is a demonstration, not trust set up by an administrator: files are checked "
+            "against it only as a demonstration, and every result says so. Press Ctrl-C to stop."
         )
     return f"{opening} Press Ctrl-C to stop."
 
@@ -327,6 +333,13 @@ def _dispatch(args: argparse.Namespace) -> int:
             portal = load_portal(configured)
         except ConfigProblem as exc:
             sys.stderr.write(f"not usable: {exc}\n")
+            return 3
+        if portal.demonstration:
+            sys.stderr.write(
+                "not usable for your own reports: the trust list is a demonstration (made by demo-setup, or holding "
+                "a demonstration key), not trust set up by an administrator. Files are checked against it only as "
+                "a demonstration.\n"
+            )
             return 3
         print(
             f"usable: profile {portal.profile}, {approved_entries(portal.approved_count)}, "

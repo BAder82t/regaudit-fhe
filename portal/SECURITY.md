@@ -45,7 +45,9 @@ This adds no privilege. Anyone who can run the command can already enrol a key w
 
 The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up.
 
-Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only the setup page labels it a demonstration. Never use the `demo-setup` files for real reports. Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
+A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or name. The portal then says it is not ready for your own reports, checks files against that list only as a demonstration, and labels every result and every saved result that way. `check-config` refuses it.
+
+Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
 
 ## Reporting a problem
 

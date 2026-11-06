@@ -66,7 +66,7 @@ def rewrite(demo: Path, **change) -> Path:
 def make_portal(
     root: Path,
     *,
-    issuer: str = "Example Synthetic Issuer",
+    issuer: str = "Northwind Test Issuer",
     profile: str = "confidential",
     verifier_id: str = "demo-verifier",
     entry: dict[str, Any] | None = None,
@@ -215,3 +215,58 @@ def crafted_plan(content: dict[str, Any]) -> bytes:
     return json.dumps(
         {**body, "content_sha256": hashlib.sha256(canonical_bytes(body)).hexdigest()}
     ).encode()
+
+
+# ----------------------------------------------------------------------------- an administrator's own configuration
+
+SYNTHETIC_ISSUER = "Northwind Test Issuer"
+
+
+def make_synthetic_portal(directory: Path) -> Path:
+    """The same files demo-setup makes, but for an ordinary issuer and without the demonstration marker.
+
+    To the portal this looks like an administrator's own configuration, which is what most tests need. demo-setup's
+    own output is a demonstration and is never taken for that.
+    """
+    from regaudit_portal import demo as demo_module
+
+    root = Path(directory).absolute()
+    reports = root / "sample-reports"
+    root.mkdir(mode=0o700, parents=True)
+    reports.mkdir(mode=0o700)
+    issuer = rf.Signer.generate(issuer=SYNTHETIC_ISSUER, key_id="northwind-test-key")
+    outsider = rf.Signer.generate(issuer=SYNTHETIC_ISSUER, key_id="northwind-outsider-key")
+    store = {
+        "entries": {
+            issuer.key_id: {
+                "issuer": SYNTHETIC_ISSUER,
+                "public_key_pem": issuer.public_key_pem(),
+                "status": "active",
+            }
+        }
+    }
+    (root / "trust-store.json").write_text(json.dumps(store, indent=2) + "\n")
+    config = {
+        "trust_store": "trust-store.json",
+        "profile": "confidential",
+        "verifier_id": demo_module.VERIFIER,
+        "max_age_days": 30,
+        "replay_mode": "check",
+        "replay_db": "replay.db",
+    }
+    (root / "portal-config.json").write_text(json.dumps(config, indent=2) + "\n")
+    good = demo_module._report(issuer)
+    (reports / "1-trusted.json").write_text(good)
+    (reports / "2-untrusted-signer.json").write_text(demo_module._report(outsider))
+    other_name = rf.Signer("Another Issuer", issuer.key_id, issuer.private_key, issuer.public_key)
+    (reports / "3-valid-signature-wrong-issuer.json").write_text(demo_module._report(other_name))
+    changed = json.loads(good)
+    changed["deployment_id"] = "changed-after-signing"
+    (reports / "4-changed-after-signing.json").write_text(json.dumps(changed, indent=2))
+    (reports / "5-not-a-report.json").write_text('{"hello": "this is not a signed report"}\n')
+    (reports / "6-too-large.json").write_text(" " * (demo_module.MAX_REPORT_BYTES + 1))
+    declares = ParameterSet(backend="tenseal-ckks", poly_modulus_degree=8192, security_bits=192)
+    (reports / "7-declares-encrypted-backend.json").write_text(demo_module._report(issuer, declares))
+    for path in (root / "trust-store.json", root / "portal-config.json"):
+        os.chmod(path, 0o600)
+    return root

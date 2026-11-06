@@ -18,6 +18,7 @@ from regaudit_fhe.replay import ReplayStateError, SqliteReplayCache
 from regaudit_fhe.trust import TrustStore, TrustStoreError
 from regaudit_fhe.verification import PolicyError, VerificationPolicy
 
+from .demonstration import is_demonstration_entry
 from .engine import REINSTALL, check_engine
 
 MAX_CONFIG_BYTES = 64 * 1024
@@ -29,6 +30,7 @@ _MEMBERS = {
     "replay_mode",
     "replay_db",
     "allow_self_signed",
+    "demonstration",
 }
 _REQUIRED = {"trust_store", "profile", "verifier_id", "max_age_days"}
 _PROFILES = ("confidential", "high-assurance", "development")
@@ -60,6 +62,8 @@ class Portal:
     replay_mode: str
     approved_count: int
     engine: dict[str, Any]
+    # A demonstration trust list is never trust set up by an administrator: see is_demonstration_trust.
+    demonstration: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,9 @@ class Settings:
     allow_self_signed: bool
     store_path: Path
     replay_path: Path
+    demonstration: bool = (
+        False  # the configuration says so itself: demo-setup writes "demonstration": true
+    )
 
 
 def _directory_problem(directory: Path, what: str) -> ConfigProblem | None:
@@ -163,10 +170,33 @@ def read_settings(config_path: str | Path) -> Settings:
     if replay_mode not in ("check", "record"):
         raise ConfigProblem("replay_mode must be 'check' or 'record'")
     allow_self_signed = _member(raw, "allow_self_signed", bool, False)
+    demonstration = _member(raw, "demonstration", bool, False)
     store_path = path.parent / _member(raw, "trust_store", str)
     replay_path = path.parent / _member(raw, "replay_db", str, "replay.db")
     return Settings(
-        path, profile, verifier_id, days, replay_mode, allow_self_signed, store_path, replay_path
+        path,
+        profile,
+        verifier_id,
+        days,
+        replay_mode,
+        allow_self_signed,
+        store_path,
+        replay_path,
+        demonstration,
+    )
+
+
+def is_demonstration_trust(settings: Settings, store: TrustStore) -> bool:
+    """Is this trust list a demonstration, which must never be taken for trust set up by an administrator?
+
+    Yes if the configuration carries demo-setup's marker, or if any entry holds one of the portal's demonstration
+    keys (by fingerprint: the bundled samples' keys) or a demonstration name or key id (demo-setup's own keys, which
+    are new each time). Renaming a demo-setup key to avoid the names makes it useless: every report it signed names
+    the old issuer and key id, and its private key was thrown away, so it can sign nothing new.
+    """
+    return settings.demonstration or any(
+        is_demonstration_entry(key_id, entry.issuer, entry.public_key_pem)
+        for key_id, entry in store.entries.items()
     )
 
 
@@ -231,4 +261,11 @@ def load_portal(config_path: str | Path) -> Portal:
         )
     except (ReplayStateError, PolicyError) as exc:
         raise ConfigProblem(f"policy: {exc}") from exc
-    return Portal(policy, settings.profile, settings.replay_mode, len(store.keys), engine)
+    return Portal(
+        policy,
+        settings.profile,
+        settings.replay_mode,
+        len(store.keys),
+        engine,
+        is_demonstration_trust(settings, store),
+    )

@@ -228,11 +228,25 @@ def test_the_readme_and_the_security_document_describe_administrator_setup_and_w
         assert "—" not in text and "owner" not in text.lower() and "round" not in text.lower()
 
 
-def test_the_docs_state_that_a_demo_setup_trust_list_is_still_accepted_for_verification():
+def test_the_docs_state_that_a_demonstration_trust_list_is_never_treated_as_trust_set_up_by_an_administrator():
     said = (
-        "Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started "
-        "with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only "
-        "the setup page labels it a demonstration. Never use the `demo-setup` files for real reports."
+        "A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made "
+        "with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or "
+        "name. The portal then says it is not ready for your own reports, checks files against that list only as a "
+        "demonstration, and labels every result and every saved result that way. `check-config` refuses it."
     )
     assert said in README.read_text()
     assert said in (README.parent / "SECURITY.md").read_text()
+    for text in (README.read_text(), (README.parent / "SECURITY.md").read_text()):
+        assert "is still accepted for verification" not in text
+    assert "`demonstration` (the trust list is a demonstration" in README.read_text()
+    assert "The portal checks them only as a demonstration" in README.read_text()
+
+
+def test_the_docs_say_which_ids_that_look_like_secret_bytes_are_refused_and_why_the_others_are_not():
+    said = (
+        "A key id, verifier id or fingerprint that is the private key of one of the plan's own public keys is refused. "
+        "Other ids made of hexadecimal or base64 characters are accepted, because an id derived from a key's "
+        "fingerprint looks exactly like random secret bytes."
+    )
+    assert said in README.read_text()

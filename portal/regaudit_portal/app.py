@@ -30,7 +30,14 @@ from regaudit_fhe.verification import VerificationPolicy, verify
 from . import __version__ as PORTAL_VERSION
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
-from .explain import DEMONSTRATION_NOTICE, FHE_NOTICE, NOT_A_CLAIM, declarations, describe
+from .explain import (
+    DEMONSTRATION_NOTICE,
+    DEMONSTRATION_TRUST_NOTICE,
+    FHE_NOTICE,
+    NOT_A_CLAIM,
+    declarations,
+    describe,
+)
 from .plan import MAX_PLAN_BYTES, prepared
 from .samples import DEMONSTRATION_ISSUER, Sample, Samples, SamplesProblem, load_samples
 from .setup import readiness
@@ -71,6 +78,10 @@ _NOT_READY = (
     "No report can be checked until then."
 )
 _NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
+_DEMONSTRATION_ONLY = (
+    "This portal is set up with a demonstration trust list, not trust set up by an administrator, so your own "
+    "reports are not set up. Files you choose are checked only as a demonstration, and every result says so."
+)
 _SAMPLES_UNAVAILABLE = "The demonstration samples cannot be used right now. Nothing was verified."
 _NOT_A_REPORT = (
     "This file is not a signed report this portal can read. Nothing was verified, so treat it as not accepted. "
@@ -190,6 +201,8 @@ def _unavailable_status() -> dict[str, Any]:
 
 
 def _own_message(state: str) -> str:
+    if state == "demonstration":
+        return _DEMONSTRATION_ONLY
     return _NOT_SET_UP if state == "not_set_up" else _NOT_READY
 
 
@@ -201,6 +214,19 @@ def _status_body(
 ) -> dict[str, Any]:
     """Whether your own reports can be checked, which samples there are, and which engine would check them."""
     listing = samples.listing() if samples is not None else []
+    if portal is not None and own_state == "demonstration":
+        # Never "ready": a demonstration trust list is not trust set up by an administrator.
+        return {
+            "ready": False,
+            "state": "demonstration",
+            "message": _DEMONSTRATION_ONLY,
+            "demonstration_checks": True,
+            "samples": listing,
+            "policy_text": "Demonstration trust list only, not trust set up by an administrator.",
+            "replay_mode": portal.replay_mode,
+            "engine": engine,
+            "not_a_claim": NOT_A_CLAIM,
+        }
     if portal is None:
         return {
             "ready": False,
@@ -232,8 +258,10 @@ def _result_body(
     raw: bytes,
     identity: Identity,
     sample: Sample | None,
+    demonstration_trust: bool = False,
 ) -> dict[str, Any]:
-    """What the page shows and what it saves. For a sample it also says, in the data, that it is a demonstration."""
+    """What the page shows and what it saves. For a sample, or a file checked against a demonstration trust list, it
+    also says, in the data, that it is a demonstration."""
     body = {
         "verification": verification,
         "explanation": explanation,
@@ -244,7 +272,7 @@ def _result_body(
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "portal_version": PORTAL_VERSION,
         "not_a_claim": NOT_A_CLAIM,
-        "synthetic_demonstration": sample is not None,
+        "synthetic_demonstration": sample is not None or demonstration_trust,
     }
     if sample is not None:
         body["demonstration"] = {
@@ -252,6 +280,13 @@ def _result_body(
             "sample": {"id": sample.id, "title": sample.title},
             "issuer": DEMONSTRATION_ISSUER,
             "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator",
+        }
+    elif demonstration_trust:
+        body["demonstration"] = {
+            "notice": DEMONSTRATION_TRUST_NOTICE,
+            "sample": None,
+            "issuer": None,
+            "trust_list": "a demonstration trust list in this portal's configuration, not trust set up by an administrator",
         }
     return body
 
@@ -273,7 +308,8 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     elif config_path is not None:
         try:
             portal = load_portal(config_path)
-            own_state = "ready"
+            # A demonstration trust list is kept apart: never "ready", and every result it gives is labelled.
+            own_state = "demonstration" if portal.demonstration else "ready"
         except ConfigProblem as exc:
             logger.error("portal not ready: %s", exc)
             own_state = "needs_attention"
@@ -287,11 +323,13 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     configured = Path(config_path).absolute() if config_path is not None else None
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.ready = portal is not None
+    app.state.ready = portal is not None and own_state == "ready"
     app.state.mode = (
         "unavailable"
         if engine_refused
-        else {"ready": "ready", "not_set_up": "welcome"}.get(own_state, "needs-attention")
+        else {"ready": "ready", "not_set_up": "welcome", "demonstration": "demonstration"}.get(
+            own_state, "needs-attention"
+        )
     )
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     origins = {f"http://{host}" for host in hosts}
@@ -493,7 +531,15 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             logger.exception("verification failed")
             return _refusal(503, "no_verdict", _NO_VERDICT)
         verification = result.to_dict()
-        explanation = describe(verification, portal.profile)
-        return JSONResponse(_result_body(verification, explanation, env, raw, identity, None))
+        demonstration = own_state == "demonstration"
+        explanation = describe(
+            verification,
+            portal.profile,
+            demonstration=demonstration,
+            notice=DEMONSTRATION_TRUST_NOTICE,
+        )
+        return JSONResponse(
+            _result_body(verification, explanation, env, raw, identity, None, demonstration)
+        )
 
     return app

@@ -228,12 +228,12 @@ def test_the_report_agrees_with_what_loading_the_configuration_decides(scenario)
         loads = True
     except ConfigProblem:
         loads = False
-    assert loads is body["own_reports"]["ready"], name
-    assert (
-        all(checks) is body["trust_configured"] is (loads and not body["demonstration_trust_list"])
-    )
-    assert body["demonstration_trust_list"] is (name == "demonstration")
-    assert client.get("/api/status").json()["ready"] is loads
+    demonstration = body["demonstration_trust_list"]
+    assert demonstration is (name == "demonstration")
+    # A demonstration trust list loads, but it is never trust set up by an administrator: not ready, not configured.
+    assert body["own_reports"]["ready"] is (loads and not demonstration), name
+    assert all(checks) is body["trust_configured"] is (loads and not demonstration)
+    assert client.get("/api/status").json()["ready"] is (loads and not demonstration)
 
 
 def test_a_demonstration_trust_list_is_labelled_and_never_counted_as_trust(tmp_path, monkeypatch):

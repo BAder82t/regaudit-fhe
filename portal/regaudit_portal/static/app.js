@@ -256,6 +256,12 @@ async function start() {
   }
   $("claim").textContent = body.not_a_claim;
   ownReady = body.ready === true;
+  // A demonstration trust list is never trust set up by an administrator: files are checked against it only as a
+  // demonstration, and the upload screen says so before anything is chosen.
+  const demonstrationOnly = body.state === "demonstration" && body.demonstration_checks === true;
+  $("upload-demo-note").textContent = demonstrationOnly ? body.message : "";
+  show("upload-demo-note", demonstrationOnly);
+  ownReady = ownReady || demonstrationOnly;
   $("not-ready-message").textContent = ownReady ? "" : body.message;
   show("record-notice", body.replay_mode === "record");
   $("policy").textContent = (body.policy_text ? body.policy_text + " " : "") + body.engine.summary;

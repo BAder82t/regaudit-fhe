@@ -41,6 +41,8 @@ You need an internet connection for the install. These steps use only made-up ke
 
 In the file chooser, press Cmd+Shift+G on a Mac (Ctrl+L on Linux), paste `~/portal-demo/sample-reports` and press Enter. The full path is `/Users/YOURNAME/portal-demo/sample-reports` on a Mac and `/home/YOURNAME/portal-demo/sample-reports` on Linux. Or open that folder in Finder or your file manager and drag a file onto the page.
 
+These files are a demonstration, and `demo-setup` marks its configuration as one. The portal checks them only as a demonstration: the page says so before you choose a file, every result and every saved result is labelled a demonstration, and the portal says your own reports are not set up.
+
 Press Ctrl-C in the terminal to stop the portal. It stops cleanly and prints one line. The sample reports are synthetic and show each outcome:
 
 | File | What you should see |
@@ -91,7 +93,7 @@ An application that starts the portal for someone who never opens a terminal can
 portal-listening url=http://127.0.0.1:PORT/ mode=MODE
 ```
 
-`MODE` is `ready` (your own reports can be checked), `welcome` (no configuration: the samples work), `needs-attention` (a configuration that cannot be used: the samples work) or `unavailable` (the engine check failed: only the page saying so is served). The launcher stops the portal with SIGTERM, which stops it as cleanly as Ctrl-C does.
+`MODE` is `ready` (your own reports can be checked), `welcome` (no configuration: the samples work), `demonstration` (the trust list is a demonstration: files are checked against it only as a demonstration), `needs-attention` (a configuration that cannot be used: the samples work) or `unavailable` (the engine check failed: only the page saying so is served). The launcher stops the portal with SIGTERM, which stops it as cleanly as Ctrl-C does.
 
 ## Reading the result
 
@@ -213,7 +215,7 @@ You apply a plan yourself, outside the browser:
 .venv/bin/regaudit-portal admin-apply setup-plan.json --expect-fingerprint KEY_ID=FINGERPRINT
 ```
 
-`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. It starts with a notice when the plan uses the development profile, a maximum report age over 30 days (the age 0.2.1 applies on its own, and the value this portal suggests) or the replay mode check, and it names the verifier id that reports must name. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
+`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. A key id, verifier id or fingerprint that is the private key of one of the plan's own public keys is refused. Other ids made of hexadecimal or base64 characters are accepted, because an id derived from a key's fingerprint looks exactly like random secret bytes. It starts with a notice when the plan uses the development profile, a maximum report age over 30 days (the age 0.2.1 applies on its own, and the value this portal suggests) or the replay mode check, and it names the verifier id that reports must name. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
 
 What `admin-apply` holds to:
 
@@ -227,7 +229,7 @@ What `admin-apply` holds to:
 - Only one can run at a time for a folder.
 - It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
 
-Known limit: a trust list made with `demo-setup` is still accepted for verification. If the portal is started with it, for example with `serve --config`, it reports itself ready and checks reports against it, and only the setup page labels it a demonstration. Never use the `demo-setup` files for real reports.
+A demonstration trust list is never treated as trust set up by an administrator. That is a trust list made with `demo-setup`, which marks its configuration as a demonstration, or one that holds a demonstration key or name. The portal then says it is not ready for your own reports, checks files against that list only as a demonstration, and labels every result and every saved result that way. `check-config` refuses it.
 
 What stays manual is getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
 

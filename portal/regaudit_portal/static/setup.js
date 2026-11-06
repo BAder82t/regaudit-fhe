@@ -20,9 +20,6 @@ function line(label, text) {
 
 function statement(body) {
   if (body.own_reports.ready && body.trust_configured) return "Verification of your own reports is ready.";
-  if (body.own_reports.ready && body.demonstration_trust_list) {
-    return "The portal is checking reports against a demonstration trust list. That is not trust set up by an administrator, so do not rely on its verdicts for your own reports.";
-  }
   if (body.own_reports.ready) return "The portal can check your own reports, but a requirement below needs attention.";
   return body.own_reports.message;
 }

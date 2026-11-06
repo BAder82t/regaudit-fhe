@@ -23,10 +23,10 @@ from .config import (
     Settings,
     approved_entries,
     check_replay_location,
+    is_demonstration_trust,
     read_settings,
     read_trust_store,
 )
-from .demonstration import is_demonstration_entry
 from .engine import Identity
 from .paths import (
     CONFIG_NAME,
@@ -254,17 +254,15 @@ def readiness(
             policy = _row("trust_policy", _POLICY, "ok", described)
         try:
             store = read_trust_store(settings)
-            demonstration = any(
-                is_demonstration_entry(key_id, entry.issuer, entry.public_key_pem)
-                for key_id, entry in store.entries.items()
-            )
+            demonstration = is_demonstration_trust(settings, store)
             if demonstration:
                 trust = _row(
                     "trust_list",
                     _TRUST,
                     "demonstration",
-                    "This is a demonstration trust list: it holds a key or a name that the portal's made-up "
-                    "samples use. It does not count as trust being set up.",
+                    "This is a demonstration trust list: it was made by demo-setup, or it holds a key or a name "
+                    "that the portal's made-up samples use. It does not count as trust being set up. The portal "
+                    "checks files against it only as a demonstration, and every result says so.",
                     _WHY["demonstration"],
                     _STATE_NEXT["demonstration"],
                 )

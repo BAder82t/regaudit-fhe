@@ -27,6 +27,12 @@ DEMONSTRATION_NOTICE = (
     "trust list. It says nothing about any real report or issuer."
 )
 
+# On every result checked against a demonstration trust list that is in the configuration, and in every saved one.
+DEMONSTRATION_TRUST_NOTICE = (
+    "This portal is set up with a demonstration trust list, so this file was checked only as a demonstration. The "
+    "result says nothing about any real issuer, and it is not a check against trust set up by an administrator."
+)
+
 TRUSTED_MEANS = (
     "This means it came from an issuer your administrator approved and has not changed since it was signed. It does "
     "not mean the report's findings are correct."
@@ -360,7 +366,11 @@ def _about_the_demonstration(text: str | None) -> str | None:
 
 
 def describe(
-    result: dict[str, Any], profile: str, *, demonstration: bool = False
+    result: dict[str, Any],
+    profile: str,
+    *,
+    demonstration: bool = False,
+    notice: str = DEMONSTRATION_NOTICE,
 ) -> dict[str, Any]:
     """Added beside the verifier's result, which is returned untouched."""
     explained = {
@@ -379,7 +389,5 @@ def describe(
             reason["meaning"] = _about_the_demonstration(reason["meaning"])
         for warning in explained["warnings"]:
             warning["message"] = _about_the_demonstration(warning["message"])
-        explained["warnings"].insert(
-            0, {"code": "DEMONSTRATION_ONLY", "message": DEMONSTRATION_NOTICE}
-        )
+        explained["warnings"].insert(0, {"code": "DEMONSTRATION_ONLY", "message": notice})
     return explained
