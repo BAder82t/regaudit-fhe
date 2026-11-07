@@ -113,9 +113,14 @@ class _Stops:
 
     holding = False
     pending = False
+    # The command's result is final: the files are in place and checked, or the answer is given. A stop from then on
+    # changes nothing, so it is not taken: it would only make the words and the status wrong.
+    finished = False
 
 
 def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
+    if _Stops.finished:
+        return
     if _Stops.holding:
         _Stops.pending = True
         return
@@ -1037,6 +1042,7 @@ def _stoppable(command: Any) -> int:
     place, which is inside this ``try``.
     """
     progress = Progress()
+    _Stops.finished = False
     try:
         with _own_signal_handling(_stop_like_ctrl_c):
             return int(command(progress))
@@ -1044,6 +1050,32 @@ def _stoppable(command: Any) -> int:
         code, said = _after(progress, "")
         _out(f"stopped: {said}", err=True)
         return code
+    finally:
+        _Stops.finished = False
+
+
+def _is_this_program() -> bool:
+    """Is this process the regaudit-portal command itself, rather than a program that calls it (the tests do)?"""
+    first = sys.argv[0] if sys.argv else ""
+    main = getattr(sys.modules.get("__main__"), "__spec__", None)
+    return os.path.basename(first) in ("regaudit-portal", "regaudit-portal.exe") or (
+        main is not None and main.name == "regaudit_portal.__main__"
+    )
+
+
+def _leave_the_result_as_it_is() -> None:
+    """After the command has finished, as the program: a stop until the process ends is ignored.
+
+    The result and its words are final by now. The entry point lets held stops through again once this returns, and
+    the handlers it had before would turn a late stop into a "stopped" with status 1, or a death by SIGHUP, after a
+    command that had finished. Ignoring them for the few moments before the process ends keeps the status exact. A
+    program that merely calls this keeps its own handling.
+    """
+    if not _is_this_program():
+        return
+    for sig in _STOPS:
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(sig, signal.SIG_IGN)
 
 
 def _after(progress: Progress, what: str) -> tuple[int, str]:
@@ -1077,6 +1109,7 @@ def _apply(args: Any, progress: Progress) -> int:
             else:
                 report = _apply_first_setup(place, plan, checked, progress)
         _final_check(folder, plan)
+        _Stops.finished = True  # in place, flushed and accepted by the portal's own readers: the result stands
     except Refused as exc:
         _out(f"refused: {exc}", err=True)
         return EXIT_DONE_BUT if progress.committed else EXIT_REFUSED
@@ -1126,4 +1159,6 @@ def _apply(args: Any, progress: Progress) -> int:
 
 def run(args: Any) -> int:
     _reserve_standard_descriptors()
-    return describe(args) if args.command == "admin-describe" else apply(args)
+    code = describe(args) if args.command == "admin-describe" else apply(args)
+    _leave_the_result_as_it_is()
+    return code
