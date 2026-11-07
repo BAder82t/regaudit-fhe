@@ -49,6 +49,40 @@ print(result.accepted, result.trust_status, result.blocking_reasons)
 
 The [command line](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/CLI.md) does the same thing, and [this example](https://github.com/BAder82t/regaudit-fhe/blob/master/examples/strict_verification_quickstart.py) also shows forged and tampered reports.
 
+## Evidence Verification Portal (experimental)
+
+The [Evidence Verification Portal](https://github.com/BAder82t/regaudit-fhe/blob/master/portal/README.md) is a local browser page for checking a signed report without the command line. It is experimental. It calls the published `regaudit-fhe` 0.2.1 verifier and shows what it returns. It listens on `127.0.0.1` only and has no sign-in. It is not a regulatory certification and not proof of encrypted computation.
+
+The verdict depends on the trusted issuers your administrator configured. A valid signature alone shows only that the report was not changed after it was signed. It does not establish who the issuer is, and it does not show that any encrypted computation happened. The screenshots below use a synthetic sample report, signed with a demonstration key, and a demonstration trust list made by the Portal's demo setup. The steps to run it with that sample data are in the [Portal guide](https://github.com/BAder82t/regaudit-fhe/blob/master/portal/README.md).
+
+**1. Upload.** Choose a signed report file. Uploads are limited to 1 MB, checked and not kept.
+
+![The Portal start page with a drop area for a report file and a Verify report button](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-upload.png)
+
+*The start page before a report is chosen. The security limitation notice is on every page.*
+
+**2. Verify.** Press **Verify report**. The verdict is the verifier's own `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`, shown with the reason, the limits of the result and the encryption claims as the signer states them.
+
+![The Portal result for a synthetic sample whose signing key is not in the demonstration trust list: verdict INVALID, reason code ISSUER_UNKNOWN, the limits of the result and the encryption claims shown as statements](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-verification-result.png)
+
+*A synthetic sample signed with a key that is not in the demonstration trust list. The verdict is INVALID with reason code ISSUER_UNKNOWN. The issuer name is shown as stated in the report, not confirmed.*
+
+**3. Export.** Press **Download result** to save the result as a JSON file.
+
+![The Save the result step of the Portal with the Download result button and the saved file name](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-export.png)
+
+*The export step after Download result was pressed. The page names the saved file, here `verification-result-2-untrusted-signer-db1e36adac7f.json`, which comes from the same synthetic sample.*
+
+Signature verification does not verify that any FHE (encrypted) computation was executed.
+
+### Portal security limitation, published v0.2.1
+
+Published regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.
+
+Users with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.
+
+These protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.
+
 ## What the answer means
 
 The company runs an audit and signs the result with its private key. The regulator keeps its own list of approved keys called the trust store. A report cannot add itself to this list. The verifier can check the report against this list and give one of three answers.
