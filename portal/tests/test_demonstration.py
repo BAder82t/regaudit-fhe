@@ -45,13 +45,14 @@ def test_the_pinned_list_still_works_if_the_sample_files_could_not_be_read(monke
         demonstration.fingerprints.cache_clear()
 
 
-def test_demo_setup_keys_are_not_recognised_by_their_keys_only_its_configuration_says_so(tmp_path):
-    """Its keys are new each time, so nothing can tell them apart from real keys. Its configuration's trust_mode is
-    the control (see test_demonstration_trust.py)."""
+def test_demo_setup_installs_the_pinned_key_and_says_it_is_a_demonstration(tmp_path):
+    """demo-setup copies the bundled trust list, so its key is recognised by fingerprint, and its configuration says
+    "trust_mode": "demonstration" (see test_demonstration_key.py)."""
     root = create(tmp_path / "d")
     made = json.loads((root / "trust-store.json").read_text())
-    for entry in made["entries"].values():
-        assert not demonstration.is_demonstration_entry(entry["public_key_pem"])
+    assert made["entries"] and all(
+        demonstration.is_demonstration_entry(entry["public_key_pem"]) for entry in made["entries"].values()
+    )
     assert json.loads((root / "portal-config.json").read_text())["trust_mode"] == "demonstration"
 
 

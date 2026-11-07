@@ -785,6 +785,29 @@ def test_adding_issuers_with_no_configuration_or_to_a_demonstration_is_refused(
     assert code == 2 and "existing configuration is a demonstration" in err
 
 
+@pytest.mark.parametrize("setting", [None, "customer"])
+def test_adding_issuers_to_the_bundled_key_without_the_demonstration_setting_is_refused(
+    home, tmp_path, run, northwind, setting
+):
+    """The demonstration files copied in and their setting removed or changed: refused, and nothing is written."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind], mode="add-issuers"))
+    demo = create(tmp_path / "demo")
+    folder = _private_folder(default_config_folder())
+    config = json.loads((demo / "portal-config.json").read_text())
+    config.pop("trust_mode")
+    if setting is not None:
+        config["trust_mode"] = setting
+    (folder / "portal-config.json").write_text(json.dumps(config))
+    (folder / "trust-store.json").write_bytes((demo / "trust-store.json").read_bytes())
+    for name in ("portal-config.json", "trust-store.json"):
+        os.chmod(folder / name, 0o600)
+    before = snapshot(folder)
+    code, out, err = run("admin-apply", plan, *_expect(northwind))
+    assert code == 2 and "Enrolled" not in out
+    assert "The existing configuration cannot be used: trust_mode: the trust list holds the portal's bundled" in err
+    assert snapshot(folder) == before
+
+
 @pytest.mark.parametrize("place", ["../outside.json", "/etc/outside.json", "sub/inner.json"])
 def test_adding_to_a_trust_list_outside_the_configuration_folder_is_refused(
     home, tmp_path, run, northwind, place

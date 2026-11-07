@@ -3,9 +3,11 @@
 The bundled samples were signed with two throwaway keys whose fingerprints are pinned below. The same fingerprints are
 also computed, every time, from the public keys in the bundled sample files, so a key that appears there is recognised
 even if this list were out of date. Recognition is by exact key identity only: no issuer name or key id makes a key a
-demonstration, so a legitimate issuer is never labelled one because of what it is called. ``demo-setup`` makes fresh
-keys each time it runs, which nothing can recognise later; its configuration says it is a demonstration instead
-(``"trust_mode": "demonstration"``), and that explicit setting is what the portal reads for them.
+demonstration, so a legitimate issuer is never labelled one because of what it is called. A changed key is simply a
+different key: it is not recognised, and it verifies only reports signed by its own private key, never the bundled
+samples. ``demo-setup`` copies the bundled trust list, so its folders hold the pinned key. Folders made by earlier
+versions of ``demo-setup`` hold fresh keys that nothing can recognise; their configuration says
+``"trust_mode": "demonstration"``, and that explicit setting is what the portal reads for them.
 
 This only reads the package's own sample files. It writes nothing.
 

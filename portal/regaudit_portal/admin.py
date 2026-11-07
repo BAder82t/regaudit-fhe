@@ -468,7 +468,13 @@ class Destination:
             store = read_trust_store(settings)
         except ConfigProblem as exc:
             raise Refused(f"The existing trust list cannot be used: {exc}") from exc
-        mode, reason = trust_mode_of(settings, store)
+        try:
+            mode, reason = trust_mode_of(settings, store)
+        except ConfigProblem as exc:  # the bundled demonstration key, without "trust_mode": "demonstration"
+            raise Refused(
+                f"The existing configuration cannot be used: {exc}. Real issuers are not added to it. Move it and "
+                "the trust list away, then apply a first-setup plan."
+            ) from exc
         if mode != CUSTOMER:
             raise Refused(
                 f"The existing configuration is a demonstration ({reason}). Real issuers are not added to "
@@ -764,6 +770,7 @@ def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
     try:
         settings = read_settings(staging_path / CONFIG_NAME)
         store = read_trust_store(settings)
+        mode = trust_mode_of(settings, store)[0]
     except ConfigProblem as exc:
         raise Refused(
             f"The new files do not pass the portal's own check: {exc}. {UNCHANGED}"
@@ -775,7 +782,7 @@ def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
         settings.max_age_days,
         settings.replay_mode,
         settings.allow_self_signed,
-        trust_mode_of(settings, store)[0],
+        mode,
     )
     if found != wanted or settings.store_path != staging_path / TRUST_LIST_NAME:
         raise Refused(f"The new configuration does not say what the plan says. {UNCHANGED}")

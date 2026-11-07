@@ -1,8 +1,9 @@
 """Demonstration trust is kept apart from customer trust, and every demonstration result says so in exactly one way.
 
 The mode comes from the configuration the portal was started with: ``"trust_mode": "demonstration"`` (demo-setup writes
-it), or a trust list that holds one of the bundled demonstration keys, recognised by exact fingerprint. No name or key
-id decides it. The engine and its verdicts are unchanged: only the portal's labels and readiness differ.
+it). A trust list that holds one of the bundled demonstration keys, recognised by exact fingerprint, is refused without
+that setting (see test_demonstration_key.py). No name or key id decides it. The engine and its verdicts are unchanged:
+only the portal's labels and readiness differ.
 """
 
 from __future__ import annotations
@@ -44,16 +45,6 @@ def _edit(config: Path, **change) -> Path:
     return config
 
 
-def _add_bundled_key(root: Path) -> None:
-    store_path = root / "trust-store.json"
-    store = json.loads(store_path.read_text())
-    pem = json.loads((SAMPLES / "demo-trust-list.json").read_text())["entries"][
-        "demo-only-synthetic-key"
-    ]["public_key_pem"]
-    store["entries"]["acme-1"] = {"issuer": "Acme Ltd", "public_key_pem": pem, "status": "active"}
-    store_path.write_text(json.dumps(store))
-
-
 # ----------------------------------------------------------------------------- the one label, exactly
 
 
@@ -87,7 +78,7 @@ def test_the_verdict_and_reason_codes_are_the_engines_own_and_shown_next_to_the_
         good["verification"]["trust_status"] == "TRUSTED"
         and good["verification"]["accepted"] is True
     )
-    bad = post(client, demo, "4-changed-after-signing.json").json()
+    bad = post(client, demo, "3-changed-after-signing.json").json()
     assert bad["verification"]["trust_status"] == "INVALID"
     assert "HASH_MISMATCH" in bad["verification"]["blocking_reasons"]
     assert [r["code"] for r in bad["explanation"]["reasons"]] == [
@@ -228,28 +219,19 @@ def test_the_mode_setting_alone_makes_any_trust_list_a_demonstration(tmp_path):
 
 
 @pytest.mark.parametrize("setting", [None, "customer"])
-def test_a_bundled_demonstration_key_makes_it_a_demonstration_whatever_the_setting_says(
+def test_a_bundled_demonstration_key_without_the_demonstration_setting_is_refused_not_labelled(
     tmp_path, setting
 ):
-    """A missing or "customer" setting cannot switch the fingerprint rule off."""
-    root = make_synthetic_portal(tmp_path / "own")
-    _add_bundled_key(root)
+    """A missing or "customer" setting cannot switch the fingerprint rule off: the configuration is refused."""
+    root = create(tmp_path / "demo")
     _edit(root / "portal-config.json", trust_mode=setting)
-    portal = load_portal(root / "portal-config.json")
-    assert (
-        portal.trust_mode == "demonstration"
-        and "bundled demonstration keys" in portal.trust_mode_reason
-    )
-    body = (
-        client_for(root / "portal-config.json")
-        .post(
-            "/api/verify",
-            content=(SAMPLES / "reports" / "trusted.json").read_bytes(),
-            headers=JSON_HEADERS,
-        )
-        .json()
-    )
-    assert body["demonstration_label"] == LABEL
+    with pytest.raises(ConfigProblem, match="bundled demonstration key") as caught:
+        load_portal(root / "portal-config.json")
+    assert caught.value.kind == "demonstration_key"
+    client = client_for(root / "portal-config.json")
+    response = post(client, root, "1-trusted.json")
+    assert response.status_code == 503 and "verification" not in response.json()
+    assert LABEL not in json.dumps(response.json())
 
 
 @pytest.mark.parametrize("value", ["yes", 1, True, "Demonstration", "demo", ""])
@@ -260,15 +242,17 @@ def test_the_mode_setting_is_customer_or_demonstration_and_nothing_else(tmp_path
         load_portal(root / "portal-config.json")
 
 
-def test_a_demo_setup_list_copied_without_its_setting_cannot_be_recognised(tmp_path):
-    """The known limit: demo-setup's keys are new each time and no name rule exists, so a copy of its trust list
-    under a configuration without the setting is customer trust, and its own sample reports verify as customer
-    TRUSTED. The setting that demo-setup writes is the only control for those keys."""
-    demo = create(tmp_path / "demo")
-    _edit(demo / "portal-config.json", trust_mode=None)
-    portal = load_portal(demo / "portal-config.json")
+def test_an_old_demo_folder_copied_without_its_setting_cannot_be_recognised(tmp_path):
+    """The known limit, now only for folders made by the earlier demo-setup: their keys were made fresh and no name
+    rule exists, so a copy of such a trust list under a configuration without the setting is customer trust, and its
+    own sample reports verify as customer TRUSTED. The setting is the only control for those keys. The current
+    demo-setup installs the bundled key instead, which is refused without the setting."""
+    old = make_synthetic_portal(tmp_path / "old", trust_mode="demonstration")
+    assert load_portal(old / "portal-config.json").trust_mode == "demonstration"
+    _edit(old / "portal-config.json", trust_mode=None)
+    portal = load_portal(old / "portal-config.json")
     assert portal.trust_mode == "customer"
-    body = post(client_for(demo / "portal-config.json"), demo, "1-trusted.json").json()
+    body = post(client_for(old / "portal-config.json"), old, "1-trusted.json").json()
     assert (
         body["verification"]["trust_status"] == "TRUSTED"
         and body["synthetic_demonstration"] is False

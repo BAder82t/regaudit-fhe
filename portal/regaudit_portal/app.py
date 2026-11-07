@@ -79,6 +79,13 @@ _NOT_READY = (
     "No report can be checked until then."
 )
 _NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
+# A configuration refused because its trust list holds the bundled demonstration key without saying it is a
+# demonstration. A plain reason, with no file names: those go to the administrator's terminal.
+_DEMONSTRATION_KEY_REFUSED = (
+    "This portal cannot check your own reports. Its trust list holds the portal's bundled demonstration key, which "
+    "can never be customer trust, and its configuration does not say it is a demonstration, so the configuration is "
+    "refused. Contact your administrator. Until then, only the bundled samples can be checked."
+)
 _DEMONSTRATION_ONLY = (
     "This portal is set up with a demonstration trust list, not trust set up by an administrator, so your own "
     "reports are not set up. Files you choose are checked only as a demonstration, and every result says so."
@@ -241,6 +248,7 @@ def _status_body(
     engine: dict[str, Any],
     samples: Samples | None,
     own_state: str,
+    own_message: str | None = None,
 ) -> dict[str, Any]:
     """Whether your own reports can be checked, which samples there are, and which engine would check them."""
     listing = samples.listing() if samples is not None else []
@@ -264,7 +272,7 @@ def _status_body(
             "ready": False,
             "state": own_state,
             **mode,
-            "message": _own_message(own_state),
+            "message": own_message or _own_message(own_state),
             "samples": listing,
             "engine": engine,
             "not_a_claim": NOT_A_CLAIM,
@@ -341,6 +349,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     """
     portal: Portal | None = None
     own_state = "not_set_up"
+    own_text: str | None = None  # a plain reason for the page, when there is one that names no file
     start = check_engine()
     engine_refused = not start.ok
     if engine_refused:
@@ -354,6 +363,9 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             logger.error("portal not ready: %s", exc)
             own_state = "needs_attention"
             engine_refused = isinstance(exc, EngineProblem)
+            if exc.kind == "demonstration_key":
+                own_text = _DEMONSTRATION_KEY_REFUSED
+    own_message = own_text or _own_message(own_state)
     samples: Samples | None = None
     if not engine_refused:
         try:
@@ -432,7 +444,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             port=port,
             identity=identity,
             own_state=own_state,
-            own_message=_own_message(own_state),
+            own_message=own_message,
         )
 
     @app.api_route("/setup/plan", methods=["GET", "HEAD"])
@@ -487,7 +499,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         watch.seen(identity)
         if not identity.ok or identity.engine is None:
             return _unavailable_status()
-        return _status_body(portal, identity.engine, samples, own_state)
+        return _status_body(portal, identity.engine, samples, own_state, own_message)
 
     @app.post("/api/samples/{sample_id}/verify")
     async def check_sample(sample_id: str) -> Response:
@@ -531,7 +543,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(
                 503,
                 "not_set_up" if own_state == "not_set_up" else "not_ready",
-                _own_message(own_state),
+                own_message,
             )
         if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
             return _refusal(415, "bad_type", _NOT_A_REPORT)

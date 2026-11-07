@@ -38,6 +38,7 @@ from .paths import (
     hide_paths,
     shell_path,
 )
+from .plan import LONG_AGE_DAYS
 from .profiles import explain, guide
 
 HOST = "127.0.0.1"
@@ -88,6 +89,10 @@ _WHY = {
         "A demonstration key is not a real issuer. It signed only made-up sample reports, so trusting it says "
         "nothing about any real report."
     ),
+    "demonstration_key": (
+        "The bundled demonstration key signed only made-up sample reports. It can never be customer trust, so a "
+        "configuration that does not say it is a demonstration is refused."
+    ),
     "development": "The development profile relaxes checks, and every result says not to rely on it.",
     "replay": (
         "Without a usable replay file the portal cannot tell a repeated report, so it does not check your own reports."
@@ -107,6 +112,11 @@ _STATE_NEXT = {
     "demonstration": (
         "Move this configuration and its trust list out of the folder, then prepare and apply a setup plan with "
         "your issuers' real keys."
+    ),
+    "demonstration_key": (
+        "Remove the demonstration key from the trust list, or prepare and apply a setup plan with your issuers' real "
+        "keys in a new folder. To use the list only as a demonstration, the configuration must say "
+        '"trust_mode": "demonstration".'
     ),
     "development": (
         "To have the replay and format checks enforced, change the profile in the configuration to confidential or high-assurance "
@@ -159,6 +169,11 @@ def _replay_text(mode: str) -> str:
     return "Mode: check. Looking at a report twice gives the same answer, and each result says it was not recorded as used."
 
 
+# demo-setup copies sample reports that were signed once, on a fixed date, so its configuration allows a long age.
+_DEMONSTRATION_AGE = (
+    "This long maximum age is accepted here only because this is a demonstration: its sample reports were signed "
+    "once, on a fixed date. Customer trust should use a short one."
+)
 _CONFIGURATION = "Configuration found and valid"
 _POLICY = "Trust policy (profile)"
 _TRUST = "Trust list found and valid"
@@ -259,6 +274,7 @@ def readiness(
             )
         else:
             policy = _row("trust_policy", _POLICY, "ok", described)
+        demonstration = False
         try:
             store = read_trust_store(settings)
             kind, reason = trust_mode_of(settings, store)
@@ -291,6 +307,15 @@ def readiness(
                     _WHY["unsafe"],
                     _FIX_ACCESS,
                 )
+            elif exc.kind == "demonstration_key":
+                trust = _row(
+                    "trust_list",
+                    _TRUST,
+                    "problem",
+                    say(str(exc)),
+                    _WHY["demonstration_key"],
+                    _STATE_NEXT["demonstration_key"],
+                )
             elif exc.kind == "missing":
                 trust = _row(
                     "trust_list",
@@ -309,6 +334,8 @@ def readiness(
                     _WHY["trust_invalid"],
                     _STATE_NEXT["trust_invalid"],
                 )
+        if demonstration and days > LONG_AGE_DAYS:
+            policy["detail"] += " " + _DEMONSTRATION_AGE
         problem = check_replay_location(settings)
         text = _replay_text(settings.replay_mode)
         if problem is not None:

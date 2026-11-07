@@ -43,7 +43,9 @@ class ConfigProblem(Exception):
     """The portal must not give verdicts until the administrator fixes this.
 
     ``kind`` says what sort of trouble it is, for the read-only setup page: ``missing`` (a file is not there),
-    ``unsafe`` (who owns it or who can change it is wrong) or ``invalid`` (what it says is wrong).
+    ``unsafe`` (who owns it or who can change it is wrong), ``invalid`` (what it says is wrong) or
+    ``demonstration_key`` (the trust list holds the bundled demonstration key without ``"trust_mode":
+    "demonstration"``).
     """
 
     def __init__(self, message: str, kind: str = "invalid") -> None:
@@ -87,7 +89,8 @@ class Settings:
     store_path: Path
     replay_path: Path
     # Which kind of trust this configuration says it is: "customer", "demonstration" (demo-setup writes it), or ""
-    # when it says nothing, which is customer trust. Chosen with the configuration when the portal starts, never later.
+    # when it says nothing: customer trust, unless the trust list holds a bundled demonstration key, which is then
+    # refused (see trust_mode_of). Chosen with the configuration when the portal starts, never later.
     trust_mode: str = ""
 
 
@@ -196,23 +199,47 @@ def read_settings(config_path: str | Path) -> Settings:
     )
 
 
+BUNDLED_KEY_AS_CUSTOMER = (
+    "trust_mode: the trust list holds the portal's bundled demonstration key, and the configuration says "
+    '"trust_mode": "customer". That key can never be customer trust, so this configuration is refused. Remove the '
+    'key from the trust list, or say "trust_mode": "demonstration" to use the list only as a demonstration'
+)
+BUNDLED_KEY_WITHOUT_MODE = (
+    "trust_mode: the trust list holds the portal's bundled demonstration key, and the configuration does not say "
+    'which kind of trust it is. It is refused until it says "trust_mode": "demonstration". That key can never be '
+    "customer trust"
+)
+
+
 def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
     """The kind of trust this is, and why: demonstration trust is kept apart from customer trust.
 
-    It is a demonstration if the configuration says ``"trust_mode": "demonstration"`` (demo-setup writes it), or if
-    the trust list holds one of the portal's bundled demonstration keys, recognised by exact fingerprint. A missing
-    or ``"customer"`` setting cannot make a list with a bundled key into customer trust. Nothing else decides it: no
-    issuer name or key id. A configuration without the setting and without a bundled key is customer trust.
+    It is a demonstration when the configuration says ``"trust_mode": "demonstration"`` (demo-setup writes it). A
+    trust list that holds one of the portal's bundled demonstration keys, recognised by exact fingerprint and by
+    nothing else, is a demonstration only with that explicit setting: with ``"customer"``, or with no setting, the
+    configuration is refused (:class:`ConfigProblem`, kind ``demonstration_key``), so the bundled key can never be
+    customer trust, whatever the files are called or wherever they were copied. A configuration without the setting
+    and without a bundled key is customer trust, as configurations made before the setting existed are.
     """
-    if any(is_demonstration_entry(entry.public_key_pem) for entry in store.entries.values()):
-        return DEMONSTRATION, "the trust list holds one of the portal's bundled demonstration keys"
+    bundled = any(is_demonstration_entry(entry.public_key_pem) for entry in store.entries.values())
     if settings.trust_mode == DEMONSTRATION:
+        if bundled:
+            return (
+                DEMONSTRATION,
+                'the configuration says "trust_mode": "demonstration", and the trust list holds the portal\'s '
+                "bundled demonstration key",
+            )
         return DEMONSTRATION, 'the configuration says "trust_mode": "demonstration"'
+    if bundled:
+        raise ConfigProblem(
+            BUNDLED_KEY_AS_CUSTOMER if settings.trust_mode == CUSTOMER else BUNDLED_KEY_WITHOUT_MODE,
+            "demonstration_key",
+        )
     if settings.trust_mode == CUSTOMER:
         return CUSTOMER, 'the configuration says "trust_mode": "customer"'
     return (
         CUSTOMER,
-        "the configuration does not say demonstration, and the trust list holds no bundled key",
+        "the configuration does not set trust_mode, and the trust list holds no bundled demonstration key",
     )
 
 

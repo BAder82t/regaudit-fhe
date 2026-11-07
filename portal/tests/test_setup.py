@@ -244,9 +244,9 @@ def test_a_demonstration_trust_list_is_labelled_and_never_counted_as_trust(tmp_p
     assert row["state"] == "demonstration" and row["ok"] is False
     assert "demonstration trust" in row["detail"] and "does not count as trust" in row["detail"]
     assert body["trust_configured"] is False and body["demonstration_trust_list"] is True
-    assert "Example Synthetic Issuer" not in json.dumps(
+    assert "DEMO-ONLY synthetic issuer" not in json.dumps(
         body
-    ) and "synthetic-issuer-key" not in json.dumps(body)
+    ) and "demo-only-synthetic-key" not in json.dumps(body)
 
 
 @pytest.mark.parametrize("source", ["bundled", "renamed"])
@@ -267,11 +267,13 @@ def test_the_bundled_demonstration_key_is_recognised_by_its_fingerprint_whatever
     )
     data["entries"][key_id] = {"issuer": issuer, "public_key_pem": pem, "status": "active"}
     _edit(store, json.dumps(data))
-    load_portal(
-        config
-    )  # the engine itself accepts it: only the label stops it being taken for real trust
+    # The configuration does not say it is a demonstration, so it is refused, not merely labelled.
+    with pytest.raises(ConfigProblem, match="bundled demonstration key") as caught:
+        load_portal(config)
+    assert caught.value.kind == "demonstration_key"
     body = client_for(config).get("/api/setup").json()
-    assert states(body)["trust_list"] == "demonstration" and body["trust_configured"] is False
+    assert states(body)["trust_list"] == "problem" and body["trust_configured"] is False
+    assert body["own_reports"]["ready"] is False
 
 
 def test_the_trust_policy_row_says_which_profile_and_what_it_means(
@@ -566,7 +568,6 @@ def test_the_two_setup_routes_only_look():
         "watch.seen",
         "_unavailable_status",
         "readiness",
-        "_own_message",
         "trust_mode_fields",
     }, called
 
