@@ -10,6 +10,7 @@ const MAX_ISSUERS = 10;
 // public key box any mention of PRIVATE or SECRET is enough.
 const SECRET = /-----BEGIN[^\n-]*(PRIVATE|SECRET)|(PRIVATE|SECRET)\s+KEY\s*(BLOCK\s*)?-----|PuTTY-User-Key-File|Private-Lines\s*:|AGE-SECRET-KEY-|openssh-key-v1|b3BlbnNzaC1rZXktdjE|MC4CAQAwBQYDK2VwBCIEI/i;
 const SECRET_IN_KEY_BOX = /PRIVATE|SECRET/i;
+// Only what saving the plan needs: its text and its file name. Nothing else from a check is kept.
 let prepared = null;
 
 function element(tag, text) {
@@ -36,7 +37,17 @@ function field(labelText, control) {
 function forget() {
   prepared = null;
   $("result").hidden = true;
+  $("writes").replaceChildren();
   $("saved").textContent = "";
+}
+
+// After every check, whatever its outcome, the pasted public keys are taken out of their boxes, and so is any value
+// that looked like a private or secret key, wherever it was typed. Paste a key again to check another plan.
+function clearKeyMaterial() {
+  const controls = [$("verifier-id"), ...$("issuers").querySelectorAll("[data-member]")];
+  for (const control of controls) {
+    if (control.dataset.member === "public_key" || SECRET.test(control.value)) control.value = "";
+  }
 }
 
 function renumber() {
@@ -178,21 +189,34 @@ function showWrites(body) {
   steps.replaceChildren(...body.next_steps.map((text) => element("li", text)));
 }
 
+const KEYS_CLEARED = " The public keys you pasted were cleared from the page.";
+
 async function check() {
   forget();
-  const request = collect();
-  if (looksSecret(request)) {
+  let request = collect();
+  const secret = looksSecret(request);
+  clearKeyMaterial(); // from here the keys are only in this one request, which is dropped below
+  if (secret) {
+    request = null;
     $("message").textContent =
-      "Something you entered looks like a private or secret key, so nothing was sent. Only the issuer's public key belongs in a plan.";
+      "Something you entered looks like a private or secret key, so nothing was sent and it was cleared from the page." +
+      KEYS_CLEARED +
+      " Only the issuer's public key belongs in a plan.";
     return;
   }
   $("message").textContent = "Checking...";
-  const response = await fetch("/api/setup/plan", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(request),
-  });
-  const body = await response.json();
+  let body;
+  try {
+    const response = await fetch("/api/setup/plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    request = null;
+    body = await response.json();
+  } finally {
+    request = null;
+  }
   if (body.state === "unavailable") {
     $("message").textContent = body.message;
     return;
@@ -203,25 +227,32 @@ async function check() {
   }
   if (!body.ok) {
     $("written").hidden = true;
-    $("message").textContent = (body.where ? body.where + ": " : "") + body.message;
+    $("message").textContent = (body.where ? body.where + ": " : "") + body.message + KEYS_CLEARED;
     return;
   }
-  prepared = body;
+  prepared = { plan_text: body.plan_text, file_name: body.file_name };
   $("written").hidden = false;
+  $("save").hidden = false;
   showWrites(body);
-  $("message").textContent = "The plan is ready to save. Nothing was written and nothing was kept by the portal.";
+  $("message").textContent =
+    "The plan is ready to save. Nothing was written and nothing was kept by the portal." + KEYS_CLEARED;
 }
 
 function save() {
   if (prepared === null) return;
+  const text = prepared.plan_text;
+  const name = prepared.file_name;
+  prepared = null; // saved once: the page keeps no copy of the plan, or of the keys in it
   const link = element("a");
-  link.href = URL.createObjectURL(new Blob([prepared.plan_text], { type: "application/json" }));
-  link.download = prepared.file_name;
+  link.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  link.download = name;
   document.body.append(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  $("saved").textContent = "Saved to your downloads as " + prepared.file_name + ".";
+  $("writes").replaceChildren();
+  $("save").hidden = true;
+  $("saved").textContent = "Saved to your downloads as " + name + ". The plan was cleared from this page.";
 }
 
 function showMode() {
