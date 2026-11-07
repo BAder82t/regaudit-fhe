@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Security limitation - Evidence Verification Portal</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>Evidence Verification Portal</h1>
+  </header>
+
+  <main>
+    <section class="panel" id="limitation-full">
+      <h2>Security limitation — published v0.2.1</h2>
+      <p>Published regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.</p>
+      <p>Users with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.</p>
+      <p>These protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.</p>
+    </section>
+
+    <section class="panel" id="fhe-full">
+      <h2>Signature verification and encrypted computation</h2>
+      <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
+    </section>
+
+    <p><a href="/">Back to the portal</a></p>
+  </main>
+</body>
+</html>
