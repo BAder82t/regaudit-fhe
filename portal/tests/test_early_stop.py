@@ -76,7 +76,7 @@ def _wait_listening(proc) -> str:
             return line
         if proc.poll() is not None:
             break
-    pytest.fail("the portal did not start")
+    raise AssertionError("the portal did not start")
 
 
 def _assert_quiet_stop(proc, out: str, tmp: Path) -> None:

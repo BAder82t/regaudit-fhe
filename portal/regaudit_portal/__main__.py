@@ -177,7 +177,7 @@ def _stop_when_input_closes() -> None:
             while os.read(0, 4096):
                 pass
         except OSError:
-            pass
+            pass  # the descriptor is gone: the same signal to stop as an end of input
         os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Thread(target=watch, name="launcher-watch", daemon=True).start()

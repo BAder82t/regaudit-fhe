@@ -7,6 +7,7 @@ too faint to read, and a page that loses its landmarks, its skip link or its key
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.metadata
 import re
@@ -231,9 +232,10 @@ def test_the_fonts_and_their_licences_are_in_the_package_data():
 
 
 def test_an_installed_copy_holds_the_fonts_the_licences_and_the_mark():
-    try:
+    installed = None
+    with contextlib.suppress(importlib.metadata.PackageNotFoundError):
         installed = importlib.metadata.distribution("regaudit-portal")
-    except importlib.metadata.PackageNotFoundError:
+    if installed is None:
         pytest.skip("the portal is not installed here")
     if (
         Path(installed.locate_file("regaudit_portal")).resolve()
