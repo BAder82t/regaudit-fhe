@@ -68,7 +68,7 @@ from one of three places: the default of `128`, when no `parameter_set` is passe
 
 | Where the report came from | What it signs | How to read it |
 |---|---|---|
-| `regaudit-fhe audit`, the HTTP server, `envelope(...)` or `envelope_v2(...)` without a `parameter_set` | `backend: "plaintext"`, `poly_modulus_degree: 0`, an empty chain and `security_bits: 128` | **No encrypted computation took place.** The `128` is a field default, and both schemas require at least 128, so the field cannot say anything else. It is not 128-bit cryptographic protection. |
+| `regaudit-fhe audit`, the HTTP server, `envelope(...)` or `envelope_v2(...)` without a `parameter_set` | `backend: "plaintext"`, `poly_modulus_degree: 0`, an empty chain and `security_bits: 128` | **The signed parameter set describes no encryption.** For `regaudit-fhe audit` and the HTTP server nothing was encrypted. For `envelope(...)` or `envelope_v2(...)` the same values are signed even when the calculation ran on an encrypted backend, because the default parameter set says plaintext. The `128` is a field default, and both schemas require at least 128, so the field cannot say anything else. It is not 128-bit cryptographic protection. |
 | `CKKSParams` with `HEStd_128_classic` | `128` | The chain was compared with the 128-bit limit for `N`, and in 0.3.0 and later a real context was built and the ring dimension and chain were read back from it. The TenSEAL backend builds its context at SEAL's default 128-bit level and is shown to refuse above that limit. The report still cannot show that the producer used that context. |
 | `CKKSParams` with `HEStd_192_classic` or `HEStd_256_classic`, before 0.3.0 | `192` or `256` | **May exceed what the parameters support.** TenSEAL gives no way to ask for these levels, and at `N = 2^14` the default 360-bit chain is above the SEAL limits for them (305 and 237 bits). Do not rely on the number. From 0.3.0 `CKKSParams` refuses these levels. |
 | `parameter_set_from_ckks_context`, before 0.3.0 | The caller's level, a fixed default chain, and `poly_modulus_degree` from the wrapper object | Not read from the context. From 0.3.0 the ring dimension, chain and scale are read from the context, and the level must be the one the backend is shown to enforce. |
@@ -80,9 +80,9 @@ looking at the report. The signed numbers are whatever the producer's code wrote
 Verifying a report does not show that FHE execution occurred. `backend` is also a declaration. See
 [SIGN_AND_VERIFY.md](SIGN_AND_VERIFY.md) for what a `TRUSTED` verdict does and does not say.
 
-**Reading existing reports.** A report that signs `backend: "plaintext"` with `security_bits: 128` was produced
-without encryption, whatever the number says. Every published version from 0.0.2 to 0.2.1 signs it this way
-by default, so show such a report as "no encryption", and never as "128-bit". The published schemas are not
+**Reading existing reports.** A report that signs `backend: "plaintext"` with `security_bits: 128` makes no claim of
+encryption, whatever the number says, and it does not show that none took place. Every published version from 0.0.2 to 0.2.1 signs it this way
+by default, so show such a report as "no encryption claimed", and never as "128-bit". The published schemas are not
 changed by this note, and correcting the field itself would need a new schema version.
 
 ## JSON schemas

@@ -17,13 +17,13 @@ its threat model, see [README.md](../README.md), [LICENSING.md](../LICENSING.md)
 ## Install
 
 ```bash
-pip install regaudit-fhe[server]
+pip install "regaudit-fhe[server]"
 ```
 
 or, with the encrypted backend baked in:
 
 ```bash
-pip install regaudit-fhe[server,fhe]
+pip install "regaudit-fhe[server,fhe]"
 ```
 
 The `[server]` extra pulls FastAPI, uvicorn, and pydantic. The `[fhe]`
