@@ -1,0 +1,4 @@
+# The number of Portal tests that must pass in CI. It is a floor, set just under what runs today (328 with the v0.2.1 tag
+# present), so that a collection error or a deleted test file fails the job. Raise it in a reviewed change when tests are
+# added; never lower it to make a failing job pass.
+325
