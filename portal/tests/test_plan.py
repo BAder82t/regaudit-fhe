@@ -923,12 +923,15 @@ def test_ids_that_only_look_like_secret_bytes_are_accepted(signer, request_body)
     der = signer.public_key.public_bytes(
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
+    thumbprint = base64.urlsafe_b64encode(hashlib.sha256(der).digest()).decode().rstrip("=")
+    if not thumbprint[0].isalnum():
+        # A key id must start with a letter or a digit, whatever its form: one in 32 thumbprints starts with - or _.
+        assert _send(_with(request_body, key_id=thumbprint))[0] == 422, thumbprint
+        thumbprint = "k" + thumbprint[1:]
     for key_id in (
         fingerprint_of(signer),  # the SHA-256 fingerprint as the key id: 64 hexadecimal characters
         hashlib.sha512(der).hexdigest(),  # 128 hexadecimal characters
-        base64.urlsafe_b64encode(hashlib.sha256(der).digest())
-        .decode()
-        .rstrip("="),  # a JWK thumbprint: 43
+        thumbprint,  # a JWK thumbprint: 43
         _seed(issuer_signer()).hex(),  # random bytes that are not this plan's key
     ):
         assert _send(_with(request_body, key_id=key_id))[0] == 200, key_id
