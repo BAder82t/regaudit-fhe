@@ -950,7 +950,8 @@ def test_a_failure_after_the_files_are_in_place_says_they_are_and_exits_4(
     code, _, err = run(
         "admin-apply", _plan_file(tmp_path, prepare_plan([northwind])), *_expect(northwind)
     )
-    assert code == 4 and "The change is complete" in err and "Nothing was changed" not in err, err
+    assert code == 4 and "Nothing was changed" not in err, err
+    assert "The new files are in place, but flushing them to the disk failed (Input/output error)" in err, err
     assert (default_config_folder() / "portal-config.json").is_file()
 
 
@@ -1172,6 +1173,54 @@ def test_killed_between_the_trust_list_and_the_configuration_the_portal_still_se
     assert code == 3 and "there is no configuration" in err  # the setup is not in use
     code, _, err = run("admin-apply", plan, *_expect(northwind))
     assert code == 2 and "stopped part-way can leave this" in err
+
+
+def _left_by_a_killed_apply(home, tmp_path, northwind) -> tuple[Path, list[Path]]:
+    folder = _private_folder(default_config_folder())
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    assert _killed(home, "link", 2, "admin-apply", plan, *_expect(northwind)).returncode == -signal.SIGKILL
+    leftovers = sorted(folder.glob(".regaudit-admin-*")) + sorted(folder.parent.glob(".regaudit-admin-*"))
+    assert leftovers and (folder / "trust-store.json").exists()
+    return plan, leftovers
+
+
+def test_describe_lists_the_leftover_folders_also_when_it_refuses_the_stray_trust_list(
+    home, tmp_path, run, northwind
+):
+    plan, leftovers = _left_by_a_killed_apply(home, tmp_path, northwind)
+    code, out, _ = run("admin-describe", plan)
+    assert code == 2 and "Destination check: applying it here is refused. There is already a trust list" in out
+    for item in leftovers:
+        assert f"Left by an apply that was stopped: {item}. The portal does not use it." in out
+    code, out, _ = run("admin-describe", plan, "--json")
+    body = json.loads(out)
+    assert body["ok"] is False and all(f"Left by an apply that was stopped: {item}." in body["summary"] for item in leftovers)
+
+
+def test_describe_lists_the_leftover_folders_with_any_refusal_after_the_folders_are_opened(
+    home, tmp_path, run, northwind
+):
+    plan, leftovers = _left_by_a_killed_apply(home, tmp_path, northwind)
+    (default_config_folder() / "trust-store.json").unlink()
+    (default_config_folder() / "portal-config.json").write_text("{}")
+    os.chmod(default_config_folder() / "portal-config.json", 0o600)
+    code, out, _ = run("admin-describe", plan)  # now refused because a configuration is there
+    assert code == 2 and "There is already a configuration" in out
+    assert all(f"Left by an apply that was stopped: {item}." in out for item in leftovers)
+
+
+def test_guard_off_dropping_the_leftovers_on_a_refusal_is_noticed(home, tmp_path, run, northwind, monkeypatch):
+    """The control: describing as before, the refusal comes without the leftover lines, and the check above fails."""
+    plan, leftovers = _left_by_a_killed_apply(home, tmp_path, northwind)
+    real = admin._describe_destination
+
+    def earlier(folder, plan):
+        problem, found = real(folder, plan)
+        return problem, (found if problem is None else [])
+
+    monkeypatch.setattr(admin, "_describe_destination", earlier)
+    code, out, _ = run("admin-describe", plan)
+    assert code == 2 and "Left by an apply that was stopped" not in out
 
 
 _PENDING_STOP = """

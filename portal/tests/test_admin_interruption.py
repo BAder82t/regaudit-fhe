@@ -1,0 +1,264 @@
+"""An interrupted or half-heard apply: the exit status and the words always match what is on the disk.
+
+A stop is sent at every step that writes or flushes, before and after it. Whatever happens, an apply never says
+"Nothing was changed." when files were changed, never reports success without the change being in place, flushed and
+read back by the portal's own readers, and leaves no temporary folder behind. With standard output or standard error
+closed when it starts, it completes, and the status and the words that can still be written say so.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from helpers import issuer_signer, prepare_plan, snapshot
+from regaudit_portal import admin
+from regaudit_portal.__main__ import main
+from regaudit_portal.config import read_settings, read_trust_store
+from regaudit_portal.paths import default_config_folder
+from test_admin import _env, _expect, _first_setup, _plan_file, _private_folder
+from test_admin import home  # noqa: F401 - a fixture
+from test_admin import northwind  # noqa: F401 - a fixture
+from test_admin import run  # noqa: F401 - a fixture
+
+PORTAL = Path(__file__).resolve().parents[1]
+UNCHANGED = "Nothing was changed."
+
+
+def _state(folder: Path) -> dict:
+    if not folder.exists():
+        return {}
+    return {name: found for name, found in snapshot(folder).items() if name != "."}
+
+
+def _leftovers(folder: Path) -> list[str]:
+    places = [folder, folder.parent]
+    return [p.name for place in places if place.exists() for p in place.iterdir() if p.name.startswith(".regaudit-admin-")]
+
+
+def _prepare(case: str, tmp_path, run, signer) -> tuple[Path, list[str]]:  # noqa: F811 - the fixture's value
+    """The plan to apply and its arguments, for: no folder yet, an empty private folder, or adding to a setup."""
+    later = issuer_signer("Later Ltd", "later-1")
+    if case == "fresh":
+        return _plan_file(tmp_path, prepare_plan([signer])), _expect(signer)
+    if case == "empty-folder":
+        _private_folder(default_config_folder())
+        return _plan_file(tmp_path, prepare_plan([signer])), _expect(signer)
+    _first_setup(tmp_path, run, signer)
+    return _plan_file(tmp_path, prepare_plan([later], mode="add-issuers"), "add.json"), _expect(later)
+
+
+STEPS = [(name, n) for name, count in (("_sync", 6), ("rename", 2), ("link", 2)) for n in range(1, count + 1)]
+
+
+@pytest.mark.parametrize("case", ["fresh", "empty-folder", "add"])
+@pytest.mark.parametrize("when", ["before", "after"])
+@pytest.mark.parametrize("step, nth", STEPS)
+def test_a_stop_at_any_writing_step_is_reported_exactly_as_the_disk_is(
+    home, tmp_path, run, northwind, monkeypatch, case, when, step, nth  # noqa: F811 - fixtures
+):
+    plan, expect = _prepare(case, tmp_path, run, northwind)
+    folder = default_config_folder()
+    before = _state(folder)
+    owner, name = (admin, "_sync") if step == "_sync" else (os, step)
+    real, calls = getattr(owner, name), []
+
+    def hooked(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == nth and when == "before":
+            os.kill(os.getpid(), signal.SIGTERM)
+        done = real(*args, **kwargs)
+        if len(calls) == nth and when == "after":
+            os.kill(os.getpid(), signal.SIGTERM)
+        return done
+
+    monkeypatch.setattr(owner, name, hooked)
+    code, out, err = run("admin-apply", plan, *expect)
+    monkeypatch.undo()
+    after = _state(folder)
+    said = out + err
+    assert "Traceback" not in said and _leftovers(folder) == [], (code, said)
+    if after != before:  # something was committed: never "nothing changed", never plain failure
+        assert UNCHANGED not in said, (code, said)
+        assert code in (0, 4), (code, said)
+        assert sorted(after) == ["portal-config.json", "trust-store.json"]
+        read_trust_store(read_settings(folder / "portal-config.json"))
+    else:
+        assert code in (1, 2) and UNCHANGED in said, (code, said)
+    if code == 0:  # success only with the change in place and read back
+        assert "Applied setup plan" in out and after != before
+    if code == 4:
+        assert "The change is complete" in err or "The new files are in place" in err, err
+
+
+def test_a_stop_while_the_committed_change_is_flushed_waits_for_the_flush(
+    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+):
+    """The stop is taken only once the folder holding the new files is on the disk itself."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    real, events = admin._sync, []
+
+    def flush(fd):
+        if os.path.exists(default_config_folder() / "portal-config.json") and "stop" not in events:
+            events.append("stop")
+            os.kill(os.getpid(), signal.SIGTERM)  # arrives during the flush of the committed change
+        real(fd)
+        events.append("flushed")
+
+    monkeypatch.setattr(admin, "_sync", flush)
+    code, _, err = run("admin-apply", plan, *_expect(northwind))
+    assert code == 4 and "stopped: The change is complete" in err, err
+    assert events[events.index("stop") + 1] == "flushed", events
+
+
+def test_guard_off_without_holding_the_stop_the_flush_of_the_committed_change_is_cut_short(
+    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+):
+    """The control: if stops were not held over the flush, the stop would land before it finished."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    real, events = admin._sync, []
+
+    @contextlib.contextmanager
+    def not_held():
+        yield
+
+    def flush(fd):
+        if os.path.exists(default_config_folder() / "portal-config.json") and "stop" not in events:
+            events.append("stop")
+            os.kill(os.getpid(), signal.SIGTERM)
+        real(fd)
+        events.append("flushed")
+
+    monkeypatch.setattr(admin, "_held_signals", not_held)
+    monkeypatch.setattr(admin, "_sync", flush)
+    code, _, err = run("admin-apply", plan, *_expect(northwind))
+    assert code == 4 and events[-1] == "stop", events
+
+
+def test_a_failed_flush_after_the_change_says_the_files_are_in_place_and_may_not_survive_a_power_cut(
+    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+):
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    real = admin._sync
+
+    def flush(fd):
+        if os.path.exists(default_config_folder() / "portal-config.json"):
+            raise OSError(5, "Input/output error")
+        real(fd)
+
+    monkeypatch.setattr(admin, "_sync", flush)
+    code, out, err = run("admin-apply", plan, *_expect(northwind))
+    assert code == 4 and UNCHANGED not in out + err
+    assert "failed: The new files are in place, but flushing them to the disk failed (Input/output error)" in err
+    assert sorted(p.name for p in default_config_folder().iterdir()) == ["portal-config.json", "trust-store.json"]
+
+
+# ----------------------------------------------------------------------------- standard output or error closed
+
+
+def _closed(account: Path, which: str, *argv: str) -> subprocess.CompletedProcess:
+    """Run the command with standard output (1), standard error (2) or both closed before it starts."""
+    closing = {"1": ">&-", "2": "2>&-", "both": ">&- 2>&-"}[which]
+    shell = f'exec "$@" {closing}'
+    return subprocess.run(  # noqa: S603 - /bin/sh with a fixed script, this interpreter, fixed arguments
+        ["/bin/sh", "-c", shell, "sh", sys.executable, "-m", "regaudit_portal", *argv],
+        env=_env(account), cwd=PORTAL, capture_output=which != "both", text=True, timeout=120, check=False,
+        stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+
+
+def _complete(folder: Path) -> None:
+    assert sorted(p.name for p in folder.iterdir()) == ["portal-config.json", "trust-store.json"]
+    read_trust_store(read_settings(folder / "portal-config.json"))
+
+
+def test_with_standard_output_closed_the_apply_completes_and_says_so_on_standard_error(home, tmp_path, northwind):  # noqa: F811
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    done = _closed(home, "1", "admin-apply", str(plan), *_expect(northwind))
+    assert done.returncode == 0, done.stderr
+    assert "Traceback" not in done.stderr and UNCHANGED not in done.stderr
+    assert done.stderr.startswith("Applied setup plan ") and "Standard output could not be written" in done.stderr
+    _complete(default_config_folder())
+
+
+def test_with_standard_error_closed_the_apply_completes_and_prints_everything_on_standard_output(
+    home, tmp_path, northwind  # noqa: F811
+):
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    done = _closed(home, "2", "admin-apply", str(plan), *_expect(northwind))
+    assert done.returncode == 0 and done.stdout.startswith("Applied setup plan ")
+    assert "Wrote trust-store.json" in done.stdout and "Enrolled:" in done.stdout
+    _complete(default_config_folder())
+
+
+def test_with_both_closed_the_status_alone_tells_and_matches_the_disk(home, tmp_path, northwind):  # noqa: F811
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    assert _closed(home, "both", "admin-describe", str(plan)).returncode == 0
+    assert _closed(home, "both", "admin-apply", str(plan), *_expect(northwind)).returncode == 0
+    _complete(default_config_folder())
+    before = _state(default_config_folder())
+    assert _closed(home, "both", "admin-apply", str(plan), *_expect(northwind)).returncode == 2  # already set up
+    assert _state(default_config_folder()) == before
+
+
+def test_with_standard_output_closed_a_refusal_is_still_said_on_standard_error(home, tmp_path, northwind):  # noqa: F811
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    wrong = ["--expect-fingerprint", f"{northwind.key_id}={'ab' * 32}"]
+    done = _closed(home, "1", "admin-apply", str(plan), *wrong)
+    assert done.returncode == 2 and done.stderr.startswith("refused: ") and UNCHANGED in done.stderr
+    assert not default_config_folder().exists()
+
+
+def test_guard_off_the_earlier_output_crashed_after_the_change_was_complete(
+    home, tmp_path, northwind, monkeypatch  # noqa: F811
+):
+    """The control: printing as before, with standard output closed (Python's None), the command raised after the
+    files were in place, so its status said failure while the disk said success."""
+
+    def earlier(text, err=False):
+        target = sys.stderr if err else sys.stdout
+        target.write(text + "\n")
+        target.flush()
+        return True
+
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    monkeypatch.setattr(admin, "_out", earlier)
+    monkeypatch.setattr(sys, "stdout", None)
+    with pytest.raises(AttributeError):
+        main(["admin-apply", str(plan), *_expect(northwind)])
+    _complete(default_config_folder())
+
+
+def test_now_with_standard_output_none_the_apply_returns_success(home, tmp_path, northwind, monkeypatch, capsys):  # noqa: F811
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    monkeypatch.setattr(sys, "stdout", None)
+    assert main(["admin-apply", str(plan), *_expect(northwind)]) == 0
+    assert "Standard output could not be written" in capsys.readouterr().err
+    _complete(default_config_folder())
+
+
+_RESERVE = """
+import os, sys
+from regaudit_portal import admin
+if sys.argv[1] == "reserve":
+    admin._reserve_standard_descriptors()
+fd = os.open(os.devnull, os.O_RDONLY)
+print(fd, file=open(sys.argv[2], "w"))
+"""
+
+
+@pytest.mark.parametrize("reserve, expected", [("reserve", lambda fd: fd > 2), ("off", lambda fd: fd == 2)])
+def test_a_closed_standard_error_is_never_reused_by_a_file_the_command_opens(tmp_path, reserve, expected):
+    """With the reservation, the first file opened does not get number 2; with it off (the control), it does, and a
+    library writing to standard error would write into it."""
+    told = tmp_path / "fd.txt"
+    subprocess.run(  # noqa: S603 - /bin/sh with a fixed script, this interpreter, fixed arguments
+        ["/bin/sh", "-c", 'exec "$@" 2>&-', "sh", sys.executable, "-c", _RESERVE, reserve, str(told)],
+        env={**os.environ, "PYTHONPATH": str(PORTAL)}, timeout=60, check=True, stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+    assert expected(int(told.read_text()))

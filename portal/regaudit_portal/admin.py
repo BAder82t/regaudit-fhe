@@ -46,7 +46,7 @@ import stat
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any
 
 from regaudit_fhe import (
     cli,
@@ -148,24 +148,64 @@ def _sync(fd: int) -> None:
     os.fsync(fd)
 
 
+def _flush_committed(fd: int) -> None:
+    """After the change is in place: flush the folder that now holds it, before a stop can be taken.
+
+    It runs while stops are held, so a stop is taken only once the change is on the disk itself. If the flush fails,
+    the words say exactly that: the files are in place, but may not survive a power cut.
+    """
+    try:
+        _sync(fd)
+    except OSError as exc:
+        raise Failed(
+            f"The new files are in place, but flushing them to the disk failed ({exc.strerror}). If the computer "
+            "loses power before it writes them out, the change may be lost. Restart the portal, and run check-config."
+        ) from exc
+
+
 # ----------------------------------------------------------------------------- output
 
 
-def _out(text: str, stream: TextIO | None = None) -> None:
-    """Print text with every control or invisible character made visible, line by line.
+def _out(text: str, err: bool = False) -> bool:
+    """Print text, on standard output or (``err``) standard error, with every control or invisible character made
+    visible, line by line. Says whether it was printed.
 
-    Printing never changes what happens to the files. If nobody reads the output any more, for example because the
-    launcher that started this command has quit, the rest of the output goes nowhere and the command carries on.
+    Printing never changes what happens to the files. A stream that was closed when the command started is not there
+    at all (Python sets it to ``None``): nothing is printed and the command carries on. If nobody reads the output any
+    more, for example because the launcher that started this command has quit, the rest of that output goes nowhere
+    and the command carries on.
     """
-    target = stream if stream is not None else sys.stdout
+    target = sys.stderr if err else sys.stdout
+    if target is None:
+        return False
     try:
         target.write("\n".join(shown(line, 100_000) for line in text.split("\n")) + "\n")
         target.flush()
-    except OSError:
+        return True
+    except (OSError, ValueError):
         with contextlib.suppress(OSError, ValueError, AttributeError):
             nowhere = os.open(os.devnull, os.O_WRONLY)
             os.dup2(nowhere, target.fileno())
             os.close(nowhere)
+        return False
+
+
+def _reserve_standard_descriptors() -> None:
+    """Put the null device on standard input, output or error if one was closed when the command started.
+
+    Otherwise the next file this command opens would get that number, and anything written to "standard error" by a
+    library would land in it: in a trust list, say. Python has already set a closed stream to ``None``, so nothing is
+    printed to the null device either: :func:`_out` skips it.
+    """
+    for number in (0, 1, 2):
+        try:
+            os.fstat(number)
+        except OSError:
+            with contextlib.suppress(OSError):
+                fd = os.open(os.devnull, os.O_RDWR)
+                if fd != number:
+                    os.dup2(fd, number)
+                    os.close(fd)
 
 
 # ----------------------------------------------------------------------------- the plan file and the fingerprints
@@ -572,7 +612,7 @@ def _staging(dir_fd: int, place: Path) -> Iterator[tuple[str, int, Path]]:
             _out(
                 f"Note: the temporary folder {place / name} could not be removed ({exc.strerror}). The portal does "
                 "not use it, and it can be deleted.",
-                sys.stderr,
+                err=True,
             )
         os.close(fd)
 
@@ -688,7 +728,7 @@ def _apply_first_setup(
                         f"meanwhile. {UNCHANGED}"
                     ) from exc
                 progress.committed = True
-            _sync(place.parent_fd)
+                _flush_committed(place.parent_fd)
         else:
             _link_both(place, staging_fd, progress)
     made = (
@@ -714,7 +754,7 @@ def _link_both(place: Destination, staging_fd: int, progress: Progress) -> None:
     staged = os.stat(TRUST_LIST_NAME, dir_fd=staging_fd, follow_symlinks=False)
     with _held_signals():
         _link_both_held(place, staging_fd, staged, progress)
-    _sync(place.folder_fd)
+        _flush_committed(place.folder_fd)
 
 
 def _link_both_held(
@@ -844,7 +884,7 @@ def _apply_add_issuers(
                 dst_dir_fd=place.folder_fd,
             )
             progress.committed = True
-        _sync(place.folder_fd)
+            _flush_committed(place.folder_fd)
     added = len(plan.issuers)
     return [
         f"Added {added} issuer{'' if added == 1 else 's'} to the trust list. The configuration was not changed.",
@@ -886,7 +926,10 @@ def _engine_or_refuse() -> None:
 
 
 def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[str]]:
-    """Would applying the plan here be refused, and why? Read-only: it opens folders and reads files, nothing else."""
+    """Would applying the plan here be refused, and why, and which folders did a stopped apply leave? Read-only: it
+    opens folders and reads files, nothing else. The leftovers are listed with any answer, a refusal included, once the
+    folders could be opened and checked."""
+    leftovers: list[str] = []
     try:
         with Destination(folder) as place:
             leftovers = place.leftovers()
@@ -902,11 +945,11 @@ def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[st
                 TrustStore.from_dict(json.loads(plan.trust_list_text(existing.payload)))
             return None, leftovers
     except Refused as exc:
-        return str(exc), []
+        return str(exc), leftovers
     except TrustStoreError as exc:
-        return f"The engine refuses the trust list it would make: {shown(str(exc))}", []
+        return f"The engine refuses the trust list it would make: {shown(str(exc))}", leftovers
     except OSError as exc:
-        return f"{folder} cannot be checked: {exc.strerror}.", []
+        return f"{folder} cannot be checked: {exc.strerror}.", leftovers
 
 
 def describe(args: Any) -> int:
@@ -923,7 +966,7 @@ def _describe(args: Any) -> int:
         if args.json:
             _out(json.dumps({"ok": False, "problem": str(exc)}, ensure_ascii=True))
         else:
-            _out(f"refused: {exc}", sys.stderr)
+            _out(f"refused: {exc}", err=True)
         return EXIT_REFUSED
     problem, leftovers = _describe_destination(folder, plan)
     origin = "the standard folder for this account" if standard else "given with --config-folder"
@@ -999,7 +1042,7 @@ def _stoppable(command: Any) -> int:
             return int(command(progress))
     except KeyboardInterrupt:
         code, said = _after(progress, "")
-        _out(f"stopped: {said}", sys.stderr)
+        _out(f"stopped: {said}", err=True)
         return code
 
 
@@ -1035,32 +1078,32 @@ def _apply(args: Any, progress: Progress) -> int:
                 report = _apply_first_setup(place, plan, checked, progress)
         _final_check(folder, plan)
     except Refused as exc:
-        _out(f"refused: {exc}", sys.stderr)
+        _out(f"refused: {exc}", err=True)
         return EXIT_DONE_BUT if progress.committed else EXIT_REFUSED
     except Failed as exc:
-        _out(f"failed: {exc}", sys.stderr)
+        _out(f"failed: {exc}", err=True)
         return EXIT_DONE_BUT if progress.committed else EXIT_FAILED
     except KeyboardInterrupt:
         code, said = _after(progress, "")
-        _out(f"stopped: {said}", sys.stderr)
+        _out(f"stopped: {said}", err=True)
         return code
     except OSError as exc:
         code, said = _after(
             progress, f"{exc.strerror or exc} ({errno.errorcode.get(exc.errno or 0, 'error')})."
         )
-        _out(f"failed: {said}", sys.stderr)
+        _out(f"failed: {said}", err=True)
         return code
     except (
         Exception
     ) as exc:  # only the kind is printed: the text of an unexpected error is not shown
         code, said = _after(progress, f"An unexpected {type(exc).__name__}.")
-        _out(f"failed: {said}", sys.stderr)
+        _out(f"failed: {said}", err=True)
         return code
     enrolled = [
         f"  {n}. {quoted(i.issuer)}, key id {i.key_id}, fingerprint {i.fingerprint}"
         for n, i in enumerate(plan.issuers, start=1)
     ]
-    _out(
+    said = _out(
         "\n".join(
             [
                 f"Applied setup plan {plan.content_sha256} in {folder}.",
@@ -1071,8 +1114,16 @@ def _apply(args: Any, progress: Progress) -> int:
             ]
         )
     )
+    if not said:
+        # The change is complete and checked, so this is still success. Say so where it can still be read.
+        _out(
+            f"Applied setup plan {plan.content_sha256} in {folder}. Standard output could not be written, so the "
+            f"list of what was written is not shown here. {_RESTART}",
+            err=True,
+        )
     return EXIT_DONE
 
 
 def run(args: Any) -> int:
+    _reserve_standard_descriptors()
     return describe(args) if args.command == "admin-describe" else apply(args)
