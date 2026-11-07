@@ -235,14 +235,20 @@ def test_the_docs_describe_the_explicit_trust_mode_the_label_and_the_limit_of_de
         for said in (
             "Demonstration trust is kept apart from customer trust.",
             "The mode is an explicit setting in the configuration, `trust_mode`",
-            "recognised by its exact fingerprint, is a demonstration whatever the setting says",
-            "No issuer name or key id decides it.",
+            "recognised by its exact fingerprint, never by a file name, issuer name or key id.",
+            'A trust list that holds it is used only with `"trust_mode": "demonstration"`.',
+            "or with no `trust_mode`",
+            "the configuration is refused",
+            "A changed key is",
+            "the bundled samples are `INVALID` against it",
             "labels every result and every saved result `DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED`",
             "next to the verifier's own verdict and reason codes",
-            "Known limit: `demo-setup` makes new keys each time, and nothing can tell them apart from real keys.",
-            "That setting is the only control for those keys",
+            "Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys "
+            "apart from real keys.",
+            "This applies only to folders made by those earlier versions.",
         ):
             assert said in text, said
+        assert "whatever the setting says" not in text
         assert "is still accepted for verification" not in text
         assert "key or name" not in text and "keys or names" not in text
     readme = README.read_text()

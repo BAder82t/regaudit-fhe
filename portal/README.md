@@ -41,7 +41,9 @@ You need an internet connection for the install. These steps use only made-up ke
 
 In the file chooser, press Cmd+Shift+G on a Mac (Ctrl+L on Linux), paste `~/portal-demo/sample-reports` and press Enter. The full path is `/Users/YOURNAME/portal-demo/sample-reports` on a Mac and `/home/YOURNAME/portal-demo/sample-reports` on Linux. Or open that folder in Finder or your file manager and drag a file onto the page.
 
-These files are a demonstration, and `demo-setup` writes `"trust_mode": "demonstration"` into its configuration. The portal checks them only as a demonstration: the page shows the mode and says so before you choose a file, every result and every saved result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, and the portal says your own reports are not set up.
+These files are a demonstration. `demo-setup` copies the demonstration trust list and the signed sample reports that come with the portal, and writes `"trust_mode": "demonstration"` into its configuration. The portal checks them only as a demonstration: the page shows the mode and says so before you choose a file, every result and every saved result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, and the portal says your own reports are not set up. Nothing in these files can sign anything: the key that signed the reports was thrown away when they were made.
+
+The sample reports were signed once, on 2026-10-01, so the demonstration configuration allows reports up to 3650 days old, the longest a configuration may give. They verify until 2036-09-28. That long age is accepted only because this is a demonstration, and the setup page says so. The profile is confidential and the replay mode is check, as in a real setup.
 
 Press Ctrl-C in the terminal to stop the portal. It stops cleanly and prints one line. The sample reports are synthetic and show each outcome:
 
@@ -49,11 +51,12 @@ Press Ctrl-C in the terminal to stop the portal. It stops cleanly and prints one
 |---|---|
 | `1-trusted.json` | `TRUSTED`. The report says it was computed on plaintext, so the page says there was no encryption |
 | `2-untrusted-signer.json` | `INVALID`, because the signing key is not enrolled |
-| `3-valid-signature-wrong-issuer.json` | `INVALID`. The signature is valid, but the report names the wrong issuer |
-| `4-changed-after-signing.json` | `INVALID`, because the contents no longer match the signature |
-| `5-not-a-report.json` | No verdict, because this is not a report |
-| `6-too-large.json` | No verdict, because it is over the 1 MB limit (1,048,576 bytes) |
-| `7-declares-encrypted-backend.json` | `TRUSTED`. The report says it used an encrypted backend. Nothing was encrypted: the file only says so, and the page says it cannot verify that |
+| `3-changed-after-signing.json` | `INVALID`, because the contents no longer match the signature |
+| `4-not-a-report.json` | No verdict, because this is not a report |
+| `5-too-large.json` | No verdict, because it is over the 1 MB limit (1,048,576 bytes) |
+| `6-declares-encrypted-backend.json` | `TRUSTED`. The report says it used an encrypted backend. Nothing was encrypted: the file only says so, and the page says it cannot verify that |
+
+Earlier versions of `demo-setup` also made a report with a valid signature that names the wrong issuer. It cannot be made again, because no private key for the demonstration key exists, so it is no longer part of the demonstration.
 
 ## Keeping it running
 
@@ -230,9 +233,13 @@ What `admin-apply` holds to:
 - Only one can run at a time for a folder.
 - It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
 
-Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. A trust list that holds one of the portal's bundled demonstration keys, recognised by its exact fingerprint, is a demonstration whatever the setting says. No issuer name or key id decides it. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
+Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
 
-Known limit: `demo-setup` makes new keys each time, and nothing can tell them apart from real keys. A copy of its trust list under a configuration without `"trust_mode": "demonstration"` is therefore treated as customer trust, and its sample reports then verify as trusted. That setting is the only control for those keys, so never copy the `demo-setup` files into a real configuration.
+The portal's bundled demonstration key is recognised by its exact fingerprint, never by a file name, issuer name or key id. A trust list that holds it is used only with `"trust_mode": "demonstration"`. With `"trust_mode": "customer"`, or with no `trust_mode` at all, the configuration is refused: `check-config` says why and exits with code 3, the page says the portal cannot check your own reports and why, and an uploaded report gets no verdict. So copying or renaming the demonstration files never makes the demonstration key customer trust. A changed key is simply a different key. It is treated as an ordinary key, it accepts only reports signed with its own private key, and the bundled samples are `INVALID` against it.
+
+A configuration without `trust_mode` whose trust list does not hold the bundled key is customer trust, as configurations made before the setting existed are. `admin-apply` always writes `"trust_mode": "customer"`.
+
+Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys apart from real keys. Their folders keep working as a demonstration through `"trust_mode": "demonstration"`, but a copy of such a trust list under a configuration without that setting is treated as customer trust, and its sample reports then verify as trusted. This applies only to folders made by those earlier versions. Never copy demonstration files into a real configuration.
 
 What stays manual is getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
 
