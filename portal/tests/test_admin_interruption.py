@@ -309,12 +309,6 @@ def test_a_stop_right_after_the_package_starts_ends_plainly(home, tmp_path, nort
     _plain_stop(_start_and_stop(home, _STOP_RIGHT_AFTER_THE_PACKAGE_STARTS, sig, command, str(plan), *extra), home)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="needs a SIGHUP handler for the administrator commands in regaudit_portal/__init__.py, which is frozen "
-    "on this branch: until the entry point holds stops, a hang-up ends the process by the signal and leaves the "
-    "private bytecode folder behind",
-)
 @pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
 def test_a_hang_up_right_after_the_package_starts_ends_plainly(home, tmp_path, northwind, command):  # noqa: F811
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
