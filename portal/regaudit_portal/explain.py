@@ -348,16 +348,28 @@ _DEMONSTRATION_WORDS = (
         "Do not rely on this report. Ask whoever sent it for a new copy, or ask your administrator.",
         "This is a demonstration, so there is nothing to act on.",
     ),
-    ("an issuer your administrator approved", "the demonstration issuer"),
-    ("an issuer your administrator trusts", "the demonstration issuer"),
+    # The issuer line never says "approved" for a demonstration: a key in a demonstration trust list is listed there,
+    # nothing more. Whatever key it is, it is never called "the demonstration issuer": a demonstration configuration
+    # can list any key, so the words say only where the key was found.
+    (
+        "Passed: this key is approved for this issuer under your administrator's rules.",
+        "Passed: this key is listed for this issuer in the demonstration trust list.",
+    ),
+    ("Not approved for this report:", "Not accepted for this report:"),
+    ("Not approved:", "Not accepted:"),
+    ("Nobody your administrator trusts", "No key in the demonstration trust list"),
+    ("an issuer your administrator approved", "an issuer listed in the demonstration trust list"),
+    ("an issuer your administrator trusts", "an issuer listed in the demonstration trust list"),
     ("the key your administrator enrolled", "the key in the demonstration trust list"),
     ("your administrator's list of trusted keys", "the demonstration trust list"),
     ("your administrator's list", "the demonstration trust list"),
     ("your administrator's trust list", "the demonstration trust list"),
+    ("your administrator's rules for a", "the demonstration's rules for a"),
     ("your administrator's rules", "the demonstration trust list"),
     ("your administrator's maximum age", "the demonstration's maximum age"),
     ("your administrator", "the demonstration setup"),
     ("the administrator", "the demonstration setup"),
+    ("The administrator", "The demonstration setup"),
 )
 
 
@@ -393,5 +405,6 @@ def describe(
             reason["meaning"] = _about_the_demonstration(reason["meaning"])
         for warning in explained["warnings"]:
             warning["message"] = _about_the_demonstration(warning["message"])
+        explained["display"]["issuer_note"] = _about_the_demonstration(explained["display"]["issuer_note"])
         explained["warnings"].insert(0, {"code": "DEMONSTRATION_ONLY", "message": notice})
     return explained
