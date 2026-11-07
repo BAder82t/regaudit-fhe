@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrator setup - Evidence Verification Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/static/vaultbytes-mark.svg">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <header class="navbar">
+    <div class="container nav-wrapper">
+      <a class="logo" href="/"><img class="logo-icon" src="/static/vaultbytes-mark.svg" alt="" width="40" height="40"><span class="logo-text">VaultBytes</span></a>
+      <nav aria-label="Portal">
+        <ul class="nav-menu">
+          <li><a href="/">Portal</a></li>
+          <li><a href="/setup" aria-current="page">Setup</a></li>
+          <li><a href="/security">Security</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="page-title">
+      <h1>Evidence Verification Portal</h1>
+      <p class="lead">Administrator setup</p>
+      <div class="title-underline"></div>
+    </div>
+    <section class="panel">
+      <h2>This page only reads</h2>
+      <p>It shows what is set up and what is not, and it explains what an administrator has to prepare. It does not create or change anything: no trust list, no key, no setting, no approval. It never asks for a signing key and never shows one.</p>
+      <p id="own-reports" class="statement"></p>
+    </section>
+
+    <section id="status" class="panel">
+      <h2>Status</h2>
+      <p id="status-message" class="fine">Looking at what is set up...</p>
+      <dl id="rows" class="checks"></dl>
+    </section>
+
+    <section class="panel">
+      <h2>What an administrator has to prepare</h2>
+      <ol>
+        <li><strong>The issuers' fingerprints.</strong> Ask each issuer whose reports you will accept for the fingerprint of their public key, and for the public key file. They must reach you by another route than the report itself, such as a call or a signed message. A report cannot vouch for its own key.</li>
+        <li><strong>A trust list.</strong> A file that lists the keys you accept, each with the name of its issuer. It is made with the command below, once for each key.</li>
+        <li><strong>A configuration file</strong> that names the trust list and your rules: the profile, your verifier name, the oldest report you accept and how repeats are handled.</li>
+      </ol>
+    </section>
+
+    <section class="panel">
+      <h2>Where the files go</h2>
+      <p>Put both files in one folder that only your account can change. On this computer the standard folder is:</p>
+      <p><code id="folder"></code></p>
+      <p>The configuration file is called <code id="file-name"></code>. The trust list goes next to it, and the configuration names it. The folder must belong to your account and must not be writable by group or others. The portal checks this when it starts and gives no verdicts for your own reports if it is not so. Restart the portal after any change.</p>
+      <p>An example of the configuration file:</p>
+      <pre>{
+  "trust_store": "trust-store.json",
+  "profile": "confidential",
+  "verifier_id": "your-organization",
+  "max_age_days": 30,
+  "replay_mode": "check",
+  "replay_db": "replay.db"
+}</pre>
+    </section>
+
+    <section class="panel">
+      <h2>The commands that make the trust list</h2>
+      <p id="cmd-intro">Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. It refuses a key whose fingerprint does not match the one you received.</p>
+      <pre id="cmd-trust-add">regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
+  --public-key issuer.pub --fingerprint FINGERPRINT</pre>
+      <p>To look at the result, run <code id="cmd-check-config">regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
+      <p><strong>For now, making the trust list needs these commands.</strong> Creating it in the browser would be a separate change that has to be designed and reviewed on its own. This page does not do it.</p>
+    </section>
+
+    <section class="panel">
+      <h2>What you can rely on</h2>
+      <p>Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
+      <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
+    </section>
+
+    <p><a href="/">Back to the portal</a></p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p class="copyright">&copy; 2026 VaultBytes Innovations Ltd.</p>
+    </div>
+  </footer>
+  <script src="/static/setup.js"></script>
+</body>
+</html>
