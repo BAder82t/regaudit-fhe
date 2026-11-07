@@ -1,0 +1,6 @@
+# The build backend that portal/pyproject.toml asks for (setuptools>=77), pinned by version and SHA-256, so that the
+# Portal's own wheel is built in CI from this checkout with nothing fetched unpinned. setuptools has no dependencies.
+# Install with
+#   pip install --require-hashes --only-binary=:all: --no-deps -r portal/ci/build-requirements.lock
+setuptools==84.2.1 \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
