@@ -72,6 +72,12 @@ def _is_the_program() -> bool:
     return first == "-m" or os.path.basename(first) in ("regaudit-portal", "regaudit-portal.exe")
 
 
+def _is_an_administrator_command() -> bool:
+    """The two commands that change a trust list on disk. A hang-up (SIGHUP) in their first moments is handled like a stop,
+    so that nothing is left half done. The portal itself is not one of them and keeps its own behaviour."""
+    return sys.argv[1:2] in (["admin-describe"], ["admin-apply"])
+
+
 def _stop_quietly_while_starting() -> None:
     if not _is_the_program():  # never a program that merely imports this package
         return
@@ -84,6 +90,13 @@ def _stop_quietly_while_starting() -> None:
             signal.signal(signal.SIGTERM, _stop_while_starting)
         if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
             signal.signal(signal.SIGINT, _stop_while_starting)
+        hangup = getattr(signal, "SIGHUP", None)
+        if (
+            hangup is not None
+            and _is_an_administrator_command()
+            and signal.getsignal(hangup) == signal.SIG_DFL
+        ):
+            signal.signal(hangup, _stop_while_starting)
     except ValueError:  # not the main thread: signals cannot be set from here
         pass
 
@@ -100,6 +113,8 @@ def _use_a_private_bytecode_cache() -> str:
     # A stop that arrives between making the folder and remembering it would leave it behind: hold such a request
     # over those few steps. It is delivered, and handled with the folder known, when they are done.
     held = {signal.SIGTERM, signal.SIGINT}
+    if _is_an_administrator_command() and hasattr(signal, "SIGHUP"):
+        held.add(signal.SIGHUP)
     program = _is_the_program()
     before = (
         signal.pthread_sigmask(signal.SIG_BLOCK, held)

@@ -40,7 +40,7 @@ def _wait_listening(proc):
             return line
         if proc.poll() is not None:
             break
-    pytest.fail("the portal did not start")
+    raise AssertionError("the portal did not start")
 
 
 def test_closing_standard_input_stops_the_portal_cleanly():

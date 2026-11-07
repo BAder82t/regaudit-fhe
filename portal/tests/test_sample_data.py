@@ -18,7 +18,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import regaudit_fhe.verification as engine_verification
 from regaudit_fhe.report_v2 import parse_envelope_strict
 from regaudit_fhe.trust import TrustStore
-from regaudit_fhe.verification import VerificationPolicy
 
 PORTAL = Path(__file__).parents[1]
 PACKAGE = PORTAL / "regaudit_portal"
@@ -47,7 +46,7 @@ def _bundled(*parts: str) -> bytes:
 def engine_verdict(sample_id: str) -> dict:
     """What the engine says about a bundled file under the demonstration policy, built here from the bundled files."""
     store = TrustStore.from_dict(json.loads(_bundled("demo-trust-list.json")))
-    policy = VerificationPolicy(
+    policy = engine_verification.VerificationPolicy(
         profile="development",
         trust_store=store,
         verifier_id="demo-verifier",
@@ -212,7 +211,7 @@ def test_the_script_signs_with_a_throwaway_key_and_writes_nothing_that_can_sign(
         ["index.json", "demo-trust-list.json", *(f"{i}.json" for i in SAMPLE_IDS)]
     )
     store = TrustStore.from_dict(json.loads((first / "demo-trust-list.json").read_text()))
-    policy = VerificationPolicy(
+    policy = engine_verification.VerificationPolicy(
         profile="development", trust_store=store, verifier_id="demo-verifier",
         clock_skew=timedelta(days=36500), check_provenance=True,
     )  # fmt: skip
