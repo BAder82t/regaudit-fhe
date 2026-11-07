@@ -26,6 +26,7 @@ import signal
 import socket
 import sys
 import threading
+from collections.abc import Callable
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
 from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _stop_while_starting
@@ -99,21 +100,34 @@ GRACEFUL_SHUTDOWN_SECONDS = 3
 
 _stop_requested = False
 _serving = False  # set when the portal starts to serve; before that, the package's own handler takes the stop
+# How the server that is running, or about to run, is asked to finish: set just before it starts. Until then a stop is
+# only recorded, and the portal does not start to serve.
+_ask_server_to_stop: Callable[[], None] | None = None
 
 
 def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
     """One stop is enough. A second request while the first is being handled (a signal, and then the launcher's input
-    closing) must not raise again in the middle of the clean-up. If something between here and the top of the program
-    swallows the interrupt, the portal still leaves: a timer ends it after STOP_DEADLINE_SECONDS."""
+    closing) changes nothing.
+
+    While the portal serves, the stop is recorded and the server is asked to finish, which it does at its next safe
+    point: it stops taking requests, lets those in progress end (for at most GRACEFUL_SHUTDOWN_SECONDS), closes, and
+    the program returns normally, so the private folder is removed on the way out. Nothing is raised here: a signal's
+    handler can run inside any Python code, a garbage collector's weakref callback included, and an exception raised
+    there is printed as "Exception ignored" and dropped, so the stop would be lost. If the portal has still not gone
+    after STOP_DEADLINE_SECONDS, a timer ends it. Any other command has nothing to finish and stops at once, as Ctrl-C
+    does."""
     global _stop_requested
     if _stop_requested:
         return
     _stop_requested = True
-    if _serving:
-        deadline = threading.Timer(STOP_DEADLINE_SECONDS, _leave_now)
-        deadline.daemon = True
-        deadline.start()
-    raise KeyboardInterrupt
+    if not _serving:
+        raise KeyboardInterrupt
+    deadline = threading.Timer(STOP_DEADLINE_SECONDS, _leave_now)
+    deadline.daemon = True
+    deadline.start()
+    ask = _ask_server_to_stop
+    if ask is not None:
+        ask()
 
 
 def _leaving() -> None:
@@ -154,7 +168,9 @@ def _hand_over_from_the_early_stop(serving: bool) -> None:
     global _serving
     _serving = serving or _serving
     if signal.getsignal(signal.SIGINT) == _stop_while_starting:
-        signal.signal(signal.SIGINT, signal.default_int_handler)
+        # The portal takes Ctrl-C the way it takes SIGTERM: recorded and handled at a safe point (see
+        # _stop_like_ctrl_c). Any other command stops with a KeyboardInterrupt, as before.
+        signal.signal(signal.SIGINT, _stop_like_ctrl_c if _serving else signal.default_int_handler)
     if signal.getsignal(signal.SIGTERM) == _stop_while_starting:
         signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
 
@@ -214,10 +230,25 @@ def _run(app: object, sock: socket.socket, mode: str) -> None:
     )
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
     logging.getLogger("uvicorn.error").addFilter(_DropCancelledRequests())
-    with contextlib.suppress(KeyboardInterrupt):
-        Announcing(config).run(sockets=[sock])
+    server = Announcing(config)
+    _ask_server_to_stop_with(lambda: setattr(server, "should_exit", True))
+    # uvicorn takes SIGINT and SIGTERM itself while it serves, and gives them back to _stop_like_ctrl_c when it has
+    # finished. A stop that came before this point was recorded: then the portal does not start to serve at all. One
+    # that comes between here and uvicorn taking the signals sets should_exit, which uvicorn checks before it serves.
+    if not _stop_requested:
+        # A KeyboardInterrupt can still come from a Ctrl-C handler this program did not set.
+        with contextlib.suppress(KeyboardInterrupt):
+            server.run(sockets=[sock])
     _leaving()
     print(STOPPED, flush=True)  # a start that failed raised SystemExit above and does not get here
+
+
+def _ask_server_to_stop_with(ask: Callable[[], None]) -> None:
+    """Say how the server is asked to finish. A stop recorded before this is passed on at once."""
+    global _ask_server_to_stop
+    _ask_server_to_stop = ask
+    if _stop_requested:
+        ask()
 
 
 def portal_command(argv0: str, python: str) -> str:
@@ -249,6 +280,9 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     # private bytecode folder is removed on the way out.
     _hand_over_from_the_early_stop(True)
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    # serve_forever ends at its next poll once shutdown() is called. shutdown() waits for that, so it is called from a
+    # thread of its own and never from the handler, which runs in the serving thread.
+    _ask_server_to_stop_with(lambda: threading.Thread(target=server.shutdown, daemon=True).start())
     try:
         print(listening_line(port, "unavailable"), flush=True)
         print(
@@ -257,7 +291,9 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
             flush=True,
         )
         server.serve_forever()
-    except KeyboardInterrupt:
+        _leaving()
+        print(STOPPED, flush=True)
+    except KeyboardInterrupt:  # a Ctrl-C handler this program did not set, if any
         _leaving()
         print(STOPPED, flush=True)
     finally:

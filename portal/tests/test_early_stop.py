@@ -562,3 +562,103 @@ def test_a_hang_up_to_a_serving_portal_keeps_its_behaviour(tmp_path):
         if proc2.poll() is None:
             proc2.kill()
     _assert_quiet_stop(proc2, out2, tmp2)
+
+
+_STOP_INSIDE_A_CALLBACK = """
+import os, signal, sys, weakref
+which = getattr(signal, sys.argv[1])
+sys.argv[:] = ["-m", "serve", "--port", "0"]  # what "python -m regaudit_portal serve" sees
+import regaudit_portal
+from regaudit_portal import __main__ as entry
+import uvicorn
+
+real_run = uvicorn.Server.run
+
+
+def run(self, sockets=None):
+    class Thing:
+        pass
+
+    thing = Thing()
+
+    def callback(_ref):
+        os.kill(os.getpid(), which)
+        for _ in range(1000):  # Python code: the signal's handler runs here, inside the callback
+            pass
+
+    keep = weakref.ref(thing, callback)
+    del thing  # the callback runs now, as the garbage collector runs one
+    return real_run(self, sockets)
+
+
+uvicorn.Server.run = run
+sys.exit(entry.main(sys.argv[1:]))
+"""
+
+
+@pytest.mark.parametrize("sig", ["SIGTERM", "SIGINT"])
+def test_a_stop_that_arrives_inside_a_weakref_callback_is_not_lost(sig, tmp_path):
+    """The handler of a stop can run inside any Python code, a garbage collector's weakref callback included, where an
+    exception is printed as "Exception ignored" and dropped. A stop arriving there, just as the portal starts to serve,
+    must still end it at once, quietly: not by the deadline, and not with a traceback."""
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    home.mkdir(mode=0o700)
+    tmp.mkdir(mode=0o700)
+    started = time.time()
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-B", "-c", _STOP_INSIDE_A_CALLBACK, sig],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        preexec_fn=_default_signals,
+    )
+    try:
+        out = proc.communicate(timeout=20)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            out = proc.communicate()[0]
+    _assert_quiet_stop(proc, out, tmp)
+    assert time.time() - started < 4.5, "the stop was lost and only the deadline ended the portal"
+
+
+_STOP_WHILE_PRINTING = """
+import sys
+sys.argv[:] = ["-m", "serve"]  # what "python -m regaudit_portal serve" sees
+import regaudit_portal  # the earliest stop handler is in, and the private folder is made
+sys.stderr.write("printing\\n")
+sys.stderr.flush()
+print("x" * 4_000_000, flush=True)  # nobody reads yet, so this blocks inside print, holding the stream
+"""
+
+
+def test_the_earliest_stop_says_so_even_while_print_holds_the_output(tmp_path):
+    """Python runs a pending handler between the pieces of a long write, with the output stream locked. A stop then
+    must still say that the portal stopped, not fail silently with a "reentrant call" inside print."""
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    home.mkdir(mode=0o700)
+    tmp.mkdir(mode=0o700)
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-B", "-c", _STOP_WHILE_PRINTING],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        preexec_fn=_default_signals,
+    )
+    try:
+        assert proc.stderr.readline() == "printing\n"
+        time.sleep(0.5)  # the write is blocked: the pipe is full and nothing reads it
+        proc.send_signal(signal.SIGTERM)
+        out, err = proc.communicate(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            out, err = proc.communicate()
+    _assert_quiet_stop(proc, out + err, tmp)
+    assert out.endswith(STOPPED + "\n"), out[-200:]

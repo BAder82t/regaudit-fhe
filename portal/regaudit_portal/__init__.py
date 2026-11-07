@@ -48,6 +48,12 @@ def _leave_now() -> None:
     it only partly made. The portal itself stops with status 0 and says so. Any other command (check-config,
     demo-setup, the administrator commands) has not done anything yet when this runs, so it says that, and leaves with
     status 1: a script that runs it must never take a stop for success.
+
+    The words are written to the output's descriptor itself, not with print or a flush: a signal's handler can run
+    while the program is inside print, holding the output stream's lock (Python runs pending handlers between the
+    pieces of a write), and print would then fail with "reentrant call" and say nothing. From the deadline's timer
+    thread, taking that lock could wait for ever on a write that is stuck. The portal prints its own lines with
+    flush, so nothing of its own is left waiting in the stream.
     """
     folder, rmtree = _folder, _rmtree
     if folder is not None and rmtree is not None:
@@ -56,10 +62,13 @@ def _leave_now() -> None:
         except Exception:  # noqa: S110 - nothing may get in the way of leaving
             pass
     serving = sys.argv[1:2] == ["serve"]
-    try:  # noqa: SIM105 - contextlib is not imported here: nothing may be imported by this handler
-        print(STOPPED if serving else "stopped: Nothing was changed.", flush=True)
-    except Exception:  # noqa: S110 - nothing may get in the way of leaving
-        pass
+    words = (STOPPED if serving else "stopped: Nothing was changed.") + "\n"
+    stream = sys.stdout
+    if stream is not None:
+        try:  # noqa: SIM105 - contextlib is not imported here: nothing may be imported by this handler
+            os.write(stream.fileno(), words.encode())
+        except Exception:  # noqa: S110 - nothing may get in the way of leaving
+            pass
     os._exit(0 if serving else 1)
 
 
