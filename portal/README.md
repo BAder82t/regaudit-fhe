@@ -181,7 +181,8 @@ The page cannot change the trust rules. They live in a configuration file that i
   "verifier_id": "your-organization",
   "max_age_days": 30,
   "replay_mode": "check",
-  "replay_db": "replay.db"
+  "replay_db": "replay.db",
+  "trust_mode": "customer"
 }
 ```
 
@@ -198,6 +199,7 @@ Paths are relative to the configuration file.
 - `verifier_id` is the name your organization is known by to report issuers. A report that names its intended recipients (an `audience`) is refused unless that list includes this `verifier_id`. A report that names no audience is not refused for this reason, except under `high-assurance`, which refuses any report that names no audience. The demo uses `demo-verifier`.
 - `max_age_days` is the oldest report you will accept. Do not raise it while you keep using the same replay file: the published [replay limitations](../docs/advisories/replay-limitations-0.2.1.md) explain why.
 - `replay_mode` is `check` or `record`. With `check`, looking at a report twice gives the same answer, and each result warns that the report was not recorded as used. With `record`, the second check of a report is refused as a repeat. Either way, repeat detection only knows what this portal's own replay file holds.
+- `trust_mode` is `customer` for trust you set up, or `demonstration` for the files `demo-setup` makes. Write it in every configuration. A configuration without it still works for now, with a warning: see [Guided administrator setup](#guided-administrator-setup) below.
 
 The configuration file, trust store, replay file and the folders holding them must belong to the account running the portal, or to root for the first two, and must not be writable by group or others. Otherwise the page says it is not ready and gives no verdicts. This is a basic start-up check the portal makes itself, from owner and permission bits. It is not the protection that the [security limitation](#security-limitation--published-v021) below says published v0.2.1 lacks, and it does not stop the same account, or an administrator, changing the files after start-up. Keep these files in a folder that only administrators can use.
 
@@ -236,7 +238,23 @@ Demonstration trust is kept apart from customer trust. The mode is an explicit s
 
 The portal's bundled demonstration key is recognised by its exact fingerprint, never by a file name, issuer name or key id. A trust list that holds it is used only with `"trust_mode": "demonstration"`. With `"trust_mode": "customer"`, or with no `trust_mode` at all, the configuration is refused: `check-config` says why and exits with code 3, the page says the portal cannot check your own reports and why, and an uploaded report gets no verdict. So copying or renaming the demonstration files never makes the demonstration key customer trust. A changed key is simply a different key. It is treated as an ordinary key, it accepts only reports signed with its own private key, and the bundled samples are `INVALID` against it.
 
-A configuration without `trust_mode` whose trust list does not hold the bundled key is customer trust, as configurations made before the setting existed are. `admin-apply` always writes `"trust_mode": "customer"`.
+Every new configuration says its trust mode. `admin-apply` always writes `"trust_mode": "customer"` and refuses to write a configuration without it, `demo-setup` writes `"demonstration"`, and the example above includes it. Any other value, or a value that is not text, is refused, as is the bundled demonstration key without `"trust_mode": "demonstration"`.
+
+A configuration without `trust_mode`, whose trust list does not hold the bundled key, is still used as customer trust, as configurations made before the setting existed were. Its verdicts are exactly as before. For now it gets this warning, word for word:
+
+```
+This configuration does not specify `trust_mode`. It is currently treated as a legacy customer configuration. Explicitly set `trust_mode: customer` after reviewing the trusted keys. A future release will require this setting.
+```
+
+`check-config` prints the warning on standard error and still exits with status 0, then prints `usable: ...` as usual. The portal's start-up log shows it, the setup page shows it as a "Trust mode setting" row marked Warning, and `/api/setup` lists it under `warnings`. `admin-describe` and `admin-apply` also print it when they add issuers to such a configuration. Nothing rewrites the configuration or the trust list for you.
+
+To move such a configuration on, do this yourself:
+
+1. Review every key in the trust list with its issuer, by a call or another route than the one the key came by.
+2. Add `"trust_mode": "customer"` to the configuration file.
+3. Restart the portal. `check-config` then prints no warning.
+
+A later release will refuse a configuration without `trust_mode`. That is a change for that release. This one still accepts it, with the warning.
 
 Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys apart from real keys. Their folders keep working as a demonstration through `"trust_mode": "demonstration"`, but a copy of such a trust list under a configuration without that setting is treated as customer trust, and its sample reports then verify as trusted. This applies only to folders made by those earlier versions. Never copy demonstration files into a real configuration.
 
