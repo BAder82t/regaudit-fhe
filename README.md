@@ -57,19 +57,19 @@ The verdict depends on the trusted issuers your administrator configured. A vali
 
 **1. Upload.** Choose a signed report file. Uploads are limited to 1 MB, checked and not kept.
 
-![The Portal start page with a drop area for a report file and a Verify report button](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/master/docs/images/portal/portal-upload.png)
+![The Portal start page with a drop area for a report file and a Verify report button](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-upload.png)
 
 *The start page before a report is chosen. The security limitation notice is on every page.*
 
 **2. Verify.** Press **Verify report**. The verdict is the verifier's own `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`, shown with the reason, the limits of the result and the encryption claims as the signer states them.
 
-![The Portal result for a synthetic sample whose signing key is not in the demonstration trust list: verdict INVALID, reason code ISSUER_UNKNOWN, the limits of the result and the encryption claims shown as statements](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/master/docs/images/portal/portal-verification-result.png)
+![The Portal result for a synthetic sample whose signing key is not in the demonstration trust list: verdict INVALID, reason code ISSUER_UNKNOWN, the limits of the result and the encryption claims shown as statements](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-verification-result.png)
 
 *A synthetic sample signed with a key that is not in the demonstration trust list. The verdict is INVALID with reason code ISSUER_UNKNOWN. The issuer name is shown as stated in the report, not confirmed.*
 
 **3. Export.** Press **Download result** to save the result as a JSON file.
 
-![The Save the result step of the Portal with the Download result button and the saved file name](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/master/docs/images/portal/portal-export.png)
+![The Save the result step of the Portal with the Download result button and the saved file name](https://raw.githubusercontent.com/BAder82t/regaudit-fhe/82ea82ab6543223f030d21b307f2aad255ee5419/docs/images/portal/portal-export.png)
 
 *The export step after Download result was pressed. The page names the saved file, here `verification-result-2-untrusted-signer-db1e36adac7f.json`, which comes from the same synthetic sample.*
 
