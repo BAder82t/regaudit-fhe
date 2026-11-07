@@ -8,6 +8,7 @@ const STATES = {
   missing: "Not set up",
   problem: "Needs attention",
   not_checked: "Not checked yet",
+  warning: "Warning",
   demonstration: "DEMONSTRATION — NOT CUSTOMER-TRUSTED", // the one label, exactly
 };
 

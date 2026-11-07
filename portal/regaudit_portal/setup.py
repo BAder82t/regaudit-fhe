@@ -24,6 +24,7 @@ from .config import (
     Settings,
     approved_entries,
     check_replay_location,
+    legacy_warnings,
     read_settings,
     read_trust_store,
     trust_mode_of,
@@ -94,6 +95,10 @@ _WHY = {
         "configuration that does not say it is a demonstration is refused."
     ),
     "development": "The development profile relaxes checks, and every result says not to rely on it.",
+    "legacy_trust_mode": (
+        "Without the setting, nothing in the configuration says that its trust list was reviewed as customer trust. "
+        "It still works as before, and nothing is changed for you."
+    ),
     "replay": (
         "Without a usable replay file the portal cannot tell a repeated report, so it does not check your own reports."
     ),
@@ -117,6 +122,10 @@ _STATE_NEXT = {
         "Remove the demonstration key from the trust list, or prepare and apply a setup plan with your issuers' real "
         "keys in a new folder. To use the list only as a demonstration, the configuration must say "
         '"trust_mode": "demonstration".'
+    ),
+    "legacy_trust_mode": (
+        "Review every key in the trust list with its issuer. Then add \"trust_mode\": \"customer\" to the "
+        "configuration yourself and restart the portal. The portal never rewrites the configuration."
     ),
     "development": (
         "To have the replay and format checks enforced, change the profile in the configuration to confidential or high-assurance "
@@ -177,6 +186,7 @@ _DEMONSTRATION_AGE = (
 _CONFIGURATION = "Configuration found and valid"
 _POLICY = "Trust policy (profile)"
 _TRUST = "Trust list found and valid"
+_TRUST_MODE = "Trust mode setting"
 _REPLAY = "Replay setting"
 _FILES = "File ownership and permission check"
 _AFTER_CONFIGURATION = "Not checked until the configuration is found and valid."
@@ -252,6 +262,7 @@ def readiness(
             _STATE_NEXT["configuration_invalid"],
         )
 
+    warnings: list[str] = []
     if settings is None:
         policy = _row("trust_policy", _POLICY, "not_checked", _AFTER_CONFIGURATION)
         trust = _row("trust_list", _TRUST, "not_checked", _AFTER_CONFIGURATION)
@@ -278,6 +289,7 @@ def readiness(
         try:
             store = read_trust_store(settings)
             kind, reason = trust_mode_of(settings, store)
+            warnings = list(legacy_warnings(settings, kind))
             demonstration = kind == "demonstration"
             if demonstration:
                 trust = _row(
@@ -386,6 +398,19 @@ def readiness(
         f"Listening on {HOST}, port {port}. Only this computer can reach it.",
     )
     rows = [engine, configuration, policy, trust, replay, files, network]
+    if warnings:
+        # Not a requirement: the configuration is usable as it is. Shown after the trust list it is about.
+        rows.insert(
+            rows.index(trust) + 1,
+            _row(
+                "trust_mode",
+                _TRUST_MODE,
+                "warning",
+                warnings[0],
+                _WHY["legacy_trust_mode"],
+                _STATE_NEXT["legacy_trust_mode"],
+            ),
+        )
     required = ("engine", "configuration", "trust_list", "replay", "file_check")
     return {
         "read_only": True,
@@ -398,6 +423,8 @@ def readiness(
         # Trust counts as set up only when every requirement passes and the trust list is not a demonstration.
         "trust_configured": all(row["ok"] for row in rows if row["id"] in required),
         "demonstration_trust_list": demonstration,
+        # Warnings about a configuration that is usable as it is, word for word.
+        "warnings": warnings,
         "rows": rows,
         "commands": commands(),
         "guide": guide(),

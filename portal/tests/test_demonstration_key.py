@@ -257,7 +257,8 @@ def test_a_list_with_the_bundled_key_and_a_real_key_is_a_demonstration_only_with
     entries = json.loads((root / "trust-store.json").read_text())["entries"]
     entries["acme-1"] = {"issuer": "Acme Ltd", "public_key_pem": BUNDLED_PEM, "status": "active"}
     _store(root, entries)
-    _assert_refused(root / "portal-config.json", BUNDLED_KEY_WITHOUT_MODE)
+    _assert_refused(root / "portal-config.json", BUNDLED_KEY_AS_CUSTOMER)
+    _assert_refused(_config(root, trust_mode=None), BUNDLED_KEY_WITHOUT_MODE)
     _config(root, trust_mode="demonstration")
     portal = load_portal(root / "portal-config.json")
     assert portal.trust_mode == "demonstration" and "bundled demonstration key" in portal.trust_mode_reason
@@ -355,7 +356,7 @@ def test_an_old_demo_folder_with_fresh_keys_and_the_marker_keeps_working_as_a_de
 def test_an_old_demo_folder_without_the_marker_is_the_known_limit(tmp_path):
     """Its keys were made fresh and nothing can recognise them, so without the setting it is customer trust. This is
     only for folders made by the earlier demo-setup: the current one installs the bundled key, which is refused."""
-    root = make_synthetic_portal(tmp_path / "old")
+    root = make_synthetic_portal(tmp_path / "old", trust_mode=None)
     assert load_portal(root / "portal-config.json").trust_mode == "customer"
 
 

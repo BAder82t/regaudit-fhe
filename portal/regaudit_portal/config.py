@@ -6,6 +6,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 from dataclasses import dataclass
@@ -37,6 +38,15 @@ _PROFILES = ("confidential", "high-assurance", "development")
 CUSTOMER = "customer"
 DEMONSTRATION = "demonstration"
 TRUST_MODES = (CUSTOMER, DEMONSTRATION)
+# Said, word for word, wherever a usable customer configuration without "trust_mode" is read: by check-config (on
+# standard error), by the portal's log when it starts, on the setup page and in its /api/setup answer. The
+# configuration still works as before; nothing rewrites it. Requiring the setting is a later release's change.
+LEGACY_TRUST_MODE_WARNING = (
+    "This configuration does not specify `trust_mode`. It is currently treated as a legacy customer configuration. "
+    "Explicitly set `trust_mode: customer` after reviewing the trusted keys. A future release will require this "
+    "setting."
+)
+logger = logging.getLogger("regaudit_portal.config")
 
 
 class ConfigProblem(Exception):
@@ -70,6 +80,8 @@ class Portal:
     # Demonstration trust is kept apart from customer trust: see trust_mode_of.
     trust_mode: str = CUSTOMER
     trust_mode_reason: str = ""
+    # Warnings about a configuration that is usable as it is: today only LEGACY_TRUST_MODE_WARNING.
+    warnings: tuple[str, ...] = ()
 
     @property
     def demonstration(self) -> bool:
@@ -219,7 +231,8 @@ def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
     nothing else, is a demonstration only with that explicit setting: with ``"customer"``, or with no setting, the
     configuration is refused (:class:`ConfigProblem`, kind ``demonstration_key``), so the bundled key can never be
     customer trust, whatever the files are called or wherever they were copied. A configuration without the setting
-    and without a bundled key is customer trust, as configurations made before the setting existed are.
+    and without a bundled key is still customer trust, as configurations made before the setting existed are, for
+    now with a warning (see :func:`legacy_warnings`).
     """
     bundled = any(is_demonstration_entry(entry.public_key_pem) for entry in store.entries.values())
     if settings.trust_mode == DEMONSTRATION:
@@ -241,6 +254,15 @@ def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
         CUSTOMER,
         "the configuration does not set trust_mode, and the trust list holds no bundled demonstration key",
     )
+
+
+def legacy_warnings(settings: Settings, mode: str) -> tuple[str, ...]:
+    """The warning for a customer configuration that does not say ``trust_mode``, or nothing.
+
+    Such a configuration is still used as customer trust, exactly as before: only a warning is added. A configuration
+    whose trust list holds the bundled demonstration key never gets this far without the setting: it is refused.
+    """
+    return (LEGACY_TRUST_MODE_WARNING,) if mode == CUSTOMER and settings.trust_mode == "" else ()
 
 
 def is_demonstration_trust(settings: Settings, store: TrustStore) -> bool:
@@ -309,6 +331,18 @@ def load_portal(config_path: str | Path) -> Portal:
     except (ReplayStateError, PolicyError) as exc:
         raise ConfigProblem(f"policy: {exc}") from exc
     mode, reason = trust_mode_of(settings, store)
+    warnings = legacy_warnings(settings, mode)
+    for warning in warnings:
+        # With no logging set up (check-config), Python prints this text alone on standard error. The portal's own
+        # start-up log shows it with its level.
+        logger.warning(warning)
     return Portal(
-        policy, settings.profile, settings.replay_mode, len(store.keys), engine, mode, reason
+        policy,
+        settings.profile,
+        settings.replay_mode,
+        len(store.keys),
+        engine,
+        mode,
+        reason,
+        warnings,
     )

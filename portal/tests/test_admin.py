@@ -1215,8 +1215,8 @@ def test_guard_off_dropping_the_leftovers_on_a_refusal_is_noticed(home, tmp_path
     real = admin._describe_destination
 
     def earlier(folder, plan):
-        problem, found = real(folder, plan)
-        return problem, (found if problem is None else [])
+        problem, found, warnings = real(folder, plan)
+        return problem, (found if problem is None else []), warnings
 
     monkeypatch.setattr(admin, "_describe_destination", earlier)
     code, out, _ = run("admin-describe", plan)

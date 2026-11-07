@@ -71,8 +71,12 @@ def make_portal(
     verifier_id: str = "demo-verifier",
     entry: dict[str, Any] | None = None,
     key_id: str = "k1",
+    trust_mode: str | None = "customer",
 ) -> tuple[Path, rf.Signer]:
-    """A portal configuration that trusts one synthetic key, with ``entry`` changing that key's trust-store entry."""
+    """A portal configuration that trusts one synthetic key, with ``entry`` changing that key's trust-store entry.
+
+    It says ``"trust_mode": "customer"``, as every new configuration must. ``trust_mode=None`` leaves the setting out,
+    as a legacy configuration made before it existed does."""
     signer = rf.Signer.generate(issuer=issuer, key_id=key_id)
     record = {"issuer": issuer, "public_key_pem": signer.public_key_pem(), "status": "active"}
     record.update(entry or {})
@@ -86,6 +90,8 @@ def make_portal(
         "replay_mode": "check",
         "replay_db": "replay.db",
     }
+    if trust_mode is not None:
+        config["trust_mode"] = trust_mode
     (root / "portal-config.json").write_text(json.dumps(config))
     for name in ("trust-store.json", "portal-config.json"):
         os.chmod(root / name, 0o600)
@@ -244,13 +250,13 @@ def synthetic_report(
     return json.dumps(env.to_dict(), indent=2)
 
 
-def make_synthetic_portal(directory: Path, *, trust_mode: str | None = None) -> Path:
-    """Sample files like demo-setup's, signed with fresh keys for an ordinary issuer, without the demonstration marker.
+def make_synthetic_portal(directory: Path, *, trust_mode: str | None = "customer") -> Path:
+    """Sample files like demo-setup's, signed with fresh keys for an ordinary issuer, under ``"trust_mode": "customer"``.
 
     To the portal this looks like an administrator's own configuration, which is what most tests need. demo-setup's
     own output holds the bundled demonstration key and says it is a demonstration, so it is never taken for that.
-    ``trust_mode`` writes that setting too: "demonstration" makes a folder like the ones the earlier demo-setup made,
-    with fresh keys and the marker.
+    ``trust_mode="demonstration"`` makes a folder like the ones the earlier demo-setup made, with fresh keys and the
+    marker. ``trust_mode=None`` leaves the setting out, as a legacy configuration does.
     """
     root = Path(directory).absolute()
     reports = root / "sample-reports"

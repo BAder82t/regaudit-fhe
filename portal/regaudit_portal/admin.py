@@ -58,6 +58,7 @@ from .config import (
     CUSTOMER,
     ConfigProblem,
     Settings,
+    legacy_warnings,
     read_settings,
     read_trust_store,
     trust_mode_of,
@@ -827,7 +828,9 @@ def _check_staged_first_setup(staging_path: Path, plan: Plan) -> None:
         settings.max_age_days,
         settings.replay_mode,
         settings.allow_self_signed,
-        mode,
+        # What the file itself says, not only what the portal makes of it: a new configuration must say "customer"
+        # in so many words. One without the setting would be read as customer trust too, but only as a legacy one.
+        settings.trust_mode if mode == CUSTOMER else mode,
     )
     if found != wanted or settings.store_path != staging_path / TRUST_LIST_NAME:
         raise Refused(f"The new configuration does not say what the plan says. {UNCHANGED}")
@@ -894,6 +897,7 @@ def _apply_add_issuers(
     return [
         f"Added {added} issuer{'' if added == 1 else 's'} to the trust list. The configuration was not changed.",
         _written(existing.store_name, store_data),
+        *legacy_warnings(existing.settings, CUSTOMER),
     ]
 
 
@@ -930,11 +934,12 @@ def _engine_or_refuse() -> None:
         )
 
 
-def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[str]]:
+def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[str], list[str]]:
     """Would applying the plan here be refused, and why, and which folders did a stopped apply leave? Read-only: it
     opens folders and reads files, nothing else. The leftovers are listed with any answer, a refusal included, once the
     folders could be opened and checked."""
     leftovers: list[str] = []
+    warnings: list[str] = []
     try:
         with Destination(folder) as place:
             leftovers = place.leftovers()
@@ -942,19 +947,20 @@ def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[st
                 place.check_first_setup()
             else:
                 existing = place.read_existing()
+                warnings = list(legacy_warnings(existing.settings, CUSTOMER))
                 already = [
                     i.key_id for i in plan.issuers if i.key_id in existing.payload["entries"]
                 ]
                 if already:
                     raise Refused(f"Key id {', '.join(already)} is already in the trust list.")
                 TrustStore.from_dict(json.loads(plan.trust_list_text(existing.payload)))
-            return None, leftovers
+            return None, leftovers, warnings
     except Refused as exc:
-        return str(exc), leftovers
+        return str(exc), leftovers, warnings
     except TrustStoreError as exc:
-        return f"The engine refuses the trust list it would make: {shown(str(exc))}", leftovers
+        return f"The engine refuses the trust list it would make: {shown(str(exc))}", leftovers, warnings
     except OSError as exc:
-        return f"{folder} cannot be checked: {exc.strerror}.", leftovers
+        return f"{folder} cannot be checked: {exc.strerror}.", leftovers, warnings
 
 
 def describe(args: Any) -> int:
@@ -973,7 +979,7 @@ def _describe(args: Any) -> int:
         else:
             _out(f"refused: {exc}", err=True)
         return EXIT_REFUSED
-    problem, leftovers = _describe_destination(folder, plan)
+    problem, leftovers, warnings = _describe_destination(folder, plan)
     origin = "the standard folder for this account" if standard else "given with --config-folder"
     lines = [
         *top_lines(plan),
@@ -989,6 +995,7 @@ def _describe(args: Any) -> int:
         f"Left by an apply that was stopped: {item}. The portal does not use it."
         for item in leftovers
     ]
+    lines += warnings  # about the existing configuration, word for word
     if args.json:
         body = {
             "ok": problem is None,
