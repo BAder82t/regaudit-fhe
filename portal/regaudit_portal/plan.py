@@ -131,7 +131,11 @@ class SecretMaterial(PlanProblem):
 
 
 class FingerprintMismatch(PlanProblem):
-    """A fingerprint typed for an issuer does not match the key. ``checks`` holds, per issuer, what was computed."""
+    """A fingerprint typed for an issuer does not match the key. ``checks`` says, per issuer, only whether it matched.
+
+    The fingerprint computed from the key is never in it: the administrator must get that value from the issuer by
+    another route, so the portal never offers it, not even after a mismatch.
+    """
 
     def __init__(self, message: str, checks: list[dict[str, Any]]) -> None:
         super().__init__(message, "fingerprint_mismatch")
@@ -663,9 +667,21 @@ def read_plan(data: bytes) -> Plan:
 # ----------------------------------------------------------------------------- a request to prepare a plan
 
 
+def _check_row(number: int, issuer: Issuer, typed: str) -> dict[str, Any]:
+    """What the page is told about one issuer's fingerprint: whether the one typed matches the key, and nothing more.
+    The fingerprint computed from the key is the value the administrator has to check with the issuer, so it is never
+    part of the answer."""
+    return {
+        "number": number,
+        "issuer": issuer.issuer,
+        "key_id": issuer.key_id,
+        "matches": fingerprints_match(typed, issuer.fingerprint),
+    }
+
+
 def read_request(data: bytes) -> tuple[Plan, list[dict[str, Any]]]:
-    """Check what the prepare page sent and build the plan. Returns the plan and, for each issuer, the check of the
-    fingerprint that was typed against the one computed from the key.
+    """Check what the prepare page sent and build the plan. Returns the plan and, for each issuer, whether the
+    fingerprint that was typed matches the key. The computed fingerprint is never returned.
 
     Raises :class:`FingerprintMismatch` if any typed fingerprint does not match: no plan is made then.
     """
@@ -685,15 +701,7 @@ def read_request(data: bytes) -> tuple[Plan, list[dict[str, Any]]]:
     _refuse_own_private_keys(issuers, _id_values(issuers, configuration, typed_values))
     for number, (issuer, item) in enumerate(zip(issuers, raw["issuers"], strict=True), start=1):
         typed = typed_fingerprint(item["fingerprint"], f"issuer {number}, fingerprint")
-        checks.append(
-            {
-                "number": number,
-                "issuer": issuer.issuer,
-                "key_id": issuer.key_id,
-                "computed_fingerprint": issuer.fingerprint,
-                "matches": fingerprints_match(typed, issuer.fingerprint),
-            }
-        )
+        checks.append(_check_row(number, issuer, typed))
     if not all(check["matches"] for check in checks):
         raise FingerprintMismatch(
             "A fingerprint you typed does not match the public key it belongs to. No plan was made. Check the key "

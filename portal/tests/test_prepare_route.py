@@ -10,6 +10,7 @@ import logging
 import os
 import secrets
 from collections import deque
+from pathlib import Path
 
 import pytest
 import regaudit_portal.engine as engine_module
@@ -223,14 +224,77 @@ def test_a_private_key_is_refused_and_appears_in_no_answer_and_no_log(welcome, c
     assert all(body_line not in record.getMessage() for record in caplog.records)
 
 
-def test_a_wrong_fingerprint_shows_the_computed_one_and_never_the_typed_one(welcome):
+def _fingerprint_forms(signer) -> list[str]:
+    """The computed fingerprint as the page could show it: lower case, upper case, and in pairs with colons."""
+    fp = fingerprint_of(signer)
+    return [fp, fp.upper(), ":".join(fp[i : i + 2] for i in range(0, 64, 2))]
+
+
+def test_a_wrong_fingerprint_says_only_that_it_does_not_match(welcome):
+    """The page must not offer the value the administrator is supposed to check with the issuer."""
     signer = issuer_signer()
     typed = "ab" * 32
     request = plan_request([signer], fingerprints=[typed])
     response = welcome.post(ROUTE, content=json.dumps(request).encode(), headers=JSON_HEADERS)
-    assert response.status_code == 422
-    assert response.json()["issuers"][0]["computed_fingerprint"] == fingerprint_of(signer)
-    assert typed not in response.text and "plan_text" not in response.text
+    assert response.status_code == 422 and response.json()["error"] == "fingerprint_mismatch"
+    assert response.json()["issuers"] == [
+        {"number": 1, "issuer": signer.issuer, "key_id": signer.key_id, "matches": False}
+    ]
+    for shown in (*_fingerprint_forms(signer), typed):
+        assert shown not in response.text, shown
+    assert "plan_text" not in response.text and "writes" not in response.json()
+
+
+def test_two_issuers_with_one_wrong_fingerprint_make_no_plan_and_show_no_fingerprint(welcome):
+    right, wrong = issuer_signer("Northwind Ltd", "northwind-2026"), issuer_signer("Acme Ltd", "acme-1")
+    request = plan_request([right, wrong], fingerprints=[fingerprint_of(right), "cd" * 32])
+    response = welcome.post(ROUTE, content=json.dumps(request).encode(), headers=JSON_HEADERS)
+    body = response.json()
+    assert response.status_code == 422 and body["error"] == "fingerprint_mismatch"
+    assert [row["matches"] for row in body["issuers"]] == [True, False]
+    assert all(set(row) == {"number", "issuer", "key_id", "matches"} for row in body["issuers"])
+    for signer in (right, wrong):
+        for shown in _fingerprint_forms(signer):
+            assert shown not in response.text, shown
+    assert "plan_text" not in body and "writes" not in body
+
+
+def test_a_good_plan_answer_carries_no_fingerprint_either(welcome):
+    signer = issuer_signer()
+    response = welcome.post(ROUTE, content=json.dumps(plan_request([signer])).encode(), headers=JSON_HEADERS)
+    assert response.status_code == 200 and response.json()["issuers"][0]["matches"] is True
+    for shown in _fingerprint_forms(signer):
+        assert shown not in response.text, shown
+
+
+def test_guard_off_the_earlier_answer_would_have_shown_the_computed_fingerprint(welcome, monkeypatch):
+    """The control: with the answer built the earlier way, the computed fingerprint is in the mismatch response, so
+    the checks above would catch it."""
+    from regaudit_portal import plan as plan_module
+
+    def earlier(number, issuer, typed):
+        return {
+            "number": number,
+            "issuer": issuer.issuer,
+            "key_id": issuer.key_id,
+            "computed_fingerprint": issuer.fingerprint,
+            "matches": plan_module.fingerprints_match(typed, issuer.fingerprint),
+        }
+
+    monkeypatch.setattr(plan_module, "_check_row", earlier)
+    signer = issuer_signer()
+    request = plan_request([signer], fingerprints=["ab" * 32])
+    response = welcome.post(ROUTE, content=json.dumps(request).encode(), headers=JSON_HEADERS)
+    assert response.status_code == 422 and fingerprint_of(signer) in response.text
+
+
+def test_the_page_has_no_place_for_a_computed_fingerprint():
+    static = Path(__file__).parents[1] / "regaudit_portal" / "static"
+    script, html = (static / "plan.js").read_text(), (static / "plan.html").read_text()
+    assert "computed_fingerprint" not in script and "Computed from the key" not in html
+    assert "<th>The fingerprint you typed matches the key</th>" in html
+    assert "The portal does not show the fingerprint of the key: check it with the issuer." in html
+    assert "subtle" not in script and "digest(" not in script  # the page never works one out either
 
 
 def test_names_with_escape_sequences_never_reach_the_log(welcome, caplog):

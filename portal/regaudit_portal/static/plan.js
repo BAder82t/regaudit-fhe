@@ -150,23 +150,16 @@ function looksSecret(request) {
   return texts.some((text) => SECRET.test(text)) || request.issuers.some((issuer) => SECRET_IN_KEY_BOX.test(issuer.public_key));
 }
 
-function typedFingerprints() {
-  return Array.from($("issuers").querySelectorAll('[data-member="fingerprint"]'), (input) => input.value.trim());
-}
-
+// Only whether each typed fingerprint matches its key. The portal never sends the fingerprint it computes, because
+// that is the value to check with the issuer, and this page never works one out.
 function showFingerprints(rows) {
-  const typed = typedFingerprints();
   const body = $("fingerprints");
   body.replaceChildren();
   for (const row of rows) {
     const line = element("tr");
     const who = element("td", row.number + ". " + row.issuer + " (key id " + row.key_id + ")");
-    const mine = element("td");
-    mine.append(element("code", typed[row.number - 1] || ""));
-    const computed = element("td");
-    computed.append(element("code", row.computed_fingerprint));
-    const match = element("td", row.matches ? "Yes" : "No: does not match");
-    line.append(who, mine, computed, match);
+    const match = element("td", row.matches ? "Yes" : "No: it does not match this key");
+    line.append(who, match);
     body.append(line);
   }
 }

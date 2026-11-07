@@ -60,10 +60,10 @@ def test_a_good_request_gives_the_plan_and_exactly_what_would_be_written(signer,
             "number": 1,
             "issuer": signer.issuer,
             "key_id": signer.key_id,
-            "computed_fingerprint": fingerprint_of(signer),
             "matches": True,
         }
     ]
+    assert fingerprint_of(signer) not in json.dumps(body)
     plan = read_plan(body["plan_text"].encode())
     assert body["plan_sha256"] == plan.content_sha256 and body["file_name"].endswith(".json")
     assert [w["file"] for w in body["writes"]] == ["portal-config.json", "trust-store.json"]
@@ -438,10 +438,8 @@ def test_a_fingerprint_that_differs_by_one_character_is_a_mismatch_and_no_plan_i
     wrong = fp[:-1] + ("0" if fp[-1] != "0" else "1")
     status, body = _send(_with(request_body, fingerprint=wrong))
     assert status == 422 and body["error"] == "fingerprint_mismatch" and "plan_text" not in body
-    assert (
-        body["issuers"][0]["matches"] is False and body["issuers"][0]["computed_fingerprint"] == fp
-    )
-    assert wrong not in json.dumps(body)
+    assert body["issuers"][0]["matches"] is False and "computed_fingerprint" not in body["issuers"][0]
+    assert wrong not in json.dumps(body) and fp not in json.dumps(body)
 
 
 def test_an_empty_fingerprint_is_refused(request_body):
