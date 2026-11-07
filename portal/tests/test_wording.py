@@ -154,7 +154,10 @@ def test_the_readme_describes_the_welcome_screen_the_standard_location_and_what_
         "DEMO-ONLY synthetic issuer",
         "no private key: the key that signed the samples was thrown away",
         "Verification of your own reports is not set up yet. An administrator has to set up trust first.",
-        "checked against the administrator's policy, never against the demonstration's",
+        "is checked against the trust list in the portal's configuration, never with the separate policy for the "
+        "bundled samples",
+        "With customer trust that is the administrator's trust, so a demonstration key is never taken for a trusted "
+        "issuer.",
         "It creates nothing and changes nothing, and it never accepts or shows a signing key",
         "only as `~/...`, and never on the verification pages",
         "Making the trust list still needs a command run outside the browser",
@@ -181,7 +184,8 @@ def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_
     text = (README.parent / "SECURITY.md").read_text()
     for said in (
         "checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else",
-        "so a demonstration key can never be taken for a trusted issuer",
+        "so a demonstration key is never taken for a trusted issuer",
+        "In a demonstration configuration every result is labelled",
         "Every sample result is labelled a synthetic demonstration",
         "no private key",
         "The administrator setup page only reads",
@@ -254,6 +258,17 @@ def test_the_docs_describe_the_explicit_trust_mode_the_label_and_the_limit_of_de
     readme = README.read_text()
     assert "`demonstration` (the trust list is a demonstration" in readme
     assert 'It always writes `"trust_mode": "customer"`' in readme
+
+
+def test_the_docs_hold_no_sentence_that_a_demonstration_portal_makes_false_and_no_bullet_twice():
+    readme = README.read_text()
+    security = (README.parent / "SECURITY.md").read_text()
+    for text in (readme, security):
+        assert "never against the demonstration's" not in text
+        assert "checked against the administrator's policy, never" not in text
+    bullets = [line for line in readme.splitlines() if line.startswith("- ")]
+    assert len(bullets) == len(set(bullets)), [b for b in bullets if bullets.count(b) > 1]
+    assert "- It refuses the portal's demonstration keys." not in readme
 
 
 def test_the_docs_say_which_ids_that_look_like_secret_bytes_are_refused_and_why_the_others_are_not():

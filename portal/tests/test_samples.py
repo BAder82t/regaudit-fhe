@@ -155,7 +155,7 @@ def test_a_sample_report_uploaded_as_your_own_is_checked_against_the_administrat
     seen = _policy_keys(monkeypatch)
     raw = (SAMPLES / "reports" / f"{sample_id}.json").read_bytes()
     body = post_bytes(client, raw).json()
-    assert seen == [{"northwind-test-key"}], "the administrator's policy, never the demonstration's"
+    assert seen == [{"northwind-test-key"}], "the configured policy, never the samples' own"
     assert (
         body["verification"]["trust_status"] == "INVALID"
         and body["verification"]["accepted"] is False
