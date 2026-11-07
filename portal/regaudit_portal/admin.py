@@ -516,7 +516,9 @@ class Destination:
             raise Refused(f"The existing trust list cannot be used: {exc}") from exc
         try:
             mode, reason = trust_mode_of(settings, store)
-        except ConfigProblem as exc:  # the bundled demonstration key, without "trust_mode": "demonstration"
+        except (
+            ConfigProblem
+        ) as exc:  # the bundled demonstration key, without "trust_mode": "demonstration"
             raise Refused(
                 f"The existing configuration cannot be used: {exc}. Real issuers are not added to it. Move it and "
                 "the trust list away, then apply a first-setup plan."
@@ -958,7 +960,11 @@ def _describe_destination(folder: Path, plan: Plan) -> tuple[str | None, list[st
     except Refused as exc:
         return str(exc), leftovers, warnings
     except TrustStoreError as exc:
-        return f"The engine refuses the trust list it would make: {shown(str(exc))}", leftovers, warnings
+        return (
+            f"The engine refuses the trust list it would make: {shown(str(exc))}",
+            leftovers,
+            warnings,
+        )
     except OSError as exc:
         return f"{folder} cannot be checked: {exc.strerror}.", leftovers, warnings
 
@@ -1116,7 +1122,9 @@ def _apply(args: Any, progress: Progress) -> int:
             else:
                 report = _apply_first_setup(place, plan, checked, progress)
         _final_check(folder, plan)
-        _Stops.finished = True  # in place, flushed and accepted by the portal's own readers: the result stands
+        _Stops.finished = (
+            True  # in place, flushed and accepted by the portal's own readers: the result stands
+        )
     except Refused as exc:
         _out(f"refused: {exc}", err=True)
         return EXIT_DONE_BUT if progress.committed else EXIT_REFUSED

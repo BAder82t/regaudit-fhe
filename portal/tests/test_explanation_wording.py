@@ -15,7 +15,7 @@ import pytest
 from regaudit_portal import explain
 from regaudit_portal.explain import DEMONSTRATION_NOTICE, DEMONSTRATION_TRUST_NOTICE, describe
 
-CODES = sorted(explain._REASONS) + ["SOMETHING_NEW"]
+CODES = [*sorted(explain._REASONS), "SOMETHING_NEW"]
 STATUSES = ["active", "revoked", "compromised", "retired", "suspended"]
 VERDICTS = ["TRUSTED", "SELF_SIGNED_ONLY", "INVALID", "SOMETHING_ELSE"]
 
@@ -29,7 +29,9 @@ def _results():
         "chronology": "SIGNER_STATED",
         "trust_history": "UNPROVEN",
     }
-    for verdict, trusted, status, integrity in itertools.product(VERDICTS, (True, False), STATUSES, (True, False)):
+    for verdict, trusted, status, integrity in itertools.product(
+        VERDICTS, (True, False), STATUSES, (True, False)
+    ):
         for code in CODES:
             for blocking in (True, False):
                 yield {
@@ -43,7 +45,10 @@ def _results():
                     "reasons": [code],
                 }
     for consumption, durable, chronology, history in itertools.product(
-        ("RECORDED_LOCAL", "NOT_RECORDED"), (True, False), ("AUTHENTICATED", "SIGNER_STATED"), ("FRESH", "UNPROVEN")
+        ("RECORDED_LOCAL", "NOT_RECORDED"),
+        (True, False),
+        ("AUTHENTICATED", "SIGNER_STATED"),
+        ("FRESH", "UNPROVEN"),
     ):
         yield {
             **base,
@@ -62,7 +67,9 @@ def _results():
 
 
 def _lines(explained: dict) -> list[str]:
-    found = [explained[key] for key in ("verdict", "means", "signature", "issuer") if explained[key]]
+    found = [
+        explained[key] for key in ("verdict", "means", "signature", "issuer") if explained[key]
+    ]
     found += [reason["meaning"] for reason in explained["reasons"]]
     found += [warning["message"] for warning in explained["warnings"]]
     found += [explained["display"]["issuer_note"]] if explained["display"]["issuer_note"] else []
@@ -74,7 +81,9 @@ def _every_line(demonstration: bool) -> set[str]:
     for result in _results():
         for profile in ("confidential", "development"):
             for notice in (DEMONSTRATION_NOTICE, DEMONSTRATION_TRUST_NOTICE):
-                lines.update(_lines(describe(result, profile, demonstration=demonstration, notice=notice)))
+                lines.update(
+                    _lines(describe(result, profile, demonstration=demonstration, notice=notice))
+                )
     return lines
 
 
@@ -99,7 +108,9 @@ def demonstration_lines() -> set[str]:
 
 def test_no_demonstration_line_speaks_of_an_administrator(demonstration_lines):
     for line in demonstration_lines:
-        if line == DEMONSTRATION_TRUST_NOTICE:  # the notice says what it is not: trust set up by an administrator
+        if (
+            line == DEMONSTRATION_TRUST_NOTICE
+        ):  # the notice says what it is not: trust set up by an administrator
             continue
         assert "administrator" not in line.lower(), line
 
@@ -115,7 +126,10 @@ def test_no_demonstration_line_calls_a_key_the_demonstration_issuer(demonstratio
 
 
 def test_the_demonstration_issuer_line_says_where_the_key_is_listed(demonstration_lines):
-    assert "Passed: this key is listed for this issuer in the demonstration trust list." in demonstration_lines
+    assert (
+        "Passed: this key is listed for this issuer in the demonstration trust list."
+        in demonstration_lines
+    )
     assert (
         "This means it came from an issuer listed in the demonstration trust list and has not changed since it was "
         "signed. It does not mean the report's findings are correct."
@@ -130,7 +144,9 @@ def test_no_customer_line_speaks_of_a_demonstration():
 def test_guard_off_the_earlier_demonstration_words_are_caught(monkeypatch):
     """The control: with the earlier replacements, the sweep finds "approved" and "the demonstration issuer"."""
     earlier = tuple(
-        (old, "the demonstration issuer") if old.startswith("an issuer your administrator") else (old, new)
+        (old, "the demonstration issuer")
+        if old.startswith("an issuer your administrator")
+        else (old, new)
         for old, new in explain._DEMONSTRATION_WORDS
         if not old.startswith(("Passed: this key is approved", "Not approved", "Nobody your"))
     )

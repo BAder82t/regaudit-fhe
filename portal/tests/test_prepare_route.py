@@ -246,7 +246,10 @@ def test_a_wrong_fingerprint_says_only_that_it_does_not_match(welcome):
 
 
 def test_two_issuers_with_one_wrong_fingerprint_make_no_plan_and_show_no_fingerprint(welcome):
-    right, wrong = issuer_signer("Northwind Ltd", "northwind-2026"), issuer_signer("Acme Ltd", "acme-1")
+    right, wrong = (
+        issuer_signer("Northwind Ltd", "northwind-2026"),
+        issuer_signer("Acme Ltd", "acme-1"),
+    )
     request = plan_request([right, wrong], fingerprints=[fingerprint_of(right), "cd" * 32])
     response = welcome.post(ROUTE, content=json.dumps(request).encode(), headers=JSON_HEADERS)
     body = response.json()
@@ -261,13 +264,17 @@ def test_two_issuers_with_one_wrong_fingerprint_make_no_plan_and_show_no_fingerp
 
 def test_a_good_plan_answer_carries_no_fingerprint_either(welcome):
     signer = issuer_signer()
-    response = welcome.post(ROUTE, content=json.dumps(plan_request([signer])).encode(), headers=JSON_HEADERS)
+    response = welcome.post(
+        ROUTE, content=json.dumps(plan_request([signer])).encode(), headers=JSON_HEADERS
+    )
     assert response.status_code == 200 and response.json()["issuers"][0]["matches"] is True
     for shown in _fingerprint_forms(signer):
         assert shown not in response.text, shown
 
 
-def test_guard_off_the_earlier_answer_would_have_shown_the_computed_fingerprint(welcome, monkeypatch):
+def test_guard_off_the_earlier_answer_would_have_shown_the_computed_fingerprint(
+    welcome, monkeypatch
+):
     """The control: with the answer built the earlier way, the computed fingerprint is in the mismatch response, so
     the checks above would catch it."""
     from regaudit_portal import plan as plan_module

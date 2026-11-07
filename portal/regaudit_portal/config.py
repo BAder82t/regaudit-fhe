@@ -245,7 +245,9 @@ def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
         return DEMONSTRATION, 'the configuration says "trust_mode": "demonstration"'
     if bundled:
         raise ConfigProblem(
-            BUNDLED_KEY_AS_CUSTOMER if settings.trust_mode == CUSTOMER else BUNDLED_KEY_WITHOUT_MODE,
+            BUNDLED_KEY_AS_CUSTOMER
+            if settings.trust_mode == CUSTOMER
+            else BUNDLED_KEY_WITHOUT_MODE,
             "demonstration_key",
         )
     if settings.trust_mode == CUSTOMER:

@@ -21,7 +21,6 @@ from regaudit_portal.config import ConfigProblem, load_portal, read_settings
 from regaudit_portal.demo import create
 from regaudit_portal.explain import DEMONSTRATION_LABEL, DEMONSTRATION_TRUST_NOTICE
 
-
 PORTAL = Path(__file__).resolve().parents[1]
 STATIC = PORTAL / "regaudit_portal" / "static"
 SAMPLES = PORTAL / "regaudit_portal" / "samples"

@@ -51,7 +51,8 @@ def test_demo_setup_installs_the_pinned_key_and_says_it_is_a_demonstration(tmp_p
     root = create(tmp_path / "d")
     made = json.loads((root / "trust-store.json").read_text())
     assert made["entries"] and all(
-        demonstration.is_demonstration_entry(entry["public_key_pem"]) for entry in made["entries"].values()
+        demonstration.is_demonstration_entry(entry["public_key_pem"])
+        for entry in made["entries"].values()
     )
     assert json.loads((root / "portal-config.json").read_text())["trust_mode"] == "demonstration"
 

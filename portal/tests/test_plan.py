@@ -438,7 +438,9 @@ def test_a_fingerprint_that_differs_by_one_character_is_a_mismatch_and_no_plan_i
     wrong = fp[:-1] + ("0" if fp[-1] != "0" else "1")
     status, body = _send(_with(request_body, fingerprint=wrong))
     assert status == 422 and body["error"] == "fingerprint_mismatch" and "plan_text" not in body
-    assert body["issuers"][0]["matches"] is False and "computed_fingerprint" not in body["issuers"][0]
+    assert (
+        body["issuers"][0]["matches"] is False and "computed_fingerprint" not in body["issuers"][0]
+    )
     assert wrong not in json.dumps(body) and fp not in json.dumps(body)
 
 

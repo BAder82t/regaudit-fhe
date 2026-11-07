@@ -112,21 +112,31 @@ def _assert_refused(config: Path, expected: str) -> None:
     status = client.get("/api/status").json()
     assert status["ready"] is False and status["state"] == "needs_attention"
     assert status["message"] == app_module._DEMONSTRATION_KEY_REFUSED
-    assert str(config.parent) not in json.dumps(status) and "trust-store.json" not in json.dumps(status)
+    assert str(config.parent) not in json.dumps(status) and "trust-store.json" not in json.dumps(
+        status
+    )
     assert status["trust_mode"] == "none" and "policy_id" not in status
     for report in (_bundled_sample("trusted.json"), _bundled_sample("modified.json")):
         response = post_bytes(client, report)
         body = response.json()
         assert response.status_code == 503 and body["error"] == "not_ready"
-        assert body["message"] == app_module._DEMONSTRATION_KEY_REFUSED and "verification" not in body
+        assert (
+            body["message"] == app_module._DEMONSTRATION_KEY_REFUSED and "verification" not in body
+        )
     setup = client.get("/api/setup").json()
     row = next(r for r in setup["rows"] if r["id"] == "trust_list")
     assert row["state"] == "problem" and row["detail"] == expected
-    assert "never be customer trust" in row["why"] and '"trust_mode": "demonstration"' in row["next_step"]
+    assert (
+        "never be customer trust" in row["why"]
+        and '"trust_mode": "demonstration"' in row["next_step"]
+    )
     assert setup["own_reports"]["ready"] is False and setup["trust_configured"] is False
     # The bundled samples still work, each one labelled, as in every other state.
     sample = client.post("/api/samples/trusted/verify").json()
-    assert sample["verification"]["trust_status"] == "TRUSTED" and sample["demonstration_label"] == LABEL
+    assert (
+        sample["verification"]["trust_status"] == "TRUSTED"
+        and sample["demonstration_label"] == LABEL
+    )
 
 
 # ----------------------------------------------------------------------------- what demo-setup makes
@@ -134,9 +144,13 @@ def _assert_refused(config: Path, expected: str) -> None:
 
 def test_demo_setup_installs_the_bundled_key_and_copies_the_bundled_reports_byte_for_byte(tmp_path):
     root = create(tmp_path / "demo")
-    assert (root / "trust-store.json").read_bytes() == (SAMPLES / "demo-trust-list.json").read_bytes()
+    assert (root / "trust-store.json").read_bytes() == (
+        SAMPLES / "demo-trust-list.json"
+    ).read_bytes()
     entries = json.loads((root / "trust-store.json").read_text())["entries"]
-    assert [spki_fingerprint(e["public_key_pem"]) for e in entries.values()] == [BUNDLED_FINGERPRINT]
+    assert [spki_fingerprint(e["public_key_pem"]) for e in entries.values()] == [
+        BUNDLED_FINGERPRINT
+    ]
     for name, bundled in demo_module.COPIED:
         assert (root / "sample-reports" / name).read_bytes() == _bundled_sample(bundled)
     assert sorted(p.name for p in (root / "sample-reports").iterdir()) == [
@@ -207,7 +221,9 @@ def test_the_long_age_is_labelled_on_the_setup_page_only_for_a_demonstration(tmp
     "setting, expected",
     [("customer", BUNDLED_KEY_AS_CUSTOMER), (None, BUNDLED_KEY_WITHOUT_MODE)],
 )
-def test_demo_setup_output_without_its_demonstration_setting_is_refused(tmp_path, setting, expected):
+def test_demo_setup_output_without_its_demonstration_setting_is_refused(
+    tmp_path, setting, expected
+):
     root = create(tmp_path / "demo")
     _assert_refused(_config(root, trust_mode=setting), expected)
 
@@ -216,7 +232,9 @@ def test_demo_setup_output_without_its_demonstration_setting_is_refused(tmp_path
     "setting, expected",
     [("customer", BUNDLED_KEY_AS_CUSTOMER), (None, BUNDLED_KEY_WITHOUT_MODE)],
 )
-def test_the_bundled_list_copied_into_another_folder_without_the_marker_is_refused(tmp_path, setting, expected):
+def test_the_bundled_list_copied_into_another_folder_without_the_marker_is_refused(
+    tmp_path, setting, expected
+):
     _assert_refused(_bundled_list_copied(tmp_path / "copy", setting), expected)
 
 
@@ -244,7 +262,13 @@ def test_the_bundled_key_written_another_way_is_still_recognised(tmp_path):
     """The same key in a differently wrapped PEM is the same key: the fingerprint is of the key, not of the text."""
     der = base64.b64decode("".join(BUNDLED_PEM.strip().splitlines()[1:-1]))
     body = base64.b64encode(der).decode()
-    rewrapped = "-----BEGIN PUBLIC KEY-----\n" + body[:20] + "\n" + body[20:] + "\n-----END PUBLIC KEY-----\n"
+    rewrapped = (
+        "-----BEGIN PUBLIC KEY-----\n"
+        + body[:20]
+        + "\n"
+        + body[20:]
+        + "\n-----END PUBLIC KEY-----\n"
+    )
     assert rewrapped != BUNDLED_PEM and spki_fingerprint(rewrapped) == BUNDLED_FINGERPRINT
     root = make_synthetic_portal(tmp_path / "own")
     _store(root, {"other": {"issuer": "Other", "public_key_pem": rewrapped, "status": "active"}})
@@ -252,7 +276,9 @@ def test_the_bundled_key_written_another_way_is_still_recognised(tmp_path):
         load_portal(root / "portal-config.json")
 
 
-def test_a_list_with_the_bundled_key_and_a_real_key_is_a_demonstration_only_with_the_setting(tmp_path):
+def test_a_list_with_the_bundled_key_and_a_real_key_is_a_demonstration_only_with_the_setting(
+    tmp_path,
+):
     root = make_synthetic_portal(tmp_path / "own")
     entries = json.loads((root / "trust-store.json").read_text())["entries"]
     entries["acme-1"] = {"issuer": "Acme Ltd", "public_key_pem": BUNDLED_PEM, "status": "active"}
@@ -261,13 +287,18 @@ def test_a_list_with_the_bundled_key_and_a_real_key_is_a_demonstration_only_with
     _assert_refused(_config(root, trust_mode=None), BUNDLED_KEY_WITHOUT_MODE)
     _config(root, trust_mode="demonstration")
     portal = load_portal(root / "portal-config.json")
-    assert portal.trust_mode == "demonstration" and "bundled demonstration key" in portal.trust_mode_reason
+    assert (
+        portal.trust_mode == "demonstration"
+        and "bundled demonstration key" in portal.trust_mode_reason
+    )
     client = client_for(root / "portal-config.json")
     own = post(client, root, "1-trusted.json").json()  # signed by the real key in the same list
     assert own["verification"]["trust_status"] == "TRUSTED" and own["demonstration_label"] == LABEL
 
 
-def test_guard_off_without_the_fingerprint_check_the_copied_list_would_be_customer_trusted(tmp_path, monkeypatch):
+def test_guard_off_without_the_fingerprint_check_the_copied_list_would_be_customer_trusted(
+    tmp_path, monkeypatch
+):
     """The control: with the fingerprint check switched off, the copied list loads as customer trust and the bundled
     sample is accepted for your own reports, unlabelled. It is the fingerprint check that refuses it."""
     config = _bundled_list_copied(tmp_path / "copy", None)
@@ -275,7 +306,10 @@ def test_guard_off_without_the_fingerprint_check_the_copied_list_would_be_custom
     portal = load_portal(config)
     assert portal.trust_mode == "customer"
     body = post_bytes(client_for(config), _bundled_sample("trusted.json")).json()
-    assert body["verification"]["trust_status"] == "TRUSTED" and body["synthetic_demonstration"] is False
+    assert (
+        body["verification"]["trust_status"] == "TRUSTED"
+        and body["synthetic_demonstration"] is False
+    )
     assert "demonstration_label" not in body
 
 
@@ -300,7 +334,9 @@ def _changed_key() -> str:
 
 
 @pytest.mark.parametrize("setting", [None, "customer"])
-def test_a_changed_demonstration_key_is_an_ordinary_key_that_never_accepts_the_bundled_samples(tmp_path, setting):
+def test_a_changed_demonstration_key_is_an_ordinary_key_that_never_accepts_the_bundled_samples(
+    tmp_path, setting
+):
     """It is treated as what it is, an ordinary key in customer trust. It cannot be promoted: the bundled samples,
     signed by the real demonstration key, are INVALID against it, under the same key id and issuer name."""
     pem = _changed_key()
@@ -308,7 +344,13 @@ def test_a_changed_demonstration_key_is_an_ordinary_key_that_never_accepts_the_b
     root = make_synthetic_portal(tmp_path / "own")
     _store(
         root,
-        {"demo-only-synthetic-key": {"issuer": "DEMO-ONLY synthetic issuer", "public_key_pem": pem, "status": "active"}},
+        {
+            "demo-only-synthetic-key": {
+                "issuer": "DEMO-ONLY synthetic issuer",
+                "public_key_pem": pem,
+                "status": "active",
+            }
+        },
     )
     config = _config(root, trust_mode=setting)
     portal = load_portal(config)
@@ -317,13 +359,17 @@ def test_a_changed_demonstration_key_is_an_ordinary_key_that_never_accepts_the_b
     for name in ("trusted.json", "plaintext-backend.json", "declares-encrypted-backend.json"):
         body = post_bytes(client, _bundled_sample(name)).json()
         assert body["verification"]["trust_status"] == "INVALID", name
-        assert body["verification"]["accepted"] is False and body["synthetic_demonstration"] is False
+        assert (
+            body["verification"]["accepted"] is False and body["synthetic_demonstration"] is False
+        )
 
 
 def test_a_different_key_under_the_demonstration_names_verifies_only_its_own_reports(tmp_path):
     """A key someone made and enrolled under the bundled key's id and issuer name is customer trust for reports it
     signed, and nothing more: it never accepts the bundled samples."""
-    signer = rf.Signer.generate(issuer="DEMO-ONLY synthetic issuer", key_id="demo-only-synthetic-key")
+    signer = rf.Signer.generate(
+        issuer="DEMO-ONLY synthetic issuer", key_id="demo-only-synthetic-key"
+    )
     root = make_synthetic_portal(tmp_path / "own")
     _store(
         root,
@@ -339,18 +385,25 @@ def test_a_different_key_under_the_demonstration_names_verifies_only_its_own_rep
     own = post_bytes(client, signed_report(signer)).json()
     assert own["verification"]["trust_status"] == "TRUSTED" and own["trust_mode"] == "customer"
     sample = post_bytes(client, _bundled_sample("trusted.json")).json()
-    assert sample["verification"]["trust_status"] == "INVALID" and sample["verification"]["accepted"] is False
+    assert (
+        sample["verification"]["trust_status"] == "INVALID"
+        and sample["verification"]["accepted"] is False
+    )
 
 
 # ----------------------------------------------------------------------------- folders made by the earlier demo-setup
 
 
-def test_an_old_demo_folder_with_fresh_keys_and_the_marker_keeps_working_as_a_demonstration(tmp_path):
+def test_an_old_demo_folder_with_fresh_keys_and_the_marker_keeps_working_as_a_demonstration(
+    tmp_path,
+):
     root = make_synthetic_portal(tmp_path / "old", trust_mode="demonstration")
     client = client_for(root / "portal-config.json")
     assert client.app.state.mode == "demonstration"
     body = post(client, root, "1-trusted.json").json()
-    assert body["verification"]["trust_status"] == "TRUSTED" and body["demonstration_label"] == LABEL
+    assert (
+        body["verification"]["trust_status"] == "TRUSTED" and body["demonstration_label"] == LABEL
+    )
 
 
 def test_an_old_demo_folder_without_the_marker_is_the_known_limit(tmp_path):

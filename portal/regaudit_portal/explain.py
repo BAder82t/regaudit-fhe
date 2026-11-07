@@ -405,6 +405,8 @@ def describe(
             reason["meaning"] = _about_the_demonstration(reason["meaning"])
         for warning in explained["warnings"]:
             warning["message"] = _about_the_demonstration(warning["message"])
-        explained["display"]["issuer_note"] = _about_the_demonstration(explained["display"]["issuer_note"])
+        explained["display"]["issuer_note"] = _about_the_demonstration(
+            explained["display"]["issuer_note"]
+        )
         explained["warnings"].insert(0, {"code": "DEMONSTRATION_ONLY", "message": notice})
     return explained

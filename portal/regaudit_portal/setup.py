@@ -124,7 +124,7 @@ _STATE_NEXT = {
         '"trust_mode": "demonstration".'
     ),
     "legacy_trust_mode": (
-        "Review every key in the trust list with its issuer. Then add \"trust_mode\": \"customer\" to the "
+        'Review every key in the trust list with its issuer. Then add "trust_mode": "customer" to the '
         "configuration yourself and restart the portal. The portal never rewrites the configuration."
     ),
     "development": (

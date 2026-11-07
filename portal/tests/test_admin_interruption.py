@@ -24,9 +24,6 @@ from regaudit_portal.__main__ import main
 from regaudit_portal.config import read_settings, read_trust_store
 from regaudit_portal.paths import default_config_folder
 from test_admin import _env, _expect, _first_setup, _plan_file, _private_folder
-from test_admin import home  # noqa: F401 - a fixture
-from test_admin import northwind  # noqa: F401 - a fixture
-from test_admin import run  # noqa: F401 - a fixture
 
 PORTAL = Path(__file__).resolve().parents[1]
 UNCHANGED = "Nothing was changed."
@@ -40,10 +37,16 @@ def _state(folder: Path) -> dict:
 
 def _leftovers(folder: Path) -> list[str]:
     places = [folder, folder.parent]
-    return [p.name for place in places if place.exists() for p in place.iterdir() if p.name.startswith(".regaudit-admin-")]
+    return [
+        p.name
+        for place in places
+        if place.exists()
+        for p in place.iterdir()
+        if p.name.startswith(".regaudit-admin-")
+    ]
 
 
-def _prepare(case: str, tmp_path, run, signer) -> tuple[Path, list[str]]:  # noqa: F811 - the fixture's value
+def _prepare(case: str, tmp_path, run, signer) -> tuple[Path, list[str]]:
     """The plan to apply and its arguments, for: no folder yet, an empty private folder, or adding to a setup."""
     later = issuer_signer("Later Ltd", "later-1")
     if case == "fresh":
@@ -52,17 +55,23 @@ def _prepare(case: str, tmp_path, run, signer) -> tuple[Path, list[str]]:  # noq
         _private_folder(default_config_folder())
         return _plan_file(tmp_path, prepare_plan([signer])), _expect(signer)
     _first_setup(tmp_path, run, signer)
-    return _plan_file(tmp_path, prepare_plan([later], mode="add-issuers"), "add.json"), _expect(later)
+    return _plan_file(tmp_path, prepare_plan([later], mode="add-issuers"), "add.json"), _expect(
+        later
+    )
 
 
-STEPS = [(name, n) for name, count in (("_sync", 6), ("rename", 2), ("link", 2)) for n in range(1, count + 1)]
+STEPS = [
+    (name, n)
+    for name, count in (("_sync", 6), ("rename", 2), ("link", 2))
+    for n in range(1, count + 1)
+]
 
 
 @pytest.mark.parametrize("case", ["fresh", "empty-folder", "add"])
 @pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("step, nth", STEPS)
 def test_a_stop_at_any_writing_step_is_reported_exactly_as_the_disk_is(
-    home, tmp_path, run, northwind, monkeypatch, case, when, step, nth  # noqa: F811 - fixtures
+    home, tmp_path, run, northwind, monkeypatch, case, when, step, nth
 ):
     plan, expect = _prepare(case, tmp_path, run, northwind)
     folder = default_config_folder()
@@ -99,7 +108,7 @@ def test_a_stop_at_any_writing_step_is_reported_exactly_as_the_disk_is(
 
 
 def test_a_stop_while_the_committed_change_is_flushed_waits_for_the_flush(
-    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+    home, tmp_path, run, northwind, monkeypatch
 ):
     """The stop is taken only once the folder holding the new files is on the disk itself."""
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
@@ -119,7 +128,7 @@ def test_a_stop_while_the_committed_change_is_flushed_waits_for_the_flush(
 
 
 def test_guard_off_without_holding_the_stop_the_flush_of_the_committed_change_is_cut_short(
-    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+    home, tmp_path, run, northwind, monkeypatch
 ):
     """The control: if stops were not held over the flush, the stop would land before it finished."""
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
@@ -138,12 +147,12 @@ def test_guard_off_without_holding_the_stop_the_flush_of_the_committed_change_is
 
     monkeypatch.setattr(admin, "_held_signals", not_held)
     monkeypatch.setattr(admin, "_sync", flush)
-    code, _, err = run("admin-apply", plan, *_expect(northwind))
+    code, _, _err = run("admin-apply", plan, *_expect(northwind))
     assert code == 4 and events[-1] == "stop", events
 
 
 def test_a_failed_flush_after_the_change_says_the_files_are_in_place_and_may_not_survive_a_power_cut(
-    home, tmp_path, run, northwind, monkeypatch  # noqa: F811 - fixtures
+    home, tmp_path, run, northwind, monkeypatch
 ):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     real = admin._sync
@@ -156,8 +165,14 @@ def test_a_failed_flush_after_the_change_says_the_files_are_in_place_and_may_not
     monkeypatch.setattr(admin, "_sync", flush)
     code, out, err = run("admin-apply", plan, *_expect(northwind))
     assert code == 4 and UNCHANGED not in out + err
-    assert "failed: The new files are in place, but flushing them to the disk failed (Input/output error)" in err
-    assert sorted(p.name for p in default_config_folder().iterdir()) == ["portal-config.json", "trust-store.json"]
+    assert (
+        "failed: The new files are in place, but flushing them to the disk failed (Input/output error)"
+        in err
+    )
+    assert sorted(p.name for p in default_config_folder().iterdir()) == [
+        "portal-config.json",
+        "trust-store.json",
+    ]
 
 
 # ----------------------------------------------------------------------------- standard output or error closed
@@ -179,17 +194,22 @@ def _complete(folder: Path) -> None:
     read_trust_store(read_settings(folder / "portal-config.json"))
 
 
-def test_with_standard_output_closed_the_apply_completes_and_says_so_on_standard_error(home, tmp_path, northwind):  # noqa: F811
+def test_with_standard_output_closed_the_apply_completes_and_says_so_on_standard_error(
+    home, tmp_path, northwind
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     done = _closed(home, "1", "admin-apply", str(plan), *_expect(northwind))
     assert done.returncode == 0, done.stderr
     assert "Traceback" not in done.stderr and UNCHANGED not in done.stderr
-    assert done.stderr.startswith("Applied setup plan ") and "Standard output could not be written" in done.stderr
+    assert (
+        done.stderr.startswith("Applied setup plan ")
+        and "Standard output could not be written" in done.stderr
+    )
     _complete(default_config_folder())
 
 
 def test_with_standard_error_closed_the_apply_completes_and_prints_everything_on_standard_output(
-    home, tmp_path, northwind  # noqa: F811
+    home, tmp_path, northwind
 ):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     done = _closed(home, "2", "admin-apply", str(plan), *_expect(northwind))
@@ -198,17 +218,21 @@ def test_with_standard_error_closed_the_apply_completes_and_prints_everything_on
     _complete(default_config_folder())
 
 
-def test_with_both_closed_the_status_alone_tells_and_matches_the_disk(home, tmp_path, northwind):  # noqa: F811
+def test_with_both_closed_the_status_alone_tells_and_matches_the_disk(home, tmp_path, northwind):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     assert _closed(home, "both", "admin-describe", str(plan)).returncode == 0
     assert _closed(home, "both", "admin-apply", str(plan), *_expect(northwind)).returncode == 0
     _complete(default_config_folder())
     before = _state(default_config_folder())
-    assert _closed(home, "both", "admin-apply", str(plan), *_expect(northwind)).returncode == 2  # already set up
+    assert (
+        _closed(home, "both", "admin-apply", str(plan), *_expect(northwind)).returncode == 2
+    )  # already set up
     assert _state(default_config_folder()) == before
 
 
-def test_with_standard_output_closed_a_refusal_is_still_said_on_standard_error(home, tmp_path, northwind):  # noqa: F811
+def test_with_standard_output_closed_a_refusal_is_still_said_on_standard_error(
+    home, tmp_path, northwind
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     wrong = ["--expect-fingerprint", f"{northwind.key_id}={'ab' * 32}"]
     done = _closed(home, "1", "admin-apply", str(plan), *wrong)
@@ -217,7 +241,7 @@ def test_with_standard_output_closed_a_refusal_is_still_said_on_standard_error(h
 
 
 def test_guard_off_the_earlier_output_crashed_after_the_change_was_complete(
-    home, tmp_path, northwind, monkeypatch  # noqa: F811
+    home, tmp_path, northwind, monkeypatch
 ):
     """The control: printing as before, with standard output closed (Python's None), the command raised after the
     files were in place, so its status said failure while the disk said success."""
@@ -236,7 +260,9 @@ def test_guard_off_the_earlier_output_crashed_after_the_change_was_complete(
     _complete(default_config_folder())
 
 
-def test_now_with_standard_output_none_the_apply_returns_success(home, tmp_path, northwind, monkeypatch, capsys):  # noqa: F811
+def test_now_with_standard_output_none_the_apply_returns_success(
+    home, tmp_path, northwind, monkeypatch, capsys
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     monkeypatch.setattr(sys, "stdout", None)
     assert main(["admin-apply", str(plan), *_expect(northwind)]) == 0
@@ -254,8 +280,12 @@ print(fd, file=open(sys.argv[2], "w"))
 """
 
 
-@pytest.mark.parametrize("reserve, expected", [("reserve", lambda fd: fd > 2), ("off", lambda fd: fd == 2)])
-def test_a_closed_standard_error_is_never_reused_by_a_file_the_command_opens(tmp_path, reserve, expected):
+@pytest.mark.parametrize(
+    "reserve, expected", [("reserve", lambda fd: fd > 2), ("off", lambda fd: fd == 2)]
+)
+def test_a_closed_standard_error_is_never_reused_by_a_file_the_command_opens(
+    tmp_path, reserve, expected
+):
     """With the reservation, the first file opened does not get number 2; with it off (the control), it does, and a
     library writing to standard error would write into it."""
     told = tmp_path / "fd.txt"
@@ -281,7 +311,11 @@ sys.exit(main(sys.argv[1:]))
 
 
 def _pyc_folders(account: Path) -> list[str]:
-    return [p.name for p in (account.parent / "tmp").iterdir() if p.name.startswith("regaudit-portal-pyc-")]
+    return [
+        p.name
+        for p in (account.parent / "tmp").iterdir()
+        if p.name.startswith("regaudit-portal-pyc-")
+    ]
 
 
 def _start_and_stop(
@@ -297,28 +331,42 @@ def _start_and_stop(
 def _plain_stop(done: subprocess.CompletedProcess, account: Path) -> None:
     said = done.stdout + done.stderr
     assert done.returncode == 1, (done.returncode, said[-400:])
-    assert "Traceback" not in said and said.strip().splitlines()[-1] == "stopped: Nothing was changed."
+    assert (
+        "Traceback" not in said and said.strip().splitlines()[-1] == "stopped: Nothing was changed."
+    )
     assert not default_config_folder().exists() and _pyc_folders(account) == []
 
 
 @pytest.mark.parametrize("sig", ["SIGTERM", "SIGINT"])
 @pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
-def test_a_stop_right_after_the_package_starts_ends_plainly(home, tmp_path, northwind, sig, command):  # noqa: F811
+def test_a_stop_right_after_the_package_starts_ends_plainly(
+    home, tmp_path, northwind, sig, command
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     extra = _expect(northwind) if command == "admin-apply" else []
-    _plain_stop(_start_and_stop(home, _STOP_RIGHT_AFTER_THE_PACKAGE_STARTS, sig, command, str(plan), *extra), home)
+    _plain_stop(
+        _start_and_stop(
+            home, _STOP_RIGHT_AFTER_THE_PACKAGE_STARTS, sig, command, str(plan), *extra
+        ),
+        home,
+    )
 
 
 @pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
-def test_a_hang_up_right_after_the_package_starts_ends_plainly(home, tmp_path, northwind, command):  # noqa: F811
+def test_a_hang_up_right_after_the_package_starts_ends_plainly(home, tmp_path, northwind, command):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     extra = _expect(northwind) if command == "admin-apply" else []
-    _plain_stop(_start_and_stop(home, _STOP_RIGHT_AFTER_THE_PACKAGE_STARTS, "SIGHUP", command, str(plan), *extra), home)
+    _plain_stop(
+        _start_and_stop(
+            home, _STOP_RIGHT_AFTER_THE_PACKAGE_STARTS, "SIGHUP", command, str(plan), *extra
+        ),
+        home,
+    )
 
 
 @pytest.mark.parametrize("sig", ["SIGHUP", "SIGTERM", "SIGINT"])
 def test_a_stop_in_the_first_moments_never_changes_anything_and_ends_plainly_or_by_the_signal(
-    home, tmp_path, northwind, sig  # noqa: F811
+    home, tmp_path, northwind, sig
 ):
     """Sent at real delays after the start. Before the package's first lines run, nothing of ours can take the stop,
     and the process ends by the signal itself. After them it is a plain stop. Nothing is ever written."""
@@ -337,9 +385,13 @@ def test_a_stop_in_the_first_moments_never_changes_anything_and_ends_plainly_or_
             assert (out + err).strip().splitlines()[-1] == "stopped: Nothing was changed.", delay
         else:
             assert proc.returncode == -getattr(signal, sig), (delay, proc.returncode, err[-300:])
-        if sig != "SIGINT":  # Python itself reports a Ctrl-C that comes before any of our code has run
+        if (
+            sig != "SIGINT"
+        ):  # Python itself reports a Ctrl-C that comes before any of our code has run
             assert "Traceback" not in err, (delay, err[-300:])
-        for left in (home.parent / "tmp").iterdir():  # what a death by the signal leaves, cleared for the next delay
+        for left in (
+            home.parent / "tmp"
+        ).iterdir():  # what a death by the signal leaves, cleared for the next delay
             shutil.rmtree(left)
 
 
@@ -362,29 +414,43 @@ sys.exit(main(sys.argv[1:]))
 
 
 @pytest.mark.parametrize("sig", ["SIGHUP", "SIGTERM", "SIGINT"])
-def test_a_stop_after_the_apply_finished_leaves_its_status_and_words_as_they_are(home, tmp_path, northwind, sig):  # noqa: F811
+def test_a_stop_after_the_apply_finished_leaves_its_status_and_words_as_they_are(
+    home, tmp_path, northwind, sig
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
-    done = _start_and_stop(home, _STOP_AFTER_THE_COMMAND_FINISHED, sig, "admin-apply", str(plan), *_expect(northwind))
+    done = _start_and_stop(
+        home, _STOP_AFTER_THE_COMMAND_FINISHED, sig, "admin-apply", str(plan), *_expect(northwind)
+    )
     assert done.returncode == 0, (done.returncode, done.stderr[-400:])
-    assert "stopped" not in done.stdout + done.stderr and done.stdout.startswith("Applied setup plan ")
+    assert "stopped" not in done.stdout + done.stderr and done.stdout.startswith(
+        "Applied setup plan "
+    )
     _complete(default_config_folder())
 
 
 @pytest.mark.parametrize("sig", ["SIGHUP", "SIGTERM", "SIGINT"])
 def test_guard_off_a_stop_after_the_apply_finished_turned_success_into_a_stop_or_a_death(
-    home, tmp_path, northwind, sig  # noqa: F811
+    home, tmp_path, northwind, sig
 ):
     """The control: without ignoring stops once the result is final, the entry point's own handlers take the late
     stop: a "stopped." with status 1, or a death by SIGHUP, after an apply that had completed."""
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     done = _start_and_stop(
-        home, _STOP_AFTER_THE_COMMAND_FINISHED, sig, "admin-apply", str(plan), *_expect(northwind), env={"GUARD_OFF": "1"}
+        home,
+        _STOP_AFTER_THE_COMMAND_FINISHED,
+        sig,
+        "admin-apply",
+        str(plan),
+        *_expect(northwind),
+        env={"GUARD_OFF": "1"},
     )
     assert done.returncode in (1, -signal.SIGHUP) and done.returncode != 0
     _complete(default_config_folder())
 
 
-def test_a_stop_after_the_files_are_checked_is_not_taken(home, tmp_path, run, northwind, monkeypatch):  # noqa: F811
+def test_a_stop_after_the_files_are_checked_is_not_taken(
+    home, tmp_path, run, northwind, monkeypatch
+):
     """Once the files are in place, flushed and read back, the result stands: a stop while the summary is printed
     changes no word and no status. Before that point (the control) the same stop is taken and reported."""
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
@@ -400,7 +466,9 @@ def test_a_stop_after_the_files_are_checked_is_not_taken(home, tmp_path, run, no
     assert code == 0 and out.startswith("Applied setup plan ") and "stopped" not in err
 
 
-def test_guard_off_a_stop_while_the_files_are_read_back_is_still_taken(home, tmp_path, run, northwind, monkeypatch):  # noqa: F811
+def test_guard_off_a_stop_while_the_files_are_read_back_is_still_taken(
+    home, tmp_path, run, northwind, monkeypatch
+):
     plan = _plan_file(tmp_path, prepare_plan([northwind]))
     real = admin._final_check
 
