@@ -66,7 +66,7 @@ Stop it later with `kill $(cat portal.pid)`, which stops it as cleanly as Ctrl-C
 
 ## Reading the result
 
-The big word is the verifier's `trust_status`, copied as it was returned: `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`. Only `TRUSTED` means the report was accepted. Under it the page keeps four questions apart.
+The big word is the verifier's `trust_status`, copied as it was returned: `TRUSTED`, `SELF_SIGNED_ONLY` or `INVALID`. Only `TRUSTED` means the report was accepted. Under it the page keeps five questions apart.
 
 | On the page | What it tells you |
 |---|---|

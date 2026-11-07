@@ -22,8 +22,10 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
-| OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; equivalence-tested for 5/6          |
-|                                         | primitives (concordance pending rectangular `mm_pt`). Not the verified reference.   |
+| OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; covers 5 of the 6 primitives        |
+|                                         | (rectangular `mm_pt` pending). CI does not install it and its tests skip without    |
+|                                         | OpenFHE: the repository records no qualification run against a real OpenFHE        |
+|                                         | installation. Not the verified reference.                                           |
 | External key custody (KMS / HSM)        | `CallableKeyProvider` keeps the signing key off-host; fails closed on bad sig.      |
 | Differential-privacy output noise       | Optional `regaudit_fhe.dp` (Laplace / Gaussian); signed `dp` block. Sensitivity is  |
 |                                         | the deployer's responsibility — the library calibrates, it does not bound.          |

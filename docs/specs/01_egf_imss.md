@@ -80,7 +80,7 @@ them with composite-output noise flooding before decryption.
 
 ## Reference deployment
 
-- Active backend: TenSEAL CKKS (`pip install regaudit-fhe[fhe]`).
+- Active backend: TenSEAL CKKS (`pip install "regaudit-fhe[fhe]"`).
   An OpenFHE backend is on the roadmap but not currently included
   (see `docs/roadmap/openfhe_backend.md`).
 - Bench targets: COMPAS, Folktables-Adult, BRSET-fairness.
