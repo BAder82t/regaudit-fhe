@@ -2,7 +2,10 @@ name: portal
 
 # The Evidence Verification Portal runs only against the published regaudit-fhe 0.2.1 release and refuses any other
 # engine. So this job does not install the library from this checkout, which is what the other jobs do. It installs the
-# exact released wheels listed, with hashes, in portal/ci/requirements-ci.lock, and then runs the Portal's own tests.
+# exact released wheels listed, with hashes, in portal/ci/requirements-ci.lock. It then builds the Portal's own wheel
+# from this checkout, the way "pip install ." in portal/ builds it, installs that wheel without dependencies, and runs
+# the Portal's tests against the installed copy, so that what the package holds (its pages, fonts, licences and samples)
+# is tested too.
 
 on:
   push:
@@ -51,11 +54,76 @@ jobs:
           assert regaudit_fhe.__version__ == "0.2.1", regaudit_fhe.__version__
           print("engine", regaudit_fhe.__version__, "from", here)
           PY
-      - name: Portal tests
-        working-directory: portal
-        env:
-          PYTHONPATH: ${{ github.workspace }}/portal
+      - name: Build the Portal's wheel from this checkout, with the build backend pinned by hash
         run: |
-          "$RUNNER_TEMP/venv/bin/python" -m pytest tests -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/portal-junit.xml"
+          # From the committed files only, in a copy, so that the build leaves nothing in the checkout.
+          mkdir "$RUNNER_TEMP/src"
+          git archive --format=tar HEAD portal | tar -x -C "$RUNNER_TEMP/src"
+          python -m venv "$RUNNER_TEMP/build"
+          "$RUNNER_TEMP/build/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps --no-cache-dir -r portal/ci/build-requirements.lock
+          "$RUNNER_TEMP/build/bin/python" -m pip wheel --no-deps --no-build-isolation --no-index --no-cache-dir --wheel-dir "$RUNNER_TEMP/dist" "$RUNNER_TEMP/src/portal"
+      - name: Install the Portal's wheel alone, and check the engine is still the published release
+        run: |
+          python_="$RUNNER_TEMP/venv/bin/python"
+          "$python_" -m pip list --format=freeze > "$RUNNER_TEMP/before.txt"
+          # --no-deps --no-index: its one dependency, regaudit-fhe[server]==0.2.1, must already be installed from the lock.
+          "$python_" -m pip install --no-deps --no-index --no-cache-dir "$RUNNER_TEMP"/dist/regaudit_portal-*.whl
+          "$python_" -m pip check
+          "$python_" -m pip list --format=freeze > "$RUNNER_TEMP/after.txt"
+          added="$(diff "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | grep '^[<>]' || true)"
+          test "$added" = "> regaudit-portal==0.0.1" || { echo "the install changed more than the Portal: $added"; exit 1; }
+          cd "$RUNNER_TEMP"
+          "$python_" - <<'PY'
+          import base64
+          import hashlib
+          import importlib.metadata
+          import pathlib
+
+          from packaging.requirements import Requirement
+
+          # Every engine file is byte for byte what the published wheel recorded.
+          engine = importlib.metadata.distribution("regaudit-fhe")
+          checked = 0
+          for item in engine.files or []:
+              if item.hash is None:
+                  continue
+              data = pathlib.Path(engine.locate_file(item)).read_bytes()
+              digest = base64.urlsafe_b64encode(hashlib.new(item.hash.mode, data).digest()).rstrip(b"=").decode()
+              assert digest == item.hash.value, f"{item} is not the file the published wheel installed"
+              checked += 1
+          assert checked > 0
+          print("engine files identical to the published wheel:", checked)
+
+          # The Portal's requirements, extras included, are met by what the lock installed.
+          def met(text, extra=""):
+              req = Requirement(text)
+              if req.marker is not None and not req.marker.evaluate({"extra": extra}):
+                  return
+              have = importlib.metadata.version(req.name)
+              assert req.specifier.contains(have, prereleases=True), f"{text} is not met by {req.name} {have}"
+              for wanted in req.extras:
+                  for sub in importlib.metadata.distribution(req.name).requires or []:
+                      if Requirement(sub).marker is not None:
+                          met(sub, wanted)
+              print("met:", text, "with", have)
+
+          for text in importlib.metadata.distribution("regaudit-portal").requires or []:
+              met(text)
+
+          # The copy that will be imported is the installed one, and its own engine check passes.
+          import regaudit_portal
+          import regaudit_portal.engine as portal_engine
+
+          here = pathlib.Path(regaudit_portal.__file__).resolve()
+          assert "site-packages" in here.parts, f"the Portal was imported from {here}"
+          identity = portal_engine.check_engine()
+          assert identity.ok, f"{identity.reason}: {identity.detail}"
+          print("portal from", here.parent, "- engine check passed")
+          PY
+      - name: Portal tests, against the installed copy
+        # Outside the checkout and without PYTHONPATH, so that the regaudit_portal imported is the copy just installed.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pytest "$GITHUB_WORKSPACE/portal/tests" -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/portal-junit.xml"
       - name: No test may be skipped unexpectedly, and none may have been dropped
         run: python portal/ci/check_skips.py "$RUNNER_TEMP/portal-junit.xml" portal/ci/allowed_skips.txt portal/ci/minimum_tests.txt
