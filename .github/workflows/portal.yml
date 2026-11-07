@@ -1,0 +1,61 @@
+name: portal
+
+# The Evidence Verification Portal runs only against the published regaudit-fhe 0.2.1 release and refuses any other
+# engine. So this job does not install the library from this checkout, which is what the other jobs do. It installs the
+# exact released wheels listed, with hashes, in portal/ci/requirements-ci.lock, and then runs the Portal's own tests.
+
+on:
+  push:
+    branches: [main, master]
+    paths: ["portal/**", ".github/workflows/portal.yml"]
+  pull_request:
+    branches: [main, master]
+    paths: ["portal/**", ".github/workflows/portal.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  portal:
+    name: portal (tests against the published 0.2.1 engine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+      - name: Node is present (some Portal tests run the page scripts)
+        run: node --version
+      - name: Install the published engine and the test tools, by hash only
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps --no-cache-dir -r portal/ci/requirements-ci.lock
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+      - name: The installed engine is the published release, not this checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import pathlib
+          import regaudit_fhe
+          here = pathlib.Path(regaudit_fhe.__file__).resolve()
+          assert "site-packages" in here.parts, f"engine imported from {here}"
+          assert regaudit_fhe.__version__ == "0.2.1", regaudit_fhe.__version__
+          print("engine", regaudit_fhe.__version__, "from", here)
+          PY
+      - name: Portal tests
+        working-directory: portal
+        env:
+          PYTHONPATH: ${{ github.workspace }}/portal
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pytest tests -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/portal-junit.xml"
+      - name: No test may be skipped unexpectedly, and none may have been dropped
+        run: python portal/ci/check_skips.py "$RUNNER_TEMP/portal-junit.xml" portal/ci/allowed_skips.txt portal/ci/minimum_tests.txt
