@@ -481,3 +481,84 @@ def test_a_second_stop_with_the_other_signal_prints_no_traceback():
             if proc.poll() is None:
                 proc.kill()
         _assert_quiet_stop(proc, out, tmp)
+
+
+def _early_signal(argv, sig_name, tmp_path, *, hold_mask=False):
+    """Start python the way ``python -m`` does, import the package, and have the process signal itself at once."""
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    home.mkdir(mode=0o700, exist_ok=True)
+    tmp.mkdir(mode=0o700, exist_ok=True)
+    code = (
+        f"import sys; sys.argv[:] = {argv!r}\n"
+        "import regaudit_portal, os, signal, time\n"
+        f"os.kill(os.getpid(), signal.{sig_name})\n"
+        "time.sleep(20)\n"
+        "print('NOT STOPPED')\n"
+    )
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-B", "-c", code],
+        env=_env(tmp, home),
+        cwd=PORTAL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        preexec_fn=_default_signals,
+    )
+    return done, done.stdout + done.stderr, tmp
+
+
+@pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
+def test_a_hang_up_in_the_first_moment_of_an_administrator_command_is_a_plain_stop(
+    command, tmp_path
+):
+    done, out, tmp = _early_signal(["-m", command, "plan.json"], "SIGHUP", tmp_path)
+    assert done.returncode == 1, f"exit {done.returncode}: {out[-300:]}"
+    assert (
+        "stopped: Nothing was changed." in out
+        and "NOT STOPPED" not in out
+        and "Traceback" not in out
+    )
+    assert list(tmp.glob(FOLDER)) == [], "the private folder must be removed"
+
+
+@pytest.mark.parametrize(
+    "argv", [["-m", "serve"], ["-m", "check-config"], ["-m", "demo-setup", "x"]]
+)
+def test_a_hang_up_is_left_alone_for_the_portal_and_the_other_commands(argv, tmp_path):
+    """The change is for the two administrator commands only: everywhere else SIGHUP keeps its default action."""
+    done, out, _ = _early_signal(argv, "SIGHUP", tmp_path)
+    assert done.returncode == -1, (
+        f"exit {done.returncode}: {out[-300:]}"
+    )  # killed by signal 1, as before
+    assert "NOT STOPPED" not in out
+
+
+@pytest.mark.parametrize("sig", ["SIGTERM", "SIGINT"])
+@pytest.mark.parametrize("command", ["admin-apply", "admin-describe"])
+def test_sigterm_and_sigint_in_an_administrator_command_are_unchanged(sig, command, tmp_path):
+    done, out, tmp = _early_signal(["-m", command, "plan.json"], sig, tmp_path)
+    assert done.returncode == 1 and "stopped: Nothing was changed." in out
+    assert list(tmp.glob(FOLDER)) == []
+
+
+def test_a_hang_up_to_a_serving_portal_keeps_its_behaviour(tmp_path):
+    """The running portal does not take SIGHUP: it ends as before, and its graceful stop by SIGTERM still works."""
+    proc, _tmp = _start(["--exit-when-input-closes"])
+    try:
+        _wait_listening(proc)
+        proc.send_signal(signal.SIGHUP)
+        out = proc.communicate(timeout=30)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == -signal.SIGHUP, f"exit {proc.returncode}: {out[-300:]}"
+    proc2, tmp2 = _start(["--exit-when-input-closes"])
+    try:
+        _wait_listening(proc2)
+        proc2.send_signal(signal.SIGTERM)
+        out2 = proc2.communicate(timeout=30)[0]
+    finally:
+        if proc2.poll() is None:
+            proc2.kill()
+    _assert_quiet_stop(proc2, out2, tmp2)
