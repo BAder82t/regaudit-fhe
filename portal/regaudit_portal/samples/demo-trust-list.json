@@ -1,0 +1,9 @@
+{
+  "entries": {
+    "demo-only-synthetic-key": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMaeZEOj0RZt/qMSdHlb5RKUyiN79vrnbPEkNa95obJg=\n-----END PUBLIC KEY-----\n",
+      "status": "active"
+    }
+  }
+}

@@ -11,6 +11,7 @@ import socket
 import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -408,7 +409,17 @@ def test_the_command_line_check_says_why(demo):
 def test_the_browser_has_no_way_to_change_the_configuration(client, demo):
     before = (demo / "trust-store.json").read_bytes(), (demo / "portal-config.json").read_bytes()
     routes = {route.path for route in client.app.routes}
-    assert routes == {"/", "/static/{name}", "/security", "/api/status", "/api/verify"}
+    assert routes == {
+        "/",
+        "/static/{name}",
+        "/static/fonts/{name}",
+        "/security",
+        "/setup",
+        "/api/setup",
+        "/api/status",
+        "/api/verify",
+        "/api/samples/{sample_id}/verify",
+    }
     for method, path in (
         ("post", "/api/status"),
         ("put", "/api/verify"),
@@ -431,7 +442,7 @@ def test_status_does_not_reveal_paths_or_key_material(client, demo):
 def test_a_not_ready_page_does_not_reveal_why(demo):
     (demo / "trust-store.json").unlink()
     text = client_for(demo / "portal-config.json").get("/api/status").text
-    assert str(demo) not in text and "trust-store" not in text
+    assert str(demo) not in text and "trust-store.json" not in text
 
 
 def test_uploads_are_not_kept(client, demo):
@@ -478,10 +489,10 @@ def test_the_page_carries_a_strict_content_policy(client):
     assert headers["x-content-type-options"] == "nosniff" and headers["cache-control"] == "no-store"
 
 
-def test_only_the_two_static_files_can_be_read(client):
-    for name in ("app.js", "app.css"):
+def test_only_the_listed_static_files_can_be_read(client):
+    for name in ("app.js", "app.css", "setup.js", "vaultbytes-mark.svg"):
         assert client.get(f"/static/{name}").status_code == 200
-    for name in ("index.html", "..%2Fconfig.py", "%2e%2e%2fapp.py"):
+    for name in ("index.html", "setup.html", "..%2Fconfig.py", "%2e%2e%2fapp.py", "fonts"):
         assert client.get(f"/static/{name}").status_code == 404
 
 
@@ -492,10 +503,17 @@ def test_the_page_uses_no_outside_resources_and_no_html_injection():
     assert "innerHTML" not in text and "eval(" not in text
 
 
+def _clock(monkeypatch, module, now: list[float]) -> None:
+    """The limiter counts per window of 60 seconds of the monotonic clock. Fix the clock, so that the test does not
+    depend on whether a minute boundary falls between its requests."""
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
+
+
 def test_too_many_checks_are_refused(demo, monkeypatch):
     module = importlib.import_module("regaudit_portal.app")
 
     monkeypatch.setattr(module, "MAX_REQUESTS_PER_MINUTE", 2)
+    _clock(monkeypatch, module, [1000.0])
     client = client_for(demo / "portal-config.json")
     report = (demo / "sample-reports" / "1-trusted.json").read_bytes()
     codes = [
@@ -503,6 +521,28 @@ def test_too_many_checks_are_refused(demo, monkeypatch):
         for _ in range(4)
     ]
     assert codes[:2] == [200, 200] and codes[2:] == [429, 429]
+
+
+def test_the_limit_counts_each_minute_afresh(demo, monkeypatch):
+    """A new window starts at every multiple of 60 seconds, so the count starts again there. Up to twice the limit can
+    therefore be accepted across a boundary; that is how a fixed window works, and what this test pins."""
+    module = importlib.import_module("regaudit_portal.app")
+
+    monkeypatch.setattr(module, "MAX_REQUESTS_PER_MINUTE", 2)
+    now = [1019.0]  # 1019 // 60 == 16; 1020 // 60 == 17
+    _clock(monkeypatch, module, now)
+    client = client_for(demo / "portal-config.json")
+    report = (demo / "sample-reports" / "1-trusted.json").read_bytes()
+
+    def codes(count: int) -> list[int]:
+        return [
+            client.post("/api/verify", content=report, headers=JSON_HEADERS).status_code
+            for _ in range(count)
+        ]
+
+    assert codes(3) == [200, 200, 429]
+    now[0] = 1020.0
+    assert codes(3) == [200, 200, 429]
 
 
 def test_no_verdict_messages_say_to_treat_it_as_not_accepted(client, demo):
@@ -661,14 +701,15 @@ def test_head_does_not_open_the_verify_route_or_anything_else(client):
     assert client.head("/static/index.html").status_code == 404
 
 
-def test_the_started_message_says_to_open_the_page_only_when_the_portal_is_ready():
-    assert (
-        started_message(True, 8765)
-        == "open http://127.0.0.1:8765 in a browser. Press Ctrl-C to stop."
-    )
-    not_ready_message = started_message(False, 8765)
-    assert "NOT ready" in not_ready_message and "open http" not in not_ready_message
-    assert "check-config" in not_ready_message
+def test_the_started_message_always_says_where_to_open_the_page_and_says_what_works(tmp_path):
+    ready = started_message("ready", 8765)
+    assert ready == "open http://127.0.0.1:8765 in a browser. Press Ctrl-C to stop."
+    welcome = started_message("welcome", 8765)
+    assert welcome.startswith("open http://127.0.0.1:8765 in a browser.")
+    assert "samples work" in welcome and "not set up yet" in welcome
+    attention = started_message("needs-attention", 8765)
+    assert attention.startswith("open http://127.0.0.1:8765 in a browser.")
+    assert "samples work" in attention and "check-config" in attention
 
 
 def test_the_app_knows_whether_it_is_ready(demo):

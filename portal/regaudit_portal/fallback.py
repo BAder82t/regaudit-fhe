@@ -18,30 +18,61 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOST = "127.0.0.1"  # local only, as the portal itself
 
+# The look of the portal's own pages, with no file to fetch: the system's fonts instead of the bundled ones, and the
+# same colours, spacing and shapes. The page is allowed this one inline style and nothing else, by its hash.
 _STYLE = (
-    ":root{color-scheme:light dark}"
-    "body{margin:0 auto;max-width:760px;padding:24px 16px 48px;font:16px/1.5 system-ui,-apple-system,sans-serif;"
-    "background:#f6f7f8;color:#1c2126}"
-    "h1{margin:0 0 20px;font-size:26px}"
-    ".panel{padding:20px;background:#fdf3d8;color:#6b4e00;border:1px solid #d6dbe0;border-radius:8px}"
-    ".panel h2{margin:0 0 12px;font-size:18px}.panel p{margin:0 0 10px}.panel p:last-child{margin:0}"
-    "@media (prefers-color-scheme:dark){body{background:#15181c;color:#e7eaed}"
-    ".panel{background:#3b3013;color:#f0d68c;border-color:#343b43}}"
+    ":root{color-scheme:light}*{box-sizing:border-box}"
+    "body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#fff;color:#1a1a1a;"
+    "font:16px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif}"
+    ".bar{background:#fff;border-bottom:2px solid #06f}"
+    ".wrap{width:100%;max-width:924px;margin:0 auto;padding:0 32px}"
+    ".bar .wrap{display:flex;align-items:center;min-height:64px}"
+    ".logo{display:inline-flex;align-items:center;gap:8px;"
+    "font:700 24px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:1px}"
+    ".logo svg{width:40px;height:40px}"
+    "main{flex:1 0 auto;width:100%;max-width:924px;margin:0 auto;padding:32px 32px 64px}"
+    "h1{margin:0 0 8px;font:700 clamp(32px,5vw,48px)/1.2 system-ui,-apple-system,'Segoe UI',sans-serif;"
+    "letter-spacing:-.02em}"
+    ".rule{width:80px;height:3px;margin:0 0 32px;background:linear-gradient(135deg,#4a90e2,#4dd0e1)}"
+    ".panel{padding:32px;background:#fff3d6;color:#6b4200;border:1px solid #6b4200;border-left-width:6px;"
+    "border-radius:8px}"
+    ".panel h2{margin:0 0 16px;font:700 24px/1.2 system-ui,-apple-system,'Segoe UI',sans-serif}"
+    ".panel p{margin:0 0 16px}.panel p:last-child{margin:0}"
+    "footer{position:relative;padding:32px 0;background:#f7f9fc;color:#4a5568;font-size:14px;line-height:1.6}"
+    "footer:before{content:'';position:absolute;top:0;left:0;right:0;height:3px;"
+    "background:linear-gradient(90deg,#4dd0e1,#4a90e2,#4dd0e1)}"
+    "footer p{margin:0}"
+    "@media (max-width:600px){.wrap,main{padding-left:16px;padding-right:16px}.panel{padding:16px}"
+    ".logo{font-size:20px}h1{font-size:32px}}"
 )
 _STYLE_HASH = base64.b64encode(hashlib.sha256(_STYLE.encode("utf-8")).digest()).decode("ascii")
+# The VaultBytes mark, drawn here so the page needs no file of any kind.
+_MARK = (
+    '<svg viewBox="0 0 32 32" width="40" height="40" fill="none" aria-hidden="true" focusable="false">'
+    '<rect width="32" height="32" fill="#fff"/>'
+    '<rect x="4" y="4" width="24" height="24" stroke="#06f" stroke-width="2"/>'
+    '<rect x="8" y="8" width="16" height="16" stroke="#06f" stroke-width="2"/>'
+    '<circle cx="16" cy="16" r="4" fill="#06f"/>'
+    '<path d="M16 0v4M16 28v4M0 16h4M28 16h4" stroke="#06f" stroke-width="2"/></svg>'
+)
 PAGE = (
     '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
     "<title>Evidence Verification Portal</title>\n"
     f"<style>{_STYLE}</style>\n</head>\n<body>\n"
+    f'<header class="bar"><div class="wrap"><span class="logo">{_MARK}VaultBytes</span></div></header>\n'
+    "<main>\n"
     "<h1>Evidence Verification Portal</h1>\n"
+    '<div class="rule"></div>\n'
     '<section class="panel" role="alert">\n'
     "<h2>Verification unavailable</h2>\n"
     "<p>The verification engine could not be loaded or its installation could not be validated.</p>\n"
     "<p>No verification was performed.</p>\n"
     "<p>Contact your administrator or follow the installation instructions. "
     "No uploaded report has been accepted or verified.</p>\n"
-    "</section>\n</body>\n</html>\n"
+    "</section>\n</main>\n"
+    '<footer><div class="wrap"><p>&copy; 2026 VaultBytes Innovations Ltd.</p></div></footer>\n'
+    "</body>\n</html>\n"
 ).encode()
 STATUS = json.dumps({"ready": False, "state": "unavailable"}).encode("utf-8")
 _UNAVAILABLE = json.dumps({"error": "unavailable", "state": "unavailable"}).encode("utf-8")
@@ -61,8 +92,10 @@ _HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
-# Paths that would verify or export. Any method on them gets the same refusal, and no body is read.
+# Paths that would verify or export, a bundled sample included. Any method on them gets the same refusal, and no body
+# is read.
 _REFUSED_PATHS = frozenset({"/api/verify", "/api/export"})
+_REFUSED_PREFIX = "/api/samples/"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -114,7 +147,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(400)
         elif not self._allowed_host():
             self._send(403, _BAD_HOST, "application/json", head=head)
-        elif path in _REFUSED_PATHS:
+        elif path in _REFUSED_PATHS or path.startswith(_REFUSED_PREFIX):
             self._send(503, _UNAVAILABLE, "application/json", head=head)
         elif path in ("/", "/api/status"):
             if method not in ("GET", "HEAD"):

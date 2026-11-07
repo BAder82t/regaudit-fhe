@@ -1,0 +1,49 @@
+{
+  "schema": "regaudit-fhe.report.v2",
+  "schema_version": "regaudit-fhe.report.v2",
+  "algorithm_version": "0.2.1",
+  "primitive": "drift",
+  "backend": "plaintext",
+  "parameter_set": {
+    "backend": "plaintext",
+    "backend_version": "",
+    "coeff_mod_bit_sizes": [],
+    "library_version": "0.2.1",
+    "multiplicative_depth": 6,
+    "poly_modulus_degree": 0,
+    "scaling_factor_bits": 0,
+    "security_bits": 128
+  },
+  "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+  "regulations": [
+    "EU_AI_ACT_ART15",
+    "FDA_SAMD_PCCP",
+    "BASEL_III"
+  ],
+  "result": {
+    "distance": 0.009999999999999995,
+    "drift_bit": true,
+    "w1_distance": 0.09999999999999998
+  },
+  "input_commitments": [],
+  "depth_budget": {
+    "declared": 6,
+    "consumed": 6
+  },
+  "issued_at": "2026-10-01T09:00:00+00:00",
+  "issuer": "DEMO-ONLY unenrolled signer",
+  "key_id": "demo-only-unenrolled-key",
+  "public_key_fingerprint": "31c7e0ea85af0752b9d95a01de395ceea6049757b5328fd5fdfee702fc2b923b",
+  "deployment_id": "demonstration-only",
+  "audit_run_id": "e75aedb8-4d3d-5fc9-9788-f53dd6de3010",
+  "trust_policy_version": 1,
+  "receipt": {
+    "sha256": "55463dcb5fde38a7ec4aa5ead0ba7a52c40a85a6ff5251e881a49e7bcb5d9418",
+    "signature_alg": "Ed25519",
+    "signature_b64": "kU5MEhgXYoYzIhqCneQA5ucTiqV4yw/V2/asRvjK2w8JcQahUxiLan8t4ew81xVuUzQRftC90PE6A/h2fvsmCg==",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAAbdeCuBx88qt3A0QIJjVPHhsxQ2jA9IF9dY8ef/+QU8=\n-----END PUBLIC KEY-----\n"
+  },
+  "audience": [
+    "demo-verifier"
+  ]
+}

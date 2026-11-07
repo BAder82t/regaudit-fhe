@@ -29,6 +29,8 @@ The check hashes the installed source files before the engine is imported, refus
 - Uploads are limited to 1 MB (1,048,576 bytes), parsed as data and never executed, and not kept.
 - It gives no verdict when its configuration, its engine or the check itself fails.
 - Verdicts and reason codes are exactly what the verifier returned.
+- The bundled samples are made-up reports checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else. A report that is uploaded is checked against the administrator's policy, or refused if there is none, so a demonstration key can never be taken for a trusted issuer. Every sample result is labelled a synthetic demonstration. The package holds the demonstration issuer's public key and no private key.
+- The administrator setup page only reads. It creates and changes nothing, enrols no key and never accepts or shows a signing key. Without a configuration the portal starts in welcome mode, where only the samples work, and it never creates the per-user configuration folder by itself.
 
 It does not make the published engine enforce anything. It makes a basic start-up check of the file ownership and permission bits of its own configuration, trust store and replay file, and that check is not the protection described in the limitation above.
 

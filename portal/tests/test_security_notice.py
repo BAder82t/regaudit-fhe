@@ -70,6 +70,8 @@ def test_the_page_the_warning_links_to_is_served_by_the_portal_with_the_full_tex
 def test_the_page_the_warning_links_to_needs_no_network(client):
     page = client.get("/security").text
     for url in re.findall(r'(?:href|src)="([^"]+)"', page):
+        if url == "#main":  # the skip link, to the same page
+            continue
         assert url.startswith("/") and not url.startswith("//"), (
             url
         )  # only this portal's own addresses
