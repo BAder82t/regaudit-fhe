@@ -1429,3 +1429,19 @@ def test_a_key_id_or_name_typed_as_the_fingerprint_is_refused_as_not_a_fingerpri
     assert code == 2 and not default_config_folder().exists()
     assert "is never a fingerprint" in err and "Nothing was changed" in err
     assert "without separators" not in err
+
+
+def test_the_list_of_enrolled_issuers_after_applying_shows_name_and_key_id_but_no_fingerprint(
+    home, tmp_path, run, northwind
+):
+    """The application shows this output in its "The setup plan was applied." dialog."""
+    code, out, err = run(
+        "admin-apply", _plan_file(tmp_path, prepare_plan([northwind])), *_expect(northwind)
+    )
+    assert code == 0, err
+    enrolled = out.split("Enrolled:\n", 1)[1].splitlines()[0]
+    assert enrolled == (
+        f'  1. "{northwind.issuer}", key id {northwind.key_id}: the fingerprint you typed matched its key'
+    )
+    assert fingerprint_of(northwind) not in out + err
+    assert fingerprint_of(northwind).upper() not in out + err

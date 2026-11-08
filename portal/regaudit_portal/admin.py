@@ -1152,7 +1152,8 @@ def _apply(args: Any, progress: Progress) -> int:
         _out(f"failed: {said}", err=True)
         return code
     enrolled = [
-        f"  {n}. {quoted(i.issuer)}, key id {i.key_id}, fingerprint {i.fingerprint}"
+        # Name and key id only: the fingerprint is what the administrator typed and checked, never listed back.
+        f"  {n}. {quoted(i.issuer)}, key id {i.key_id}: the fingerprint you typed matched its key"
         for n, i in enumerate(plan.issuers, start=1)
     ]
     said = _out(
