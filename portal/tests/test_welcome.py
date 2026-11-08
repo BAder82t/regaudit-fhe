@@ -23,8 +23,8 @@ STATIC = PORTAL / "regaudit_portal" / "static"
 LISTENING = re.compile(r"^portal-listening url=http://127\.0\.0\.1:(\d+)/ mode=([a-z-]+)$")
 NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
 NEEDS_ATTENTION = (
-    "This portal cannot check reports right now, because its setup needs attention. Contact your administrator. "
-    "No report can be checked until then."
+    "Your own reports cannot be checked right now: a configuration was found, but it needs attention. Contact your "
+    "administrator. Until then, only the bundled samples can be checked."
 )
 
 

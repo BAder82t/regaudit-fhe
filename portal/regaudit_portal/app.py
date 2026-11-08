@@ -75,8 +75,8 @@ _HEADERS = {
     "Cache-Control": "no-store",
 }
 _NOT_READY = (
-    "This portal cannot check reports right now, because its setup needs attention. Contact your administrator. "
-    "No report can be checked until then."
+    "Your own reports cannot be checked right now: a configuration was found, but it needs attention. Contact your "
+    "administrator. Until then, only the bundled samples can be checked."
 )
 _NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
 # A configuration refused because its trust list holds the bundled demonstration key without saying it is a
@@ -218,6 +218,12 @@ _NO_TRUST_MODE = (
     "Trust mode: none. No trust is set up, so only the bundled demonstration samples can be checked, and each of "
     f"their results is labelled {DEMONSTRATION_LABEL}."
 )
+# A configuration was found but refused or not valid: not the same as having none, so it is said differently.
+_REFUSED_TRUST_MODE = (
+    "Trust mode: none. A configuration was found, but it was refused or is not valid, so none of its trust is used. "
+    "The setup page says what needs attention. Only the bundled demonstration samples can be checked, and each of "
+    f"their results is labelled {DEMONSTRATION_LABEL}."
+)
 _CUSTOMER_MODE = "Trust mode: customer. Reports are checked against the trust set up in this portal's configuration."
 
 
@@ -240,6 +246,8 @@ def trust_mode_fields(portal: Portal | None, own_state: str) -> dict[str, Any]:
             "trust_mode_reason": portal.trust_mode_reason,
             "trust_mode_text": _CUSTOMER_MODE,
         }
+    if own_state == "needs_attention":
+        return {"trust_mode": "none", "trust_mode_text": _REFUSED_TRUST_MODE}
     return {"trust_mode": "none", "trust_mode_text": _NO_TRUST_MODE}
 
 
