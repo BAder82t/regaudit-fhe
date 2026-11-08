@@ -35,7 +35,7 @@ On an Apple silicon Mac with Xcode or the command line tools (for `swiftc`), `co
 
     python3 build_app.py --out /path/to/empty/folder
 
-It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS`, `READ ME FIRST.txt` and `BUILD_MANIFEST.json`, signed ad hoc. To sign with a Developer ID instead, see below. The build is not reproducible: the Swift compiler output differs between builds, so identify a build by its manifest and the hash of the file you were given. Add `--no-dmg` to skip the disk image. Then check the result without a browser (first run in an empty account, then a configured run):
+It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS`, `READ ME FIRST.txt` and `BUILD_MANIFEST.json`, signed ad hoc. To sign with a Developer ID instead, see below. The build is not reproducible: the Swift compiler output differs between builds, so identify a build by its manifest and the hash of the file you were given. Add `--no-dmg` to skip the disk image. Then check the result without a browser (first run in an empty account, then demo-setup's demonstration configuration, then a customer setup made from a setup plan and applied with `admin-apply`, for a made-up test issuer whose public key and one signed report are in the test):
 
     python3 smoke_test.py "/path/to/Evidence Verification Portal.app"
 
