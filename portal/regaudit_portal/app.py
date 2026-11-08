@@ -42,6 +42,7 @@ from .explain import (
 from .plan import MAX_PLAN_BYTES, prepared
 from .samples import DEMONSTRATION_ISSUER, Sample, Samples, SamplesProblem, load_samples
 from .setup import readiness
+from .statuses import build as build_statuses
 
 MAX_REPORT_BYTES = 1 << 20
 MAX_REQUESTS_PER_MINUTE = 120
@@ -309,6 +310,7 @@ def _result_body(
     identity: Identity,
     sample: Sample | None,
     demonstration_trust: bool = False,
+    policy: VerificationPolicy | None = None,
 ) -> dict[str, Any]:
     """What the page shows and what it saves. For a sample, or a file checked against a demonstration trust list, it
     also says, in the data, that it is a demonstration."""
@@ -325,6 +327,15 @@ def _result_body(
         "synthetic_demonstration": sample is not None or demonstration_trust,
         "trust_mode": "demonstration" if sample is not None or demonstration_trust else "customer",
     }
+    if policy is not None:
+        # Additive: the members above keep their meaning. These explain them one by one, from the same engine result.
+        body["statuses"] = build_statuses(
+            verification,
+            body["encryption_declarations"],
+            policy,
+            trust_mode=body["trust_mode"],
+            demonstration=body["synthetic_demonstration"],
+        )
     if sample is not None or demonstration_trust:
         # Inside the result, so it is inside every saved file too. The verdict and the reason codes stay as they are.
         body["demonstration_label"] = DEMONSTRATION_LABEL
@@ -541,7 +552,11 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(503, "no_verdict", _NO_VERDICT)
         verification = result.to_dict()
         explanation = describe(verification, "demonstration", demonstration=True)
-        return JSONResponse(_result_body(verification, explanation, env, raw, identity, sample))
+        return JSONResponse(
+            _result_body(
+                verification, explanation, env, raw, identity, sample, policy=samples.policy
+            )
+        )
 
     @app.post("/api/verify")
     async def check(request: Request) -> Response:
@@ -600,7 +615,16 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             notice=DEMONSTRATION_TRUST_NOTICE,
         )
         return JSONResponse(
-            _result_body(verification, explanation, env, raw, identity, None, demonstration)
+            _result_body(
+                verification,
+                explanation,
+                env,
+                raw,
+                identity,
+                None,
+                demonstration,
+                policy=portal.policy,
+            )
         )
 
     return app

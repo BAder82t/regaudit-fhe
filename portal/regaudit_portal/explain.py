@@ -91,6 +91,12 @@ _REASONS = {
 }
 _UNKNOWN_REASON = "No plain-language explanation is available for this code."
 
+# Said wherever a repeat check is described: the record is this portal's own file, and nothing wider.
+REPLAY_LOCAL_ONLY_TEXT = (
+    "Repeats are detected only against this portal's own record file. The same report could still be used "
+    "somewhere else."
+)
+
 
 def _reasons(result: dict[str, Any]) -> list[dict[str, Any]]:
     blocking = list(result["blocking_reasons"])
@@ -122,11 +128,7 @@ def _warnings(result: dict[str, Any], profile: str) -> list[dict[str, str]]:
                 "No durable local record of seen reports was available for this check.",
             )
         if result["consumption"] == "RECORDED_LOCAL":
-            warn(
-                "REPLAY_LOCAL_ONLY",
-                "Repeats are detected only against this portal's own record file. The same report could still be "
-                "used somewhere else.",
-            )
+            warn("REPLAY_LOCAL_ONLY", REPLAY_LOCAL_ONLY_TEXT)
         if result["chronology"] != "AUTHENTICATED":
             warn("TIME_NOT_INDEPENDENT", "The signing time is only what the signer stated.")
         if result["trust_history"] != "FRESH":
