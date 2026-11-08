@@ -41,6 +41,16 @@
       <dl id="rows" class="checks"></dl>
     </section>
 
+    <section id="enrolled" class="panel" hidden>
+      <h2>Enrolled issuers</h2>
+      <p>The issuers whose reports this portal accepts, as the trust list names them. This page only reads the list. To change it, see How to set up below.</p>
+      <table class="issuers">
+        <thead><tr><th scope="col">Issuer</th><th scope="col">Key id</th><th scope="col">Status</th></tr></thead>
+        <tbody id="enrolled-rows"></tbody>
+      </table>
+      <p class="fine">No fingerprint is shown here, on purpose. Check each fingerprint with its issuer by a call or another route, never from this computer.</p>
+    </section>
+
     <section class="panel">
       <h2>How to set up</h2>
       <p>First prepare a setup plan in the browser, on the <a href="/setup/plan">Prepare a setup plan</a> page. It checks the plan, shows exactly what applying it would write and gives it to you as a file. It writes nothing, keeps nothing and enrols nothing.</p>

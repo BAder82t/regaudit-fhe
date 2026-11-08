@@ -46,6 +46,19 @@ function render(body) {
     if (row.next_step) value.append(document.createElement("br"), line("Next step: ", row.next_step));
     list.append(name, value);
   }
+  // Customer trust only: the enrolled issuers' names, key ids and status, read-only. Never a key or a fingerprint.
+  const enrolled = $("enrolled-rows");
+  enrolled.replaceChildren();
+  for (const issuer of body.issuers || []) {
+    const tr = document.createElement("tr");
+    for (const text of [issuer.issuer, issuer.key_id, issuer.status]) {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      tr.append(cell);
+    }
+    enrolled.append(tr);
+  }
+  $("enrolled").hidden = !(body.issuers && body.issuers.length);
   $("status-message").textContent = "Configuration location: " + body.configuration_in_use;
   // Show only the steps for how this portal was started: the application's menu, or Terminal in a plain install.
   $("steps-app").hidden = !body.commands.in_application;

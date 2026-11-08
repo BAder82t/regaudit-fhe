@@ -600,22 +600,29 @@ def test_the_setup_page_has_no_form_and_sends_nothing():
         assert write not in script, write
 
 
-def test_the_setup_answer_never_carries_key_material_or_the_trust_lists_contents(
-    tmp_path, monkeypatch, demo
-):
+def test_the_setup_answer_never_carries_key_material_or_a_fingerprint(tmp_path, monkeypatch, demo):
+    """The enrolled issuers' names and key ids are listed, as the trust list file states them in plain text. Nothing
+    else from the trust list is: no public key, no part of one, and no fingerprint, computed or stored."""
+    from regaudit_fhe._keys import spki_fingerprint
+
     fake_home(tmp_path, monkeypatch)
     config = install_configuration(demo, default_config_folder())
-    text = client_for(config).get("/api/setup").text
+    body = client_for(config).get("/api/setup").json()
     store = json.loads((demo / "trust-store.json").read_text())
     key_id, entry = next(iter(store["entries"].items()))
+    name = entry["issuer"]
+    assert body["issuers"] == [{"issuer": name, "key_id": key_id, "status": "active"}]
+    text = json.dumps(body)
     for secret in (
         "PUBLIC KEY",
         "PRIVATE KEY",
         entry["public_key_pem"].strip().splitlines()[1],
-        key_id,
-        "Example Synthetic Issuer",
+        spki_fingerprint(entry["public_key_pem"]),
     ):
         assert secret not in text, secret
+    # The name and the key id are in that list and nowhere else in the answer.
+    rest = json.dumps({name: value for name, value in body.items() if name != "issuers"})
+    assert key_id not in rest and name not in rest
 
 
 # ----------------------------------------------------------------------------- what the page tells an administrator

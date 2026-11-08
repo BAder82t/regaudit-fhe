@@ -40,7 +40,7 @@ from .paths import (
     hide_paths,
     shell_path,
 )
-from .plan import LONG_AGE_DAYS
+from .plan import LONG_AGE_DAYS, shown
 from .profiles import explain, guide
 
 HOST = "127.0.0.1"
@@ -225,6 +225,10 @@ def readiness(
     here = location.parent
 
     unsafe: list[str] = []
+    # Customer trust only: each enrolled issuer's name, key id and status, as the trust list file states them in plain
+    # text.
+    # Never a public key and never a fingerprint: a fingerprint is checked with the issuer by another route.
+    issuers: list[dict[str, str]] = []
     checked_files = (
         settings is not None
     )  # the configuration file and its folder passed the check of who can change them
@@ -316,6 +320,10 @@ def readiness(
                     "ok",
                     f"{approved_entries(len(store.keys)).capitalize()} in {display_path(settings.store_path)}.",
                 )
+                issuers = [
+                    {"issuer": shown(entry.issuer), "key_id": shown(key_id), "status": entry.status}
+                    for key_id, entry in sorted(store.entries.items())
+                ]
         except ConfigProblem as exc:
             if exc.kind == "unsafe":
                 unsafe.append(say(str(exc)))
@@ -438,6 +446,7 @@ def readiness(
         # Trust counts as set up only when every requirement passes and the trust list is not a demonstration.
         "trust_configured": all(row["ok"] for row in rows if row["id"] in required),
         "demonstration_trust_list": demonstration,
+        "issuers": issuers,
         # Warnings about a configuration that is usable as it is, word for word.
         "warnings": warnings,
         "rows": rows,
