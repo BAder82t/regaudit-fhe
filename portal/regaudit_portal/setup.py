@@ -105,16 +105,21 @@ _WHY = {
     ),
     "engine": "Only the published regaudit-fhe 0.2.1 may give verdicts, so nothing is checked until it passes.",
 }
+# The commands are in a section of the setup page that is closed until it is opened, so a next step names it.
+_MANUAL = "Manual setup in Terminal (advanced)"
 _STATE_NEXT = {
     "configuration_invalid": (
-        "Run the check-config command below to see the exact reason, and correct the file. A setup plan cannot "
-        "replace an existing configuration."
+        f"Open {_MANUAL} below and run the check-config command there to see the exact reason, then correct the "
+        "file. A setup plan cannot replace an existing configuration."
     ),
     "trust_missing": (
-        "Make the trust list with the trust add command below, using the file name the configuration gives, or "
-        "restore it from a copy."
+        f"Restore the trust list from a copy, or make it with the trust add command in {_MANUAL} below, using the "
+        "file name the configuration gives."
     ),
-    "trust_invalid": "Run the check-config command below to see the exact reason, and correct the trust list.",
+    "trust_invalid": (
+        f"Open {_MANUAL} below and run the check-config command there to see the exact reason, then correct the "
+        "trust list."
+    ),
     "demonstration": (
         "Move this configuration and its trust list out of the folder, then prepare and apply a setup plan with "
         "your issuers' real keys."

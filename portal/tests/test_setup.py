@@ -669,3 +669,15 @@ def test_when_the_engine_stops_passing_the_setup_answer_is_the_unavailable_one(c
     assert client.get("/api/setup").json()["own_reports"]["ready"] is True
     monkeypatch.setattr(engine_module, "files_digest", _crashes)
     assert client.get("/api/setup").json() == REFUSED_STATUS
+
+
+def test_a_next_step_that_needs_a_command_names_the_closed_section_it_is_in():
+    """The commands sit in "Manual setup in Terminal (advanced)", which is closed until it is opened."""
+    import regaudit_portal.setup as readiness_text
+
+    html = (STATIC / "setup.html").read_text()
+    assert "<summary>Manual setup in Terminal (advanced)</summary>" in html
+    for key in ("configuration_invalid", "trust_missing", "trust_invalid"):
+        step = readiness_text._STATE_NEXT[key]
+        assert "Manual setup in Terminal (advanced) below" in step, key
+        assert "command below" not in step, key
