@@ -131,6 +131,7 @@ function snapshot(name) {
   await new Promise((r) => setTimeout(r, 0));
   for (const step of input.steps) {
     if (step.fill) fill(step.fill);
+    if (step.max_age !== undefined) $("max-age").value = step.max_age;
     if (step.action === "check") await page.check();
     if (step.action === "save") page.save();
     snapshot(step.name);
@@ -316,7 +317,7 @@ def test_an_empty_form_lists_everything_missing_sends_nothing_and_says_nothing_a
     assert done["sent"] == []
     assert (
         step["message"]
-        == "Nothing was sent. Fill in what is missing, then press Check the plan again."
+        == "Nothing was sent. Correct what is listed below, then press Check the plan again."
     )
     assert step["problems"] == [
         "Choose a profile.",
@@ -418,6 +419,25 @@ def test_each_profile_has_a_short_accessible_name_and_a_separate_description(wel
     )
 
 
+@needs_node
+def test_a_maximum_age_out_of_range_is_not_called_missing(welcome):
+    """The lead says to correct what is listed, which fits a wrong value as well as a missing one."""
+    signer = issuer_signer()
+    form = _form(signer, fingerprint_of(signer))
+    done = _run_page(
+        welcome.get("/api/setup").json(),
+        [],
+        [{"name": "age", "fill": form, "action": "check", "max_age": "0"}],
+    )
+    step = done["steps"][0]
+    assert done["sent"] == []
+    assert step["problems"] == [
+        "Type the maximum report age as a whole number of days, from 1 to 3650."
+    ]
+    assert step["message"].startswith("Nothing was sent. Correct what is listed below")
+    assert "missing" not in step["message"] and step["focus"] == "max-age"
+
+
 # ----------------------------------------------------------------------------- the script's text, always checked
 
 
@@ -439,5 +459,7 @@ def test_the_script_clears_the_keys_on_every_outcome_of_a_check_and_keeps_only_t
 def test_the_script_never_puts_the_technical_place_in_front_of_a_message():
     script = (STATIC / "plan.js").read_text()
     assert 'body.where + ": "' not in script
-    assert "Nothing was sent. Fill in what is missing, then press Check the plan again." in script
+    assert (
+        "Nothing was sent. Correct what is listed below, then press Check the plan again." in script
+    )
     assert "paste the public key again" in script

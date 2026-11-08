@@ -293,7 +293,7 @@ async function check() {
   if (problems.length) {
     request = null;
     showProblems(
-      "Nothing was sent. Fill in what is missing, then press Check the plan again." + (pasted ? PASTE_AGAIN : ""),
+      "Nothing was sent. Correct what is listed below, then press Check the plan again." + (pasted ? PASTE_AGAIN : ""),
       problems,
     );
     return;
