@@ -475,7 +475,7 @@ def main() -> int:
         script.write_text(TOOL_TEMPLATE.format(what=what, module=module))
         script.chmod(0o755)
 
-    # 5c. The icon: the VaultBytes mark on a white tile
+    # 5c. The icon: the regaudit artwork on a white rounded tile
     with tempfile.TemporaryDirectory() as tmp:
         maker = Path(tmp) / "make_icon"
         run(
@@ -492,7 +492,7 @@ def main() -> int:
         run(
             [
                 str(maker),
-                str(HERE / "icon" / "vaultbytes-mark.svg"),
+                str(HERE / "icon" / "regaudit-icon.png"),
                 str(Path(tmp) / "AppIcon.iconset"),
             ]
         )

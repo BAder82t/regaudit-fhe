@@ -23,7 +23,7 @@ Everything the application runs is inside the bundle:
 - The portal's own source.
 - A small native launcher (`launcher/main.swift`). It picks a free port, starts the bundled Python with `-I -B` (no user site, no `PYTHON*` variables, and no bytecode written into the bundle, which would break its signature), waits until the portal answers, opens the browser, and stops the portal when the application quits or receives SIGTERM, SIGINT or SIGHUP. It holds the write end of a pipe on the portal's standard input and starts the portal with `--exit-when-input-closes`, so if the launcher is killed, even with SIGKILL, the portal notices and stops by itself. It has no window, reads and writes no reports, keys or settings, and keeps no log.
 - `Contents/Resources/tools/`: the two administrator programs described above.
-- An icon made from the VaultBytes mark (`icon/`).
+- The regaudit application icon (`icon/regaudit-icon.png`, drawn on a white rounded tile by `icon/make_icon.swift`).
 - `Contents/Resources/BUILD_MANIFEST.json`: the portal commit and tree, the engine identity, the runtime and lock hashes, the launcher's hash before signing, the build time and the signing status. The hashes of the launcher and of the whole application after signing are in the `BUILD_MANIFEST.json` next to the disk image, because a signature seals the bundle's own files and cannot contain its own final hash.
 - The disk image also holds `READ ME FIRST.txt`: what the application is, how to install and stop it, what to do if macOS will not open it (which depends on how the build is signed), and the approved security limitation text.
 
