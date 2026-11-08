@@ -1413,3 +1413,19 @@ def test_issuers_are_never_added_to_a_configuration_marked_demonstration(
     code, _, err = run("admin-apply", plan, *_expect(later))
     assert code == 2 and "existing configuration is a demonstration" in err
     assert (folder / "trust-store.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("typed", ["northwind-2026", "Northwind Ltd"])
+def test_a_key_id_or_name_typed_as_the_fingerprint_is_refused_as_not_a_fingerprint(
+    home, tmp_path, run, northwind, typed
+):
+    """An issuer's key id or name never stands in for the fingerprint, and the message says so plainly."""
+    code, _out, err = run(
+        "admin-apply",
+        _plan_file(tmp_path, prepare_plan([northwind])),
+        "--expect-fingerprint",
+        f"{northwind.key_id}={typed}",
+    )
+    assert code == 2 and not default_config_folder().exists()
+    assert "is never a fingerprint" in err and "Nothing was changed" in err
+    assert "without separators" not in err

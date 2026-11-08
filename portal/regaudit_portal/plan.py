@@ -412,6 +412,12 @@ def public_key(value: Any, where: str) -> tuple[str, str]:
     return canonical, fingerprint
 
 
+NOT_A_FINGERPRINT = (
+    "A fingerprint is 64 characters, each 0-9 or a-f. What was typed is not. An issuer's name or key id is never a "
+    "fingerprint: type the fingerprint the issuer gave you by a call or another route."
+)
+
+
 def typed_fingerprint(value: Any, where: str) -> str:
     """A fingerprint as typed: 64 hexadecimal characters, upper or lower case, with spaces allowed only around it.
 
@@ -432,18 +438,20 @@ def typed_fingerprint(value: Any, where: str) -> str:
             "fingerprint_format",
             where,
         )
-    if len(text) <= MAX_FINGERPRINT_CHARS and any(sep in text for sep in ": -\t"):
+    if (
+        len(text) <= MAX_FINGERPRINT_CHARS
+        and any(sep in text for sep in ": -\t")
+        and _FINGERPRINT.fullmatch(re.sub(r"[: \t-]", "", text))
+    ):
+        # Only a real fingerprint written with separators gets this advice. A name or a key id, which often has spaces
+        # or dashes, is told below that it is not a fingerprint at all.
         raise PlanProblem(
             "The fingerprint has colons, spaces or dashes in it. Type the 64 characters without separators.",
             "fingerprint_format",
             where,
         )
     if not _FINGERPRINT.fullmatch(text):
-        raise PlanProblem(
-            "A fingerprint is 64 characters, each 0-9 or a-f. What was typed is not.",
-            "fingerprint_format",
-            where,
-        )
+        raise PlanProblem(NOT_A_FINGERPRINT, "fingerprint_format", where)
     return text.lower()
 
 

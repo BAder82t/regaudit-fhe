@@ -938,3 +938,17 @@ def test_ids_that_only_look_like_secret_bytes_are_accepted(signer, request_body)
     ok = json.loads(json.dumps(request_body))
     ok["configuration"]["verifier_id"] = "ab" * 32
     assert _send(ok)[0] == 200
+
+
+def test_a_name_or_key_id_typed_as_the_fingerprint_is_told_it_is_not_one(signer, request_body):
+    """Not "take out the separators": a name or a key id often has spaces or dashes, and it is not a fingerprint."""
+    for typed in (signer.key_id, signer.issuer, "Test Issuer One Ltd", "test-issuer-1"):
+        status, body = _send(_with(request_body, fingerprint=typed))
+        assert status == 422 and body["error"] == "fingerprint_format", typed
+        assert body["message"] == plan_module.NOT_A_FINGERPRINT, typed
+        assert "separators" not in body["message"] and typed not in json.dumps(body), typed
+    # A real fingerprint written with separators still gets the advice to take them out.
+    fp = fingerprint_of(signer)
+    for typed in (":".join(re.findall("..", fp)), " ".join(re.findall("....", fp))):
+        status, body = _send(_with(request_body, fingerprint=typed))
+        assert status == 422 and "without separators" in body["message"]
