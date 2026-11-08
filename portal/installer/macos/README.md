@@ -53,6 +53,12 @@ Every Mach-O file in the bundle is then signed on its own, the deepest first: th
 
 Notarization comes afterwards and is not part of the build. Submitting a disk image to Apple's notary tool uploads all of it. The ticket is then stapled to the disk image, and the result is checked with the stapler and with spctl on the stapled copy. The result belongs to that exact disk image. It is recorded with it and with its evidence, never inside the bundle, and a new build has to be notarized again. The first candidate signed this way, built from commit 8a410d5, was accepted by Apple's notary service.
 
+## Licence notices (optional)
+
+`--compliance-dir <folder>` adds a folder of licence notices to the package. The folder must hold a `bundle-manifest.txt` with one line per file: its SHA-256, a flag (`SHIP-CANDIDATE` or `PRIVATE-EVIDENCE`) and its path. Only `SHIP-CANDIDATE` files are copied, and never anything under `evidence/`. Every one is checked against its SHA-256 before anything is copied, and a mismatch stops the build. The files go into a folder named "Licences and source" next to the application on the disk image, with a short read-me, and into `Contents/Resources/Licences` inside the application, so a copy dragged out of the disk image keeps them. `READ ME FIRST.txt` then says where they are. The portal's pages do not change. `--without-pip-notices` leaves out the `pip-section/` folder and the part of the notices between its pip begin and end markers.
+
+A Developer ID build refuses notices that still contain one of the draft placeholder markers listed in `build_app.py`, unless `--allow-compliance-placeholders` is given for a local candidate that nobody else receives. An ad hoc build takes them, and its log says loudly that it must not be given to anyone. The manifest records only whether the notices are a draft, how many files were copied, whether the pip notices were left out and the SHA-256 of `bundle-manifest.txt`. Adding the notices is not a statement that every licence obligation is met. Without `--compliance-dir` the build is as before.
+
 ## Updating the pinned wheels
 
 Resolve with the bundled runtime's pip (`pip install --dry-run --ignore-installed --only-binary=:all: --report report.json 'regaudit-fhe[server]==0.2.1'`), write each name, version and `sha256` into `requirements.lock`, and review the diff. The engine line must stay at 0.2.1.

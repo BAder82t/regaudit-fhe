@@ -163,7 +163,7 @@ def test_the_build_checks_what_it_signed_in_both_modes_and_keeps_the_ad_hoc_comm
     assert "check_signature(path, signed_by, team)" in source
     assert "check_signature(dmg, signed_by, team, runtime=False)" in source
     assert (
-        "read_me_first(portal_version, signed_by)" in source
+        "read_me_first(portal_version, signed_by, licensed)" in source
         and "signing_statement(signed_by)" in source
     )
     signing = inspect.getsource(build_app.sign_with_developer_id)
