@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ from regaudit_fhe.report_v2 import EnvelopeFormatError, parse_envelope_strict
 from regaudit_fhe.verification import VerificationPolicy, verify
 
 from . import __version__ as PORTAL_VERSION
+from . import batch as batch_module
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
 from .explain import (
@@ -112,16 +115,44 @@ class _TooLarge(Exception):
 
 
 class _RateLimit:
+    """A fixed one-minute window. Every request counts, refusals included."""
+
     def __init__(self, limit: int) -> None:
         self._limit, self._lock, self._window, self._count = limit, threading.Lock(), 0, 0
 
+    def _roll(self) -> None:
+        now = int(time.monotonic() // 60)
+        if now != self._window:
+            self._window, self._count = now, 0
+
     def allow(self) -> bool:
         with self._lock:
-            now = int(time.monotonic() // 60)
-            if now != self._window:
-                self._window, self._count = now, 0
+            self._roll()
             self._count += 1
             return self._count <= self._limit
+
+    def take(self, count: int) -> bool:
+        """All or nothing: count checks are taken together, or none are and nothing is used up."""
+        with self._lock:
+            self._roll()
+            if self._count + count > self._limit:
+                return False
+            self._count += count
+            return True
+
+    def remaining(self) -> int:
+        with self._lock:
+            self._roll()
+            return max(0, self._limit - self._count)
+
+    @staticmethod
+    def resets_in() -> int:
+        """Whole seconds until the window ends and the count starts again from nothing."""
+        return max(1, math.ceil(60 - time.monotonic() % 60))
+
+    @property
+    def limit(self) -> int:
+        return self._limit
 
 
 def _refusal(status: int, code: str, message: str) -> JSONResponse:
@@ -273,6 +304,7 @@ def _status_body(
             "samples": listing,
             "policy_text": "Demonstration trust list only, not trust set up by an administrator.",
             "replay_mode": portal.replay_mode,
+            "batch": batch_module.limits(),
             "engine": engine,
             "not_a_claim": NOT_A_CLAIM,
         }
@@ -297,6 +329,7 @@ def _status_body(
         "profile": portal.profile,
         "approved_count": portal.approved_count,
         "replay_mode": portal.replay_mode,
+        "batch": batch_module.limits(),
         "engine": engine,
         "not_a_claim": NOT_A_CLAIM,
     }
@@ -520,6 +553,58 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _unavailable_status()
         return _status_body(portal, identity.engine, samples, own_state, own_message)
 
+    busy = {"batches": 0}
+
+    async def judge(raw: bytes) -> tuple[int, dict[str, Any]]:
+        """One uploaded report: parse it, check the engine, verify, check the engine again. The status and the body.
+
+        A single upload and every file of a batch go through this, so they are checked identically.
+        """
+        assert portal is not None
+        try:
+            env = _parse(raw)
+        except (
+            CanonicalError,
+            EnvelopeFormatError,
+            InputLimitError,
+            RecursionError,
+            ValueError,
+            TypeError,
+        ):
+            return 422, {"error": "not_a_report", "message": _NOT_A_REPORT}
+        try:
+            async with gate:
+                result, identity = await run_in_threadpool(
+                    _verify_between_checks, env, portal.policy, watch
+                )
+        except _EngineRefused:
+            return 503, {
+                "error": "unavailable",
+                "state": "unavailable",
+                "message": UNAVAILABLE_MESSAGE,
+            }
+        except Exception:
+            logger.exception("verification failed")
+            return 503, {"error": "no_verdict", "message": _NO_VERDICT}
+        verification = result.to_dict()
+        demonstration = own_state == "demonstration"
+        explanation = describe(
+            verification,
+            portal.profile,
+            demonstration=demonstration,
+            notice=DEMONSTRATION_TRUST_NOTICE,
+        )
+        return 200, _result_body(
+            verification,
+            explanation,
+            env,
+            raw,
+            identity,
+            None,
+            demonstration,
+            policy=portal.policy,
+        )
+
     @app.post("/api/samples/{sample_id}/verify")
     async def check_sample(sample_id: str) -> Response:
         """Check one bundled sample, chosen by its id from the list. Nothing is uploaded and no body is read."""
@@ -585,45 +670,143 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(413, "too_large", _TOO_LARGE)
         except asyncio.TimeoutError:
             return _refusal(408, "too_slow", "The upload took too long. Nothing was verified.")
-        try:
-            env = _parse(raw)
-        except (
-            CanonicalError,
-            EnvelopeFormatError,
-            InputLimitError,
-            RecursionError,
-            ValueError,
-            TypeError,
-        ):
-            return _refusal(422, "not_a_report", _NOT_A_REPORT)
-        try:
-            async with gate:
-                result, identity = await run_in_threadpool(
-                    _verify_between_checks, env, portal.policy, watch
-                )
-        except _EngineRefused:
-            return _unavailable()
-        except Exception:
-            logger.exception("verification failed")
-            return _refusal(503, "no_verdict", _NO_VERDICT)
-        verification = result.to_dict()
-        demonstration = own_state == "demonstration"
-        explanation = describe(
-            verification,
-            portal.profile,
-            demonstration=demonstration,
-            notice=DEMONSTRATION_TRUST_NOTICE,
-        )
+        status_code, payload = await judge(raw)
+        return JSONResponse(payload, status_code=status_code)
+
+    def _rate_information(*, refused: int | None = None) -> dict[str, int]:
+        return {
+            "limit": limit.limit,
+            "remaining": limit.remaining(),
+            "resets_in_seconds": limit.resets_in(),
+            **({"batch_size": refused} if refused is not None else {}),
+        }
+
+    def _too_many(message: str, *, size: int | None = None) -> JSONResponse:
+        info = _rate_information(refused=size)
         return JSONResponse(
-            _result_body(
-                verification,
-                explanation,
-                env,
-                raw,
-                identity,
-                None,
-                demonstration,
-                policy=portal.policy,
+            {
+                "error": "too_many",
+                "message": message,
+                "retry_after_seconds": info["resets_in_seconds"],
+                "rate": info,
+            },
+            status_code=429,
+            headers={"Retry-After": str(info["resets_in_seconds"])},
+        )
+
+    @app.post("/api/verify-batch")
+    async def check_batch(request: Request) -> Response:
+        """Several report files in one request. Each is checked as a single upload is, one after another.
+
+        The batch is charged to the same 120-a-minute budget, one check per file, up front: a batch that does not fit
+        in what is left is refused whole, with Retry-After, and nothing is verified. Nothing is kept.
+        """
+        if engine_refused:
+            return _unavailable()
+        if portal is None:
+            return _refusal(
+                503,
+                "not_set_up" if own_state == "not_set_up" else "not_ready",
+                own_message,
+            )
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            return _refusal(415, "bad_type", batch_module.BAD_TYPE)
+        if not limit.allow():
+            return _too_many(
+                "Too many checks in the last minute. Nothing was verified. Try again shortly."
+            )
+        if busy["batches"] >= batch_module.MAX_CONCURRENT_BATCHES:
+            return JSONResponse(
+                {"error": "busy", "message": batch_module.BUSY, "retry_after_seconds": 2},
+                status_code=429,
+                headers={"Retry-After": "2"},
+            )
+        busy["batches"] += 1
+        try:
+            return await _run_batch(request)
+        finally:
+            busy["batches"] -= 1
+
+    async def _run_batch(request: Request) -> Response:
+        assert portal is not None
+        identity = await run_in_threadpool(check_engine)
+        watch.seen(identity)
+        if not identity.ok or identity.engine is None:
+            return _unavailable()
+        try:
+            raw = await asyncio.wait_for(
+                _read_limited(request, batch_module.MAX_BODY_BYTES), BODY_TIMEOUT_S
+            )
+        except _TooLarge:
+            return _refusal(413, "too_large", batch_module.BATCH_TOO_LARGE)
+        except asyncio.TimeoutError:
+            return _refusal(408, "too_slow", "The upload took too long. Nothing was verified.")
+        try:
+            items = batch_module.read_items(raw)
+        except batch_module.BatchFormatError as exc:
+            return _refusal(exc.status, exc.code, exc.message)
+        del raw
+        # One check was charged for the request itself. The rest of the files are taken together, or none are.
+        if not limit.take(len(items) - 1):
+            return _too_many(
+                "This batch does not fit in the checks left this minute. Nothing was verified.",
+                size=len(items),
+            )
+        demonstration = own_state == "demonstration"
+        files: list[dict[str, Any]] = []
+        complete = True
+        engine_stopped = False
+        for item in items:
+            if complete and item.index and await request.is_disconnected():
+                complete = False
+                logger.info("a batch was stopped: the connection closed after %d files", item.index)
+            if not complete:
+                entry = batch_module.file_entry(item, None)
+                files.append(
+                    {
+                        **entry,
+                        "ok": False,
+                        "error": {
+                            "error": "not_run",
+                            "message": batch_module.NOT_RUN_ENGINE
+                            if engine_stopped
+                            else batch_module.NOT_RUN_CLOSED,
+                        },
+                    }
+                )
+                continue
+            try:
+                data = batch_module.decode(item)
+            except batch_module.FileUnreadable as exc:
+                message = _TOO_LARGE if exc.code == "too_large" else _NOT_A_REPORT
+                files.append(
+                    {
+                        **batch_module.file_entry(item, None),
+                        "ok": False,
+                        "error": {"error": exc.code, "message": message},
+                    }
+                )
+                continue
+            status_code, payload = await judge(data)
+            entry = batch_module.file_entry(item, data)
+            if status_code == 200:
+                files.append({**entry, "ok": True, "result": payload})
+                continue
+            files.append({**entry, "ok": False, "error": payload})
+            if payload.get("error") == "unavailable":
+                # The engine failed its check: nothing more is run, and nothing from it was used.
+                complete = False
+                engine_stopped = True
+        trust = trust_mode_fields(portal, own_state)["trust_mode"]
+        return JSONResponse(
+            batch_module.answer(
+                files,
+                batch_id=uuid.uuid4().hex,
+                trust_mode=trust,
+                demonstration=demonstration,
+                replay_mode=portal.replay_mode,
+                rate=_rate_information(),
+                complete=complete,
             )
         )
 

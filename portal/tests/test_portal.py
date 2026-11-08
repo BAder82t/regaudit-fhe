@@ -420,6 +420,7 @@ def test_the_browser_has_no_way_to_change_the_configuration(client, demo):
         "/api/setup/plan",
         "/api/status",
         "/api/verify",
+        "/api/verify-batch",
         "/api/samples/{sample_id}/verify",
     }
     for method, path in (

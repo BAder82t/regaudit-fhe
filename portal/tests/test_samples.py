@@ -204,7 +204,7 @@ def test_only_the_sample_route_ever_touches_the_demonstration_policy():
 
     Visitor().visit(ast.parse((PACKAGE / "app.py").read_text()))
     assert users["samples"] == {"check_sample"}, users
-    assert users["portal"] <= {"check", "_status_body"}, users
+    assert users["portal"] <= {"judge", "_status_body"}, users
     source = (PACKAGE / "app.py").read_text()
     assert "demonstration_policy" not in source and "load_samples()" in source
 
