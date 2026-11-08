@@ -1445,3 +1445,16 @@ def test_the_list_of_enrolled_issuers_after_applying_shows_name_and_key_id_but_n
     )
     assert fingerprint_of(northwind) not in out + err
     assert fingerprint_of(northwind).upper() not in out + err
+
+
+def test_a_first_setup_plan_on_an_existing_configuration_points_to_an_add_issuers_plan(
+    home, tmp_path, run, northwind
+):
+    """The usual reason to apply a plan where a configuration already exists is to add an issuer."""
+    plan = _plan_file(tmp_path, prepare_plan([northwind]))
+    assert run("admin-apply", plan, *_expect(northwind))[0] == 0
+    code, out, _ = run("admin-describe", "--json", plan)
+    problem = json.loads(out)["problem"]
+    assert code == 2 and "There is already a configuration" in problem
+    assert 'To add issuers to it, prepare an "Add issuers" plan instead.' in problem
+    assert "To start again, move the folder's files somewhere else first." in problem

@@ -478,8 +478,8 @@ class Destination:
         if config is not None:
             raise Refused(
                 f"There is already a configuration in {self.folder}. This first version never replaces one. "
-                "To start again, move the folder's files somewhere else first."
-                + finder_steps(self.folder)
+                'To add issuers to it, prepare an "Add issuers" plan instead. To start again, move the '
+                "folder's files somewhere else first." + finder_steps(self.folder)
             )
         if store is not None:
             raise Refused(
