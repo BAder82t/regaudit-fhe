@@ -2,7 +2,7 @@
 
 This builds the Evidence Verification Portal as a double-clickable macOS application for Apple silicon Macs running macOS 14 or newer. Opening it starts the portal on this computer only, opens the default browser at it, and stops the portal when the application quits. A person using it needs no Python installation and no terminal.
 
-It is a **local evaluation build**. It is signed ad hoc, which is enough to run on the Mac that built it. It is not signed with a Developer ID certificate and not notarized, so macOS will warn about it on any other computer. It is not for public distribution.
+It is a **local evaluation build**: an experimental build, not a production-qualified release, and not for public distribution. By default it is signed ad hoc, which is enough to run on the Mac that built it. Such a build is not notarized, so macOS warns about it on any other computer. A build signed with a Developer ID Application certificate (see "Signing with a Developer ID" below) is meant to be notarized by Apple before it is handed to anyone.
 
 ## First launch
 
@@ -10,9 +10,9 @@ Opening the application for the first time, with nothing configured, shows the p
 
 ## Install from the disk image
 
-To install it from the disk image, we just need to drag Evidence Verification Portal onto the Applications folder in the same window and open it from Applications. This opens the browser and we are taken to the portal. The first screen offers a synthetic sample report. We would not need to use Terminal for this. The disk image also contains `READ ME FIRST.txt`, which says what to do if macOS refuses to open a copy that is not notarized.
+To install it from the disk image, we just need to drag Evidence Verification Portal onto the Applications folder in the same window and open it from Applications. This opens the browser and we are taken to the portal. The first screen offers a synthetic sample report. We would not need to use Terminal for this. The disk image also contains `READ ME FIRST.txt`, which says what to do if macOS will not open it. What it says depends on how the build is signed.
 
-A Mac that did not build it would refuse to open this build at first, because it is signed ad hoc and not notarized. The person would need to open System Settings, choose Privacy & Security, choose Open Anyway and type their password. Many people would not be comfortable with this, and this is why this build is only for evaluation under direction. The checksum check in `READ ME FIRST.txt` is done in Terminal. A person who does not use Terminal can skip it, and then they depend on knowing where the file came from.
+A Mac that did not build it would refuse to open an ad hoc build at first, because it is not notarized. The person would need to open System Settings, choose Privacy & Security, choose Open Anyway and type their password. Many people would not be comfortable with this, and this is why an ad hoc build is only for evaluation under direction. A Developer ID build that Apple has notarized opens with the usual macOS prompts. Its `READ ME FIRST.txt` says so, and says that a warning from macOS means the copy is not that build: the person should not bypass it, but delete the copy and ask the sender. The checksum check in `READ ME FIRST.txt` is done in Terminal. A person who does not use Terminal can skip it, and then they depend on knowing where the file came from.
 
 ## What is inside
 
@@ -23,9 +23,9 @@ Everything the application runs is inside the bundle:
 - The portal's own source.
 - A small native launcher (`launcher/main.swift`). It picks a free port, starts the bundled Python with `-I -B` (no user site, no `PYTHON*` variables, and no bytecode written into the bundle, which would break its signature), waits until the portal answers, opens the browser, and stops the portal when the application quits or receives SIGTERM, SIGINT or SIGHUP. It holds the write end of a pipe on the portal's standard input and starts the portal with `--exit-when-input-closes`, so if the launcher is killed, even with SIGKILL, the portal notices and stops by itself. It has no window, reads and writes no reports, keys or settings, and keeps no log.
 - `Contents/Resources/tools/`: the two administrator programs described above.
-- An icon made from the VaultBytes mark (`icon/`).
+- The regaudit application icon (`icon/regaudit-icon.png`, drawn on a white rounded tile by `icon/make_icon.swift`).
 - `Contents/Resources/BUILD_MANIFEST.json`: the portal commit and tree, the engine identity, the runtime and lock hashes, the launcher's hash before signing, the build time and the signing status. The hashes of the launcher and of the whole application after signing are in the `BUILD_MANIFEST.json` next to the disk image, because a signature seals the bundle's own files and cannot contain its own final hash.
-- The disk image also holds `READ ME FIRST.txt`: what the application is, how to install and stop it, what to do about macOS refusing a copy that is not notarized, and the approved security limitation text.
+- The disk image also holds `READ ME FIRST.txt`: what the application is, how to install and stop it, what to do if macOS will not open it (which depends on how the build is signed), and the approved security limitation text.
 
 The portal's own engine check is unchanged and runs inside the bundle. The build refuses to finish unless that check passes there. A packaged engine that is modified, missing or not exactly the published 0.2.1 gives the "Verification unavailable" page, as it does in a normal install. Nothing in the launcher can override that.
 
@@ -35,17 +35,23 @@ On an Apple silicon Mac with Xcode or the command line tools (for `swiftc`), `co
 
     python3 build_app.py --out /path/to/empty/folder
 
-It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS`, `READ ME FIRST.txt` and `BUILD_MANIFEST.json`. The build is not reproducible: the Swift compiler output differs between builds, so identify a build by its manifest and the hash of the file you were given. Add `--no-dmg` to skip the disk image. Then check the result without a browser (first run in an empty account, then a configured run):
+It writes `Evidence Verification Portal.app`, a `.dmg`, `SHA256SUMS`, `READ ME FIRST.txt` and `BUILD_MANIFEST.json`, signed ad hoc. To sign with a Developer ID instead, see below. The build is not reproducible: the Swift compiler output differs between builds, so identify a build by its manifest and the hash of the file you were given. Add `--no-dmg` to skip the disk image. Then check the result without a browser (first run in an empty account, then a configured run):
 
     python3 smoke_test.py "/path/to/Evidence Verification Portal.app"
 
-## Signing for distribution (not done)
+## Signing with a Developer ID
 
-Before sending this application to anyone else we need a Developer ID Application certificate, with its private key in the Keychain of the Mac where we do the build. The only code signing certificate on the build Mac today is an Apple Development one. That cannot be used for this. A Developer ID certificate comes from an Apple Developer Program account, and the account holder needs to confirm that this team is allowed to create it. Nothing has been created or bought.
+To sign with a Developer ID Application certificate whose private key is in the Keychain of the build Mac, add its full name, and its SHA-1 if the Keychain holds more than one certificate with that name:
 
-The signing would need to change in several ways. The bundled Python, all the libraries and extension modules inside it, and the launcher would each need to be signed with this certificate, starting with the files inside. The signature will use the hardened runtime and a secure timestamp. It is not known if the hardened runtime would also need the entitlement that turns off library validation. With all files signed by one team it may not need it, so this has to be tested with the real certificate. The disk image is signed as well.
+    python3 build_app.py --out /path/to/empty/folder \
+        --sign-identity "Developer ID Application: VaultBytes Innovations LTD (939QZ58TG5)" \
+        --sign-identity-sha1 <SHA-1 of that certificate>
 
-Afterwards the disk image is notarized with Apple's notary tool, using credentials stored in the Keychain. The ticket is stapled to the disk image and the result is checked with the stapler, with spctl and with syspolicy_check on a quarantined copy. Submitting the application uploads all of it to Apple. This step is done only when the build is meant to leave this Mac. None of these steps has been run for this application.
+Every Mach-O file in the bundle is then signed on its own, the deepest first: the bundled Python, its libraries and extension modules, and those of the installed packages. Then the bundle is signed, which signs the launcher, and then the disk image. Each signature has a secure timestamp, and each Mach-O file and the bundle use the hardened runtime. There are no entitlements. A candidate built this way ran the smoke test and a full local check (samples, uploads, export, a tampered engine, stopping) with none, so library validation stays on. `--deep` is not used for signing. Nothing secret is passed to the build: codesign finds the key in the Keychain by the certificate's name or SHA-1.
+
+`READ ME FIRST.txt` and `BUILD_MANIFEST.json` say how the build is signed. An ad hoc build says it is signed only ad hoc and not notarized. A Developer ID build names the certificate and says it is intended to be notarized by Apple before it is handed to anyone. After signing, the build checks every signature it made against the signing it was asked for, and it stops if they disagree, so a build can never describe itself as signed in a way it is not.
+
+Notarization comes afterwards and is not part of the build. Submitting a disk image to Apple's notary tool uploads all of it. The ticket is then stapled to the disk image, and the result is checked with the stapler and with spctl on the stapled copy. The result belongs to that exact disk image. It is recorded with it and with its evidence, never inside the bundle, and a new build has to be notarized again. The first candidate signed this way, built from commit 8a410d5, was accepted by Apple's notary service.
 
 ## Updating the pinned wheels
 
@@ -54,7 +60,7 @@ Resolve with the bundled runtime's pip (`pip install --dry-run --ignore-installe
 ## Limits
 
 - Apple silicon only, and macOS 14 or newer (the pinned numpy wheel needs it). No Intel build, no Linux, no Windows.
-- No Developer ID signature and no notarization. Both are needed before the application can go to anyone else (see "Signing for distribution" above).
+- The default build has no Developer ID signature and is not notarized. A build signed with a Developer ID has to be notarized and stapled before it goes to anyone else, and every new build has to be notarized again (see "Signing with a Developer ID" above).
 - A stop request (Quit, SIGTERM, SIGINT, or the launcher's input closing) ends the portal with its private folder removed and no traceback, while it is starting, a moment after it started, or while an upload is still coming in. While the portal is starting it leaves at once and raises nothing inside the engine's libraries, because a library can catch such an interrupt and carry on (pydantic did). Before uvicorn takes over, a deadline of five seconds ends the portal if anything swallowed the stop. Once it is serving, uvicorn's graceful shutdown applies, and an upload that is still arriving gets three seconds before it is cut off, so the launcher's six-second wait is not used up. A second request while the portal is stopping changes nothing and prints no error. The same holds for the `regaudit-portal` command. Started with the launcher's `--exit-when-input-closes` option, the portal takes SIGTERM even if its parent had it ignored, and it unblocks SIGTERM and SIGINT if its parent had blocked them. An ignored SIGINT is left as it is. A stop that lands in the first fraction of a second after the process starts, before Python has run any of the portal's code (about 0.07 s measured on a Linux virtual machine, not yet measured on a Mac, and longer on a slow or busy computer), ends it by the signal itself with nothing left behind. If its parent had SIGTERM ignored, a SIGTERM in that first moment is ignored too, and the launcher's input closing is what then stops the portal. SIGKILL of the portal cannot be handled by any program and leaves the private folder (about 13 MB) in the temporary directory.
 - If the launcher is killed with SIGKILL the portal stops by itself within a few seconds (it sees its standard input close), but a kill of the portal process alone is not detected by anything except the launcher, which then reports it and quits.
 - The check that the engine is the published 0.2.1 covers the engine's installed source files. It does not cover the Python interpreter, the standard library, the other libraries or the portal's own files. Changing those inside the bundle is not detected, although it breaks the bundle's code signature and macOS may then refuse to open it.

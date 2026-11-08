@@ -81,7 +81,7 @@ def test_the_build_keeps_the_bundle_free_of_what_it_created():
 
 
 def test_the_icon_sources_are_there():
-    assert (HERE / "icon" / "vaultbytes-mark.svg").read_text().lstrip().startswith("<svg")
+    assert (HERE / "icon" / "regaudit-icon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert (HERE / "icon" / "make_icon.swift").is_file()
 
 
