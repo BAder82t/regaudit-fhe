@@ -90,7 +90,7 @@ def sign_off(folder: Path, **lines: str | None) -> Path:
     sha = hashlib.sha256((folder / "bundle-manifest.txt").read_bytes()).hexdigest()
     fields = {
         "Bundle revision": "1",
-        "Bundle manifest sha256": sha,
+        "Manifest sha256": sha,
         "Counsel name": "A. Made-Up Counsel",
         "Date": "2026-11-09",
         "Scope": "this made-up test folder",
@@ -336,7 +336,8 @@ def test_the_draft_words_alone_are_not_looked_for_in_upstream_licence_texts(tmp_
         folder, signed_by=NAME, allow_placeholders=False, without_pip=False
     )
     assert (
-        compliance.draft is False and compliance.status == "no placeholder marker found, signed off"
+        compliance.draft is False
+        and compliance.status == "no placeholder marker found, sign-off file matches this manifest"
     )
 
 
@@ -554,7 +555,10 @@ def test_a_resolved_and_signed_off_folder_is_accepted_for_a_developer_id_build(t
         folder, signed_by=NAME, allow_placeholders=False, without_pip=False
     )
     assert compliance.signed_off and not compliance.draft and not compliance.overridden
-    assert compliance.manifest_entries()["compliance"] == "no placeholder marker found, signed off"
+    assert (
+        compliance.manifest_entries()["compliance"]
+        == "no placeholder marker found, sign-off file matches this manifest"
+    )
     build_app.write_licences(compliance, tmp_path / "Licences")
     assert build_app.SIGNOFF not in files_under(tmp_path / "Licences")  # private, never copied
 
@@ -563,7 +567,11 @@ def test_a_resolved_and_signed_off_folder_is_accepted_for_a_developer_id_build(t
     "change, said",
     [
         (None, "there is no COUNSEL_SIGNOFF.txt"),
-        ({"Bundle manifest sha256": "0" * 64}, "does not name the sha256"),
+        ({"Manifest sha256": "0" * 64}, "names another manifest"),
+        ({"Manifest sha256": None}, "no single line 'Manifest sha256: <64 hex>'"),
+        ({"Counsel name": None, "Counsel": "TBC"}, "placeholder or a draft word"),
+        ({"Statement": "todo"}, "placeholder or a draft word"),
+        ({"Statement": "Approved (counsel to confirm wording)."}, "placeholder or a draft word"),
         ({"Counsel name": ""}, "no Counsel line filled in"),
         ({"Counsel name": None}, "no Counsel line filled in"),
         ({"Date": "2026-13-40"}, "no Date: YYYY-MM-DD"),
@@ -585,7 +593,7 @@ def test_a_developer_id_build_needs_counsels_sign_off_for_this_manifest(tmp_path
     ad_hoc = build_app.check_compliance(
         folder, signed_by=None, allow_placeholders=False, without_pip=False
     )
-    assert ad_hoc.status == "no placeholder marker found, not signed off"
+    assert ad_hoc.status == "no placeholder marker found, no matching sign-off file"
 
 
 def test_a_sign_off_for_an_earlier_manifest_no_longer_counts(tmp_path):
@@ -593,7 +601,7 @@ def test_a_sign_off_for_an_earlier_manifest_no_longer_counts(tmp_path):
     sign_off(folder)
     (folder / "licences" / "two" / "LICENSE").write_text("changed licence text\n")
     rehash(folder)  # a changed file means a changed manifest
-    with pytest.raises(SystemExit, match="does not name the sha256"):
+    with pytest.raises(SystemExit, match="names another manifest"):
         build_app.check_compliance(
             folder, signed_by=NAME, allow_placeholders=False, without_pip=False
         )
@@ -622,3 +630,67 @@ def test_the_override_skips_placeholders_and_sign_off_but_is_recorded_and_said_l
         source.count("if compliance.warn:") == 1
         and "compliance.warn:" in source.split("built", 1)[1]
     )
+
+
+def _manifest_sha(folder: Path) -> str:
+    return hashlib.sha256((folder / "bundle-manifest.txt").read_bytes()).hexdigest()
+
+
+def test_a_hash_outside_the_dedicated_line_does_not_count(tmp_path):
+    folder = make_folder(tmp_path)
+    sha = _manifest_sha(folder)
+    path = sign_off(folder, **{"Manifest sha256": None})
+    for extra in (
+        f"# Manifest sha256: {sha}\n",  # in a comment
+        f"Scope: the folder whose manifest is {sha}\n",  # elsewhere in the text
+        f"Bundle manifest sha256: {sha}\n",  # under another name
+        f"Manifest sha256: {sha} (current)\n",  # not alone on its line
+    ):
+        signed = path.read_text()
+        path.write_text(signed + extra)
+        with pytest.raises(SystemExit, match="no single line 'Manifest sha256: <64 hex>'"):
+            build_app.check_compliance(
+                folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+            )
+        path.write_text(signed)
+
+
+def test_an_upper_case_hash_counts_on_the_dedicated_line_only(tmp_path):
+    folder = make_folder(tmp_path)
+    sha = _manifest_sha(folder).upper()
+    sign_off(folder, **{"Manifest sha256": sha})
+    accepted = build_app.check_compliance(
+        folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+    )
+    assert accepted.signed_off is True
+    path = sign_off(folder, **{"Manifest sha256": None})
+    path.write_text(path.read_text() + f"# Manifest sha256: {sha}\n")
+    with pytest.raises(SystemExit, match="no single line"):
+        build_app.check_compliance(
+            folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+        )
+
+
+def test_two_manifest_lines_are_refused_even_if_one_matches(tmp_path):
+    folder = make_folder(tmp_path)
+    path = sign_off(folder)
+    path.write_text(path.read_text() + f"Manifest sha256: {'0' * 64}\n")
+    with pytest.raises(SystemExit, match="no single line"):
+        build_app.check_compliance(
+            folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+        )
+
+
+def test_the_build_says_the_sign_off_is_a_process_guard_not_legal_approval(tmp_path):
+    note = build_app.SIGNOFF_NOTE
+    assert "process guard" in note and "not legal authentication or approval" in note
+    source = inspect.getsource(build_app.main)
+    assert 'print(f"licence notices: {compliance.status}. {SIGNOFF_NOTE}", flush=True)' in source
+    folder = make_folder(tmp_path)
+    with pytest.raises(SystemExit) as refused:
+        build_app.check_compliance(
+            folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+        )
+    assert note in str(refused.value)
+    readme = (HERE / "README.md").read_text()
+    assert "process guard" in readme and "not legal authentication or approval" in readme

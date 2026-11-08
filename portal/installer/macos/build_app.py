@@ -318,7 +318,15 @@ SHIP = "SHIP-CANDIDATE"
 _FLAGS = (SHIP, "PRIVATE-EVIDENCE")
 NEVER_SHIPPED = "evidence"  # a top-level folder that is never copied, in any case of its name
 # Counsel's sign-off, which a Developer ID build needs. It is private: never listed in the manifest, never copied.
+# It is a process guard, so that a distribution build cannot be made by mistake. It is NOT legal authentication or
+# approval: anyone who can write the folder can write this file.
 SIGNOFF = "COUNSEL_SIGNOFF.txt"
+SIGNOFF_NOTE = (
+    f"{SIGNOFF} is a process guard against a distribution build made by mistake. It is not legal authentication or "
+    "approval."
+)
+# The one line that names the manifest the sign-off is for. A hash anywhere else in the file does not count.
+_SIGNOFF_HASH_LINE = re.compile(r"Manifest sha256:[ \t]*([0-9A-Fa-f]{64})")
 PIP_NOTICES = "pip-section"  # the notices for pip, which --without-pip-notices leaves out
 PIP_BEGIN = "===== BEGIN PIP SECTION ====="
 PIP_END = "===== END PIP SECTION ====="
@@ -343,7 +351,9 @@ class Compliance:
         if self.draft:
             return "draft, contains placeholders"
         return "no placeholder marker found, " + (
-            "signed off" if self.signed_off else "not signed off"
+            "sign-off file matches this manifest"
+            if self.signed_off
+            else "no matching sign-off file"
         )
 
     @property
@@ -445,9 +455,9 @@ def shipped_bytes(folder: Path, name: str, sha: str, without_pip: bool) -> bytes
 
 
 def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
-    """What is wrong with counsel's sign-off, or None. It must be a plain UTF-8 file in the folder that names the sha256
-    of the current bundle-manifest.txt and has a filled-in Counsel line, a Date (YYYY-MM-DD) and a Statement, and no
-    placeholder of its own."""
+    """What is wrong with counsel's sign-off, or None. It must be a plain UTF-8 file in the folder with exactly one line
+    ``Manifest sha256: <64 hex>`` naming the sha256 of the current bundle-manifest.txt, a filled-in Counsel line, a Date
+    (YYYY-MM-DD) and a Statement, and nothing that still looks like a placeholder or a draft word (TBC, todo...)."""
     path = folder / SIGNOFF
     if not os.path.lexists(path):
         return f"there is no {SIGNOFF} in the folder"
@@ -455,8 +465,13 @@ def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
         return f"{SIGNOFF} is not a regular file"
     text = text_of(SIGNOFF, path.read_bytes())
     lines = [line.strip() for line in text.splitlines()]
-    if manifest_sha256 not in re.findall(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])", text.lower()):
-        return f"{SIGNOFF} does not name the sha256 of the current {COMPLIANCE_MANIFEST}"
+    named = [m.group(1).lower() for line in lines if (m := _SIGNOFF_HASH_LINE.fullmatch(line))]
+    if len(named) != 1:
+        return f"{SIGNOFF} has no single line 'Manifest sha256: <64 hex>' naming the manifest"
+    if named[0] != manifest_sha256:
+        return (
+            f"{SIGNOFF} names another manifest, not the sha256 of the current {COMPLIANCE_MANIFEST}"
+        )
     if not any(re.match(r"counsel( name)?:\s*\S", line, re.IGNORECASE) for line in lines):
         return f"{SIGNOFF} has no Counsel line filled in"
     dated = False
@@ -472,8 +487,8 @@ def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
         return f"{SIGNOFF} has no Date: YYYY-MM-DD line with a real date"
     if not any(re.match(r"statement:\s*\S", line, re.IGNORECASE) for line in lines):
         return f"{SIGNOFF} has no Statement filled in"
-    if has_placeholder(text, licence_text=True):
-        return f"{SIGNOFF} still holds a placeholder"
+    if has_placeholder(text):  # every marker and draft word, as in the notices themselves
+        return f"{SIGNOFF} still holds a placeholder or a draft word ({', '.join(placeholders_in(text)[:3])})"
     return None
 
 
@@ -516,7 +531,7 @@ def check_compliance(
         raise SystemExit(
             f"--compliance-dir: {'; and '.join(reasons)}. A Developer ID build is meant to be given to people, so it "
             "is refused. Complete the notices and the sign-off, or pass --allow-compliance-placeholders for a local "
-            "candidate that nobody else receives."
+            f"candidate that nobody else receives. {SIGNOFF_NOTE}"
         )
     return Compliance(
         folder=folder,
@@ -763,6 +778,7 @@ def main(argv: list[str] | None = None) -> int:
             f"(sha256 {compliance.manifest_sha256})",
             flush=True,
         )
+        print(f"licence notices: {compliance.status}. {SIGNOFF_NOTE}", flush=True)
         if compliance.warn:
             print(draft_warning(), flush=True)
 
