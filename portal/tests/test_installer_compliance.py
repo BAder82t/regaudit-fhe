@@ -223,7 +223,14 @@ def test_a_developer_id_build_refuses_draft_notices_unless_told_otherwise(tmp_pa
 
 @pytest.mark.parametrize(
     "marker",
-    ["[FOR COUNSEL", "[contact to be added", "[copyright holder to be confirmed"],
+    [
+        *build_app.COMPLIANCE_MARKERS,
+        "[for counsel",  # any case
+        "draft for counsel review",
+        "[COUNSEL: settle this",
+        "[name to be confirmed",  # any bracket about counsel or a confirmation
+        "[ask Counsel later",
+    ],
 )
 def test_each_placeholder_marker_is_caught(tmp_path, marker):
     folder = make_folder(tmp_path)
@@ -243,6 +250,32 @@ def test_each_placeholder_marker_is_caught(tmp_path, marker):
         build_app.check_compliance(
             folder, signed_by=NAME, allow_placeholders=False, without_pip=False
         )
+
+
+def test_the_marker_list_holds_every_marker_the_guard_must_refuse():
+    for marker in (
+        "[FOR COUNSEL",
+        "[contact to be added",
+        "[copyright holder to be confirmed",
+        "[holder to be confirmed",
+        "[Counsel:",
+        "DRAFT FOR COUNSEL",
+    ):
+        assert marker in build_app.COMPLIANCE_MARKERS, marker
+        assert build_app.has_placeholder(f"text {marker} more]"), marker
+        assert build_app.has_placeholder(f"text {marker.lower()} more]"), marker
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Copyright [yyyy] [name of copyright owner]",  # the Apache licence's own appendix
+        "Licensed under the MIT licence. [See LICENSE.]",
+        "The counsel of the project is not a placeholder, and nothing here is to be confirmed.",
+    ],
+)
+def test_ordinary_licence_text_is_not_taken_for_a_placeholder(text):
+    assert not build_app.has_placeholder(text)
 
 
 def test_an_ad_hoc_build_takes_draft_notices_and_says_so_loudly(tmp_path):

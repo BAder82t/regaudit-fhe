@@ -250,8 +250,27 @@ The licence texts, the third-party notices and how to get the source code are in
 "{LICENCES_FOLDER}" next to the application, and inside the application in
 Contents/Resources/{LICENCES_IN_APP}.
 """
-# Text a draft still carries. A Developer ID build refuses notices that hold any of them, unless told otherwise.
-COMPLIANCE_MARKERS = ("[FOR COUNSEL", "[contact to be added", "[copyright holder to be confirmed")
+# Text a draft still carries, matched without regard to case. A Developer ID build refuses notices that hold any of
+# them, unless told otherwise. Any bracket that mentions counsel or something "to be confirmed" counts as well.
+COMPLIANCE_MARKERS = (
+    "[FOR COUNSEL",
+    "[contact to be added",
+    "[copyright holder to be confirmed",
+    "[holder to be confirmed",
+    "[Counsel:",
+    "DRAFT FOR COUNSEL",
+)
+_OPEN_BRACKET = re.compile(r"\[[^\]\n]*?(?:counsel|to be confirmed)", re.IGNORECASE)
+
+
+def has_placeholder(text: str) -> bool:
+    """Whether a text still holds a draft placeholder: one of the markers, or a bracket about counsel or a confirmation."""
+    folded = text.casefold()
+    return any(marker.casefold() in folded for marker in COMPLIANCE_MARKERS) or bool(
+        _OPEN_BRACKET.search(text)
+    )
+
+
 COMPLIANCE_MANIFEST = "bundle-manifest.txt"
 SHIP = "SHIP-CANDIDATE"
 _FLAGS = (SHIP, "PRIVATE-EVIDENCE")
@@ -368,7 +387,7 @@ def check_compliance(
     draft = []
     for name, sha in files:
         text = shipped_bytes(folder, name, sha, without_pip).decode("utf-8", errors="replace")
-        if any(marker in text for marker in COMPLIANCE_MARKERS):
+        if has_placeholder(text):
             draft.append(name)
     if draft and signed_by is not None and not allow_placeholders:
         raise SystemExit(
