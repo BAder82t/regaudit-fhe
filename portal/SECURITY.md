@@ -27,6 +27,7 @@ The check hashes the installed source files before the engine is imported, refus
 - It listens on `127.0.0.1` only, refuses other host names and other web pages, and has no sign-in. Do not put it on a network.
 - The administrator's configuration, including the trust rules and profile, is read once at start-up. No page or request can change it.
 - Uploads are limited to 1 MB (1,048,576 bytes), parsed as data and never executed, and not kept.
+- A batch (`POST /api/verify-batch`) holds at most 20 files and 8 MB in all, each file still at most 1 MB. Each file goes through the same checks as a single upload, counts as one of the 120 checks a minute, and is not kept. A batch that does not fit in the checks left is refused whole before anything is checked.
 - It gives no verdict when its configuration, its engine or the check itself fails.
 - Verdicts and reason codes are exactly what the verifier returned.
 - The bundled samples are made-up reports checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else. A report that is uploaded is checked against the trust list in the portal's configuration, or refused if there is none, and never with the samples' policy. With customer trust that is the administrator's trust, so a demonstration key is never taken for a trusted issuer. In a demonstration configuration every result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`. Every sample result is labelled a synthetic demonstration. The package holds the demonstration issuer's public key and no private key.

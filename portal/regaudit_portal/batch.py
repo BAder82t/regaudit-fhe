@@ -36,7 +36,9 @@ MAX_REPORT_BASE64 = 4 * ((MAX_REPORT_BYTES + 2) // 3)
 MAX_TOTAL_REPORT_BYTES = 8 * (1 << 20)  # all the reports of a batch together
 # The whole request: that much as base64 inside JSON, plus room for the names and the JSON around them.
 MAX_BODY_BYTES = (MAX_TOTAL_REPORT_BYTES * 4 + 2) // 3 + (1 << 16)
-MAX_CONCURRENT_BATCHES = 2  # batches in progress at once; each checks its files one at a time
+MAX_CONCURRENT_BATCHES = (
+    1  # batches in progress at once: the largest one needed about 105 MB on top of the idle process
+)
 MAX_NAME_SHOWN = 120
 
 SCHEMA = "regaudit-portal-batch/1"
