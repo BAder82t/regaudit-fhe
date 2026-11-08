@@ -57,3 +57,74 @@ def test_the_lock_pins_every_package_by_hash_and_the_published_engine():
     assert "regaudit-fhe==0.2.1 \\" in text
     assert text.count("--hash=sha256:") == len(pins)
     assert not any(">" in ln or "<" in ln or "~=" in ln for ln in pins)
+
+
+WORKFLOW = CI.parents[1] / ".github" / "workflows" / "portal.yml"
+TESTS = Path(__file__).resolve().parent
+
+
+def pins(text):
+    """Each pinned line with the hash line that follows it."""
+    rows = text.splitlines()
+    return [(ln, rows[i + 1]) for i, ln in enumerate(rows) if "==" in ln and not ln.startswith("#")]
+
+
+def test_the_launcher_lock_is_pytest_alone_copied_from_the_ci_lock():
+    launcher = pins((CI / "requirements-launcher.lock").read_text())
+    whole = pins((CI / "requirements-ci.lock").read_text())
+    assert [ln.split("==")[0] for ln, _ in launcher] == [
+        "Pygments",
+        "iniconfig",
+        "packaging",
+        "pluggy",
+        "pytest",
+    ]
+    for row in launcher:
+        assert row in whole, row  # the same version and the same hash, byte for byte
+        assert row[1].strip().startswith("--hash=sha256:")
+
+
+def test_the_one_allowed_skip_is_the_swift_type_check():
+    assert check_skips.lines(CI / "allowed_skips.txt") == ["^needs swiftc on macOS$"]
+    # Only one test skips for that reason: the reason is written once, in test_launcher_admin.py.
+    reason = "reason=" + '"needs swiftc on macOS"'
+    users = {p.name: p.read_text().count(reason) for p in TESTS.glob("test_*.py")}
+    assert {name: n for name, n in users.items() if n} == {"test_launcher_admin.py": 1}
+
+
+def test_the_macos_job_runs_the_type_check_alone_with_no_skip_allowed():
+    text = WORKFLOW.read_text()
+    linux, macos = text.split("\n  launcher-macos:\n")
+    assert "runs-on: macos-" in macos and "runs-on: ubuntu-" in linux
+    # The same pinned actions as the ubuntu job, and nothing installed but the hash-pinned lock.
+    for action in (
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+    ):
+        assert action in linux and action in macos
+    installs = [ln for ln in macos.splitlines() if "pip install" in ln]
+    assert installs == [
+        '          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps '
+        "--no-cache-dir -r portal/ci/requirements-launcher.lock"
+    ]
+    assert (
+        '"$GITHUB_WORKSPACE/portal/tests/test_launcher_admin.py::test_the_launcher_type_checks" --noconftest'
+        in macos
+    )
+    assert macos.count("-m pytest") == 1
+    assert (
+        'check_skips.py "$RUNNER_TEMP/launcher-junit.xml" /dev/null "$RUNNER_TEMP/minimum.txt"'
+        in macos
+    )
+    assert "printf '1\\n' > \"$RUNNER_TEMP/minimum.txt\"" in macos
+
+
+def test_with_no_allowed_reason_the_type_check_may_not_be_skipped(tmp_path):
+    xml = junit(
+        tmp_path,
+        '<testcase classname="tests.test_launcher_admin" name="test_the_launcher_type_checks">'
+        '<skipped message="needs swiftc on macOS"/></testcase>',
+    )
+    problems = check_skips.check(xml, check_skips.lines(Path("/dev/null")), 1)
+    assert any("unexpected skip" in p for p in problems)
+    assert any("at least 1" in p for p in problems)
