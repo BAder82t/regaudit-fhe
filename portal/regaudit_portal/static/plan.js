@@ -98,6 +98,8 @@ function addIssuer() {
   renumber();
 }
 
+// One radio button in its label, laid out as before. With a title, the title alone is the button's accessible name and
+// the rest of the text is its description, so a screen reader says "Confidential" and then, separately, what it means.
 function choice(name, value, title, lines, checked) {
   const label = element("label");
   label.className = "option";
@@ -107,8 +109,16 @@ function choice(name, value, title, lines, checked) {
   input.value = value;
   input.checked = checked;
   const text = element("span");
-  text.append(element("strong", title));
-  for (const said of lines) text.append(" ", said);
+  const heading = element("strong", title);
+  const described = element("span");
+  for (const said of lines) described.append(" ", said);
+  text.append(heading, described);
+  if (title) {
+    heading.id = name + "-" + value + "-name";
+    described.id = name + "-" + value + "-description";
+    input.setAttribute("aria-labelledby", heading.id);
+    input.setAttribute("aria-describedby", described.id);
+  }
   label.append(input, " ", text);
   return label;
 }

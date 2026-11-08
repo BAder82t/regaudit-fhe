@@ -115,6 +115,13 @@ function snapshot(name) {
     prepared: prepared === null ? null : Object.keys(prepared).sort(), writes: $("writes").textContent,
     save_hidden: $("save").hidden, everything: everything(),
     problems: $("problems").hidden ? [] : $("problems").children.map((li) => li.textContent), focus: log.focus,
+    choices: document.querySelectorAll("input").filter((r) => r.name === "profile" || r.name === "replay").map((r) => {
+      const all = roots.flatMap((x) => [x, ...x.walk()]);
+      const find = (id) => all.find((e) => e.id === id && id);
+      return { group: r.name, value: r.value, label: r.parent.textContent,
+        name: (find(r.attributes["aria-labelledby"]) || {}).textContent || null,
+        description: (find(r.attributes["aria-describedby"]) || {}).textContent || null };
+    }),
     invalid: [...$("issuers").querySelectorAll("[data-member]"), $("verifier-id"), $("max-age"),
       ...document.querySelectorAll('input[name="profile"]')].filter((e) => e.attributes["aria-invalid"] === "true").map(describe),
   });
@@ -390,6 +397,25 @@ def test_a_configuration_problem_has_no_technical_prefix_and_focuses_its_box(wel
     assert step["message"].startswith(answer["message"])
     assert "configuration:" not in step["message"]
     assert step["focus"] == "verifier-id" and step["invalid"] == ["verifier-id"]
+
+
+@needs_node
+def test_each_profile_has_a_short_accessible_name_and_a_separate_description(welcome):
+    setup = welcome.get("/api/setup").json()
+    done = _run_page(setup, [], [{"name": "shown"}])
+    choices = done["steps"][0]["choices"]
+    profiles = [c for c in choices if c["group"] == "profile"]
+    assert [c["value"] for c in profiles] == [p["name"] for p in setup["guide"]["profiles"]]
+    for shown, profile in zip(profiles, setup["guide"]["profiles"], strict=True):
+        lines = [profile["summary"], *profile["does"], *profile["does_not"]]
+        assert shown["name"] == profile["title"] + "."  # short: the title alone
+        assert shown["description"] == "".join(" " + line for line in lines)
+        # The layout and the text a person reads are as before: the title, then what it means, in one label.
+        assert shown["label"] == " " + profile["title"] + "." + shown["description"]
+    # The replay modes have no title of their own, so their whole text stays their name.
+    assert all(
+        c["name"] is None and c["description"] is None for c in choices if c["group"] == "replay"
+    )
 
 
 # ----------------------------------------------------------------------------- the script's text, always checked
