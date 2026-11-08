@@ -29,6 +29,8 @@ def test_the_old_sentence_about_the_trust_list_and_replay_record_is_gone_everywh
     for path in [*PORTAL.rglob("*.py"), *PORTAL.rglob("*.md"), *STATIC.glob("*")]:
         if "build" in path.parts or "egg-info" in str(path) or "tests" in path.parts:
             continue
+        if path.is_dir():
+            continue
         assert old not in path.read_text(), path
     assert "storage_protections" not in (PORTAL / "regaudit_portal" / "engine.py").read_text()
 

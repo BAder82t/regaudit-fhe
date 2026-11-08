@@ -20,6 +20,13 @@ FHE_NOTICE = (
     "Signature verification does not verify that any FHE (encrypted) computation was executed."
 )
 
+# On every sample result and in every saved sample result. The samples are made-up reports checked against a
+# demonstration trust list, never against anything an administrator set up.
+DEMONSTRATION_NOTICE = (
+    "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration "
+    "trust list. It says nothing about any real report or issuer."
+)
+
 TRUSTED_MEANS = (
     "This means it came from an issuer your administrator approved and has not changed since it was signed. It does "
     "not mean the report's findings are correct."
@@ -320,9 +327,43 @@ def _display(result: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def describe(result: dict[str, Any], profile: str) -> dict[str, Any]:
+# For a sample, the plain-language lines speak of the demonstration trust list, not of an administrator's rules.
+# Only the words around a verdict change. The verdict, the reason codes and every value stay the engine's own.
+_DEMONSTRATION_WORDS = (
+    (
+        "Signature and configured trust rules verified.",
+        "Signature and the demonstration trust list verified.",
+    ),
+    (
+        "Do not rely on this report. Ask whoever sent it for a new copy, or ask your administrator.",
+        "This is a demonstration, so there is nothing to act on.",
+    ),
+    ("an issuer your administrator approved", "the demonstration issuer"),
+    ("an issuer your administrator trusts", "the demonstration issuer"),
+    ("the key your administrator enrolled", "the key in the demonstration trust list"),
+    ("your administrator's list of trusted keys", "the demonstration trust list"),
+    ("your administrator's list", "the demonstration trust list"),
+    ("your administrator's trust list", "the demonstration trust list"),
+    ("your administrator's rules", "the demonstration trust list"),
+    ("your administrator's maximum age", "the demonstration's maximum age"),
+    ("your administrator", "the demonstration setup"),
+    ("the administrator", "the demonstration setup"),
+)
+
+
+def _about_the_demonstration(text: str | None) -> str | None:
+    if text is None:
+        return None
+    for old, new in _DEMONSTRATION_WORDS:
+        text = text.replace(old, new)
+    return text
+
+
+def describe(
+    result: dict[str, Any], profile: str, *, demonstration: bool = False
+) -> dict[str, Any]:
     """Added beside the verifier's result, which is returned untouched."""
-    return {
+    explained = {
         "verdict": _verdict(result),
         "means": TRUSTED_MEANS if result["trust_status"] == "TRUSTED" else None,
         "signature": _signature_line(result),
@@ -331,3 +372,14 @@ def describe(result: dict[str, Any], profile: str) -> dict[str, Any]:
         "warnings": _warnings(result, profile),
         "display": _display(result),
     }
+    if demonstration:
+        for key in ("verdict", "means", "signature", "issuer"):
+            explained[key] = _about_the_demonstration(explained[key])
+        for reason in explained["reasons"]:
+            reason["meaning"] = _about_the_demonstration(reason["meaning"])
+        for warning in explained["warnings"]:
+            warning["message"] = _about_the_demonstration(warning["message"])
+        explained["warnings"].insert(
+            0, {"code": "DEMONSTRATION_ONLY", "message": DEMONSTRATION_NOTICE}
+        )
+    return explained

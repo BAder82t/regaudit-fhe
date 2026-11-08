@@ -407,19 +407,28 @@ class Running:
     """A ``serve`` process. It prints its "open http" line only once it is listening, so reading that line is the wait."""
 
     def __init__(
-        self, tmp_path: Path, args: list[str], *, python_args=None, path_first: Path | None = None
+        self,
+        tmp_path: Path,
+        args: list[str],
+        *,
+        python_args=None,
+        path_first: Path | None = None,
+        env: dict[str, str] | None = None,
+        port: int | None = None,
     ):
-        self.port = _free_port()
-        self.errors = tmp_path / f"stderr-{self.port}.txt"
+        self.port = _free_port() if port is None else port  # 0 asks the portal for any free port
+        number = len(list(tmp_path.glob("temp-*")))
+        self.errors = tmp_path / f"stderr-{number}.txt"
         # The portal's private bytecode folder is made in the temporary directory. Giving each process its own lets the
         # tests see whether it was removed, and leaves nothing behind in the real one.
-        self.temp = tmp_path / f"temp-{self.port}"
+        self.temp = tmp_path / f"temp-{number}"
         self.temp.mkdir()
         paths = [str(path_first)] if path_first else []
         env = dict(
             os.environ,
             PYTHONPATH=os.pathsep.join([*paths, str(PORTAL_FOLDER)]),
             TMPDIR=str(self.temp),
+            **(env or {}),
         )
         command = [
             sys.executable,
@@ -442,6 +451,8 @@ class Running:
         try:
             for line in self.process.stdout:  # type: ignore[union-attr]
                 self.lines.append(line.rstrip())
+                if line.startswith("portal-listening "):
+                    self.port = int(line.split("url=http://127.0.0.1:")[1].split("/")[0])
                 if line.startswith("open http"):
                     break
         finally:
@@ -648,6 +659,17 @@ def test_the_unavailable_page_stops_cleanly_too_and_exits_with_3(tmp_path, demo,
         _stopped_cleanly(running, running.stop(sig), 3)
 
 
+def test_a_stop_the_moment_the_unavailable_page_announces_itself_still_exits_with_3(tmp_path, demo):
+    """Whoever waits for the listening line (a test, a launcher) may stop the portal the instant it appears. The early
+    stop handler must already have been handed over by then, or the exit status would be 0 and not 3."""
+    _damaged_copy(tmp_path, "modified")
+    for sig in (signal.SIGINT, signal.SIGTERM) * 4:
+        with Running(
+            tmp_path, ["serve", "--config", str(demo / "portal-config.json")], path_first=tmp_path
+        ) as running:
+            _stopped_cleanly(running, running.stop(sig), 3)
+
+
 def test_a_hard_kill_is_the_one_stop_that_can_leave_the_folder_and_the_documents_say_so(
     tmp_path, demo
 ):
@@ -733,7 +755,7 @@ def test_after_the_right_engine_is_back_and_the_portal_restarted_the_normal_port
         assert (
             status["ready"] is True
             and status["engine"]["version"] == "0.2.1"
-            and "state" not in status
+            and status["state"] == "ready"
         )
         body = ask(
             normal.port, "POST", "/api/verify",
@@ -768,15 +790,19 @@ def test_the_unavailable_panel_and_the_saving_check_are_on_the_normal_page():
         script.index("async function download()") : script.index("async function start()")
     ]
     assert (
-        'fetch("/api/status")' in saving and "status.ready" in saving
+        'fetch("/api/status")' in saving and "savePermitted(status, lastSaved.body)" in saving
     )  # no export unless the engine passes now
+    assert 'status.state === "unavailable" || !status.engine' in script
 
 
 def test_when_the_page_learns_the_engine_has_stopped_passing_it_clears_every_identity_and_policy_text():
     script = (PORTAL_FOLDER / "regaudit_portal" / "static" / "app.js").read_text()
-    body = script[script.index("function unavailable()") : script.index("function fail(")]
-    for hidden in ("upload", "result", "failure", "not-ready", "record-notice", "saved"):
+    body = script[script.index("function unavailable()") : script.index("function showView(")]
+    assert 'const VIEWS = ["welcome", "samples", "upload", "not-ready"]' in script
+    assert "for (const view of VIEWS) show(view, false);" in body
+    for hidden in ("result", "failure", "record-notice", "saved"):
         assert f'show("{hidden}", false)' in body, hidden
+    assert '$("sample-list").replaceChildren()' in body
     assert 'show("unavailable", true)' in body
     cleared = re.search(r"for \(const id of \[(.*?)\]\)", body, re.S)
     assert cleared, "the texts are cleared by id"
