@@ -29,13 +29,13 @@ from .explain import DEMONSTRATION_LABEL, FHE_NOTICE, NOT_A_CLAIM, printable
 
 # The limits. Each is derived from the existing single-report limits and from what was measured (see the design note):
 # one report is at most 1 MB and 120 checks are allowed a minute, so a batch of 20 uses a sixth of a minute's budget and
-# at most 20 MB of reports could never be sent anyway, because the whole request is capped lower.
+# the reports of a batch together are capped at 8 MB (below 20 x 1 MB, because no real report is near its limit).
 MAX_FILES = 20
 MAX_REPORT_BYTES = 1 << 20  # the single-report limit, unchanged
 MAX_REPORT_BASE64 = 4 * ((MAX_REPORT_BYTES + 2) // 3)
-MAX_BODY_BYTES = 12 * (
-    1 << 20
-)  # all the reports of a batch together, as base64 inside JSON, with their names
+MAX_TOTAL_REPORT_BYTES = 8 * (1 << 20)  # all the reports of a batch together
+# The whole request: that much as base64 inside JSON, plus room for the names and the JSON around them.
+MAX_BODY_BYTES = (MAX_TOTAL_REPORT_BYTES * 4 + 2) // 3 + (1 << 16)
 MAX_CONCURRENT_BATCHES = 2  # batches in progress at once; each checks its files one at a time
 MAX_NAME_SHOWN = 120
 
@@ -47,7 +47,7 @@ NOT_A_BATCH = (
     "accepted. Choose the report files again."
 )
 BATCH_TOO_LARGE = (
-    f"This batch is over the {MAX_BODY_BYTES // (1 << 20)} MB limit for all the files together. Nothing was verified. "
+    f"This batch is over the {MAX_TOTAL_REPORT_BYTES // (1 << 20)} MB limit for all the files together. Nothing was verified. "
     "Send the files in smaller groups."
 )
 NOT_RUN_ENGINE = (
@@ -177,6 +177,7 @@ def limits() -> dict[str, int]:
     return {
         "max_files": MAX_FILES,
         "max_file_bytes": MAX_REPORT_BYTES,
+        "max_total_bytes": MAX_TOTAL_REPORT_BYTES,
         "max_request_bytes": MAX_BODY_BYTES,
         "max_concurrent_batches": MAX_CONCURRENT_BATCHES,
     }

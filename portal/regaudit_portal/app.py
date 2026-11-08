@@ -215,6 +215,19 @@ def _unavailable() -> JSONResponse:
     )
 
 
+async def _watch_for_disconnect(request: Request, gone: asyncio.Event) -> None:
+    """Set ``gone`` when the client closes the connection. ``Request.is_disconnected`` cannot do this here: behind the
+    middleware that adds the headers it always answers no, so the connection is listened to directly."""
+    try:
+        message = await request.receive()
+    except (
+        Exception
+    ):  # nothing to learn from a failing listener: the batch then simply runs to its end
+        return
+    if message.get("type") == "http.disconnect":
+        gone.set()
+
+
 async def _read_limited(request: Request, limit: int = MAX_REPORT_BYTES) -> bytes:
     length = request.headers.get("content-length")
     if length is not None and (not length.isdigit() or int(length) > limit):
@@ -756,47 +769,54 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         files: list[dict[str, Any]] = []
         complete = True
         engine_stopped = False
-        for item in items:
-            if complete and item.index and await request.is_disconnected():
-                complete = False
-                logger.info("a batch was stopped: the connection closed after %d files", item.index)
-            if not complete:
-                entry = batch_module.file_entry(item, None)
-                files.append(
-                    {
-                        **entry,
-                        "ok": False,
-                        "error": {
-                            "error": "not_run",
-                            "message": batch_module.NOT_RUN_ENGINE
-                            if engine_stopped
-                            else batch_module.NOT_RUN_CLOSED,
-                        },
-                    }
-                )
-                continue
-            try:
-                data = batch_module.decode(item)
-            except batch_module.FileUnreadable as exc:
-                message = _TOO_LARGE if exc.code == "too_large" else _NOT_A_REPORT
-                files.append(
-                    {
-                        **batch_module.file_entry(item, None),
-                        "ok": False,
-                        "error": {"error": exc.code, "message": message},
-                    }
-                )
-                continue
-            status_code, payload = await judge(data)
-            entry = batch_module.file_entry(item, data)
-            if status_code == 200:
-                files.append({**entry, "ok": True, "result": payload})
-                continue
-            files.append({**entry, "ok": False, "error": payload})
-            if payload.get("error") == "unavailable":
-                # The engine failed its check: nothing more is run, and nothing from it was used.
-                complete = False
-                engine_stopped = True
+        gone = asyncio.Event()
+        listener = asyncio.ensure_future(_watch_for_disconnect(request, gone))
+        try:
+            for item in items:
+                if complete and item.index and gone.is_set():
+                    complete = False
+                    logger.info(
+                        "a batch was stopped: the connection closed after %d files", item.index
+                    )
+                if not complete:
+                    entry = batch_module.file_entry(item, None)
+                    files.append(
+                        {
+                            **entry,
+                            "ok": False,
+                            "error": {
+                                "error": "not_run",
+                                "message": batch_module.NOT_RUN_ENGINE
+                                if engine_stopped
+                                else batch_module.NOT_RUN_CLOSED,
+                            },
+                        }
+                    )
+                    continue
+                try:
+                    data = batch_module.decode(item)
+                except batch_module.FileUnreadable as exc:
+                    message = _TOO_LARGE if exc.code == "too_large" else _NOT_A_REPORT
+                    files.append(
+                        {
+                            **batch_module.file_entry(item, None),
+                            "ok": False,
+                            "error": {"error": exc.code, "message": message},
+                        }
+                    )
+                    continue
+                status_code, payload = await judge(data)
+                entry = batch_module.file_entry(item, data)
+                if status_code == 200:
+                    files.append({**entry, "ok": True, "result": payload})
+                    continue
+                files.append({**entry, "ok": False, "error": payload})
+                if payload.get("error") == "unavailable":
+                    # The engine failed its check: nothing more is run, and nothing from it was used.
+                    complete = False
+                    engine_stopped = True
+        finally:
+            listener.cancel()
         trust = trust_mode_fields(portal, own_state)["trust_mode"]
         return JSONResponse(
             batch_module.answer(
