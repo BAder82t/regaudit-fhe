@@ -33,6 +33,7 @@
       <p><strong>Security limitation.</strong> Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator. <a href="/security">Read the full limitation</a>.</p>
       <p>Signature verification does not verify that any FHE (encrypted) computation was executed.</p>
     </div>
+    <p id="trust-mode" class="statement" role="status"></p>
 
     <section id="unavailable" class="panel notice" role="alert" hidden>
       <h2>Verification unavailable</h2>
@@ -75,6 +76,7 @@
 
     <section id="upload" class="panel" hidden>
       <h2><span class="step">1</span> Choose a signed report</h2>
+      <p id="upload-demo-note" class="demo-banner" hidden></p>
       <label id="drop" for="file">
         <span id="drop-text">Drop a report file (.json) here, or click to choose one</span>
         <input id="file" type="file" accept=".json,application/json">
@@ -95,6 +97,7 @@
       <p id="demo-banner" class="demo-banner" role="note" hidden></p>
       <p id="result-file" class="fine"></p>
       <p id="verdict" class="verdict"></p>
+      <p id="demo-label" class="demo-label" hidden></p>
       <p id="verdict-meaning"></p>
       <p id="verdict-means"></p>
       <p id="fhe-notice" class="statement">Signature verification does not verify that any FHE (encrypted) computation was executed.</p>

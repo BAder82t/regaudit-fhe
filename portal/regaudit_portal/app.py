@@ -30,7 +30,16 @@ from regaudit_fhe.verification import VerificationPolicy, verify
 from . import __version__ as PORTAL_VERSION
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
-from .explain import DEMONSTRATION_NOTICE, FHE_NOTICE, NOT_A_CLAIM, declarations, describe
+from .explain import (
+    DEMONSTRATION_LABEL,
+    DEMONSTRATION_NOTICE,
+    DEMONSTRATION_TRUST_NOTICE,
+    FHE_NOTICE,
+    NOT_A_CLAIM,
+    declarations,
+    describe,
+)
+from .plan import MAX_PLAN_BYTES, prepared
 from .samples import DEMONSTRATION_ISSUER, Sample, Samples, SamplesProblem, load_samples
 from .setup import readiness
 
@@ -44,6 +53,7 @@ _STATIC_FILES = {
     "app.js": (_STATIC / "app.js", "text/javascript"),
     "app.css": (_STATIC / "app.css", "text/css"),
     "setup.js": (_STATIC / "setup.js", "text/javascript"),
+    "plan.js": (_STATIC / "plan.js", "text/javascript"),
     "vaultbytes-mark.svg": (_STATIC / "vaultbytes-mark.svg", "image/svg+xml"),
 }
 # The three typefaces the pages use, as files of this package. Nothing else in the folder can be asked for.
@@ -69,6 +79,17 @@ _NOT_READY = (
     "No report can be checked until then."
 )
 _NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
+# A configuration refused because its trust list holds the bundled demonstration key without saying it is a
+# demonstration. A plain reason, with no file names: those go to the administrator's terminal.
+_DEMONSTRATION_KEY_REFUSED = (
+    "This portal cannot check your own reports. Its trust list holds the portal's bundled demonstration key, which "
+    "can never be customer trust, and its configuration does not say it is a demonstration, so the configuration is "
+    "refused. Contact your administrator. Until then, only the bundled samples can be checked."
+)
+_DEMONSTRATION_ONLY = (
+    "This portal is set up with a demonstration trust list, not trust set up by an administrator, so your own "
+    "reports are not set up. Files you choose are checked only as a demonstration, and every result says so."
+)
 _SAMPLES_UNAVAILABLE = "The demonstration samples cannot be used right now. Nothing was verified."
 _NOT_A_REPORT = (
     "This file is not a signed report this portal can read. Nothing was verified, so treat it as not accepted. "
@@ -162,14 +183,14 @@ def _unavailable() -> JSONResponse:
     )
 
 
-async def _read_limited(request: Request) -> bytes:
+async def _read_limited(request: Request, limit: int = MAX_REPORT_BYTES) -> bytes:
     length = request.headers.get("content-length")
-    if length is not None and (not length.isdigit() or int(length) > MAX_REPORT_BYTES):
+    if length is not None and (not length.isdigit() or int(length) > limit):
         raise _TooLarge
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_REPORT_BYTES:
+        if len(body) > limit:
             raise _TooLarge
     return bytes(body)
 
@@ -188,7 +209,38 @@ def _unavailable_status() -> dict[str, Any]:
 
 
 def _own_message(state: str) -> str:
+    if state == "demonstration":
+        return _DEMONSTRATION_ONLY
     return _NOT_SET_UP if state == "not_set_up" else _NOT_READY
+
+
+_NO_TRUST_MODE = (
+    "Trust mode: none. No trust is set up, so only the bundled demonstration samples can be checked, and each of "
+    f"their results is labelled {DEMONSTRATION_LABEL}."
+)
+_CUSTOMER_MODE = "Trust mode: customer. Reports are checked against the trust set up in this portal's configuration."
+
+
+def trust_mode_fields(portal: Portal | None, own_state: str) -> dict[str, Any]:
+    """Which mode the portal is in, for the status and the setup page. It comes from the configuration the portal
+    was started with, and only a different configuration at the next start can change it."""
+    if portal is not None and own_state == "demonstration":
+        return {
+            "trust_mode": "demonstration",
+            "demonstration_label": DEMONSTRATION_LABEL,
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": (
+                f"Trust mode: demonstration. {DEMONSTRATION_LABEL}. The portal was started with a demonstration "
+                f"configuration ({portal.trust_mode_reason}), so files are checked only as a demonstration."
+            ),
+        }
+    if portal is not None and own_state == "ready":
+        return {
+            "trust_mode": "customer",
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": _CUSTOMER_MODE,
+        }
+    return {"trust_mode": "none", "trust_mode_text": _NO_TRUST_MODE}
 
 
 def _status_body(
@@ -196,14 +248,31 @@ def _status_body(
     engine: dict[str, Any],
     samples: Samples | None,
     own_state: str,
+    own_message: str | None = None,
 ) -> dict[str, Any]:
     """Whether your own reports can be checked, which samples there are, and which engine would check them."""
     listing = samples.listing() if samples is not None else []
+    mode = trust_mode_fields(portal, own_state)
+    if portal is not None and own_state == "demonstration":
+        # Never "ready": a demonstration trust list is not trust set up by an administrator.
+        return {
+            "ready": False,
+            "state": "demonstration",
+            **mode,
+            "message": _DEMONSTRATION_ONLY,
+            "demonstration_checks": True,
+            "samples": listing,
+            "policy_text": "Demonstration trust list only, not trust set up by an administrator.",
+            "replay_mode": portal.replay_mode,
+            "engine": engine,
+            "not_a_claim": NOT_A_CLAIM,
+        }
     if portal is None:
         return {
             "ready": False,
             "state": own_state,
-            "message": _own_message(own_state),
+            **mode,
+            "message": own_message or _own_message(own_state),
             "samples": listing,
             "engine": engine,
             "not_a_claim": NOT_A_CLAIM,
@@ -212,6 +281,7 @@ def _status_body(
     return {
         "ready": True,
         "state": "ready",
+        **mode,
         "samples": listing,
         "policy_id": policy.policy_id,
         "policy_text": f"Policy {policy.policy_id}, {approved_entries(portal.approved_count)}.",
@@ -230,8 +300,10 @@ def _result_body(
     raw: bytes,
     identity: Identity,
     sample: Sample | None,
+    demonstration_trust: bool = False,
 ) -> dict[str, Any]:
-    """What the page shows and what it saves. For a sample it also says, in the data, that it is a demonstration."""
+    """What the page shows and what it saves. For a sample, or a file checked against a demonstration trust list, it
+    also says, in the data, that it is a demonstration."""
     body = {
         "verification": verification,
         "explanation": explanation,
@@ -242,14 +314,27 @@ def _result_body(
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "portal_version": PORTAL_VERSION,
         "not_a_claim": NOT_A_CLAIM,
-        "synthetic_demonstration": sample is not None,
+        "synthetic_demonstration": sample is not None or demonstration_trust,
+        "trust_mode": "demonstration" if sample is not None or demonstration_trust else "customer",
     }
+    if sample is not None or demonstration_trust:
+        # Inside the result, so it is inside every saved file too. The verdict and the reason codes stay as they are.
+        body["demonstration_label"] = DEMONSTRATION_LABEL
     if sample is not None:
         body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
             "notice": DEMONSTRATION_NOTICE,
             "sample": {"id": sample.id, "title": sample.title},
             "issuer": DEMONSTRATION_ISSUER,
             "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator",
+        }
+    elif demonstration_trust:
+        body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
+            "notice": DEMONSTRATION_TRUST_NOTICE,
+            "sample": None,
+            "issuer": None,
+            "trust_list": "a demonstration trust list in this portal's configuration, not trust set up by an administrator",
         }
     return body
 
@@ -264,6 +349,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     """
     portal: Portal | None = None
     own_state = "not_set_up"
+    own_text: str | None = None  # a plain reason for the page, when there is one that names no file
     start = check_engine()
     engine_refused = not start.ok
     if engine_refused:
@@ -271,11 +357,15 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     elif config_path is not None:
         try:
             portal = load_portal(config_path)
-            own_state = "ready"
+            # A demonstration trust list is kept apart: never "ready", and every result it gives is labelled.
+            own_state = "demonstration" if portal.demonstration else "ready"
         except ConfigProblem as exc:
             logger.error("portal not ready: %s", exc)
             own_state = "needs_attention"
             engine_refused = isinstance(exc, EngineProblem)
+            if exc.kind == "demonstration_key":
+                own_text = _DEMONSTRATION_KEY_REFUSED
+    own_message = own_text or _own_message(own_state)
     samples: Samples | None = None
     if not engine_refused:
         try:
@@ -285,11 +375,13 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     configured = Path(config_path).absolute() if config_path is not None else None
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.ready = portal is not None
+    app.state.ready = portal is not None and own_state == "ready"
     app.state.mode = (
         "unavailable"
         if engine_refused
-        else {"ready": "ready", "not_set_up": "welcome"}.get(own_state, "needs-attention")
+        else {"ready": "ready", "not_set_up": "welcome", "demonstration": "demonstration"}.get(
+            own_state, "needs-attention"
+        )
     )
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     origins = {f"http://{host}" for host in hosts}
@@ -348,11 +440,56 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _unavailable_status()
         return readiness(
             configured,
+            mode=trust_mode_fields(portal, own_state),
             port=port,
             identity=identity,
             own_state=own_state,
-            own_message=_own_message(own_state),
+            own_message=own_message,
         )
+
+    @app.api_route("/setup/plan", methods=["GET", "HEAD"])
+    def plan_page() -> FileResponse:
+        return FileResponse(_STATIC / "plan.html", media_type="text/html")
+
+    @app.post("/api/setup/plan")
+    async def prepare_plan(request: Request) -> Response:
+        """Stateless: check a setup plan and say exactly what applying it would write.
+
+        It writes nothing, keeps nothing and enrols nothing. It reads no file and does not look at the configuration.
+        Applying a plan is a separate command that this process never imports, so no request can reach it.
+        """
+        if engine_refused:
+            return _unavailable()
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            return _refusal(
+                415, "bad_type", "A setup plan is sent as JSON from the portal's own page."
+            )
+        if not limit.allow():
+            return _refusal(
+                429, "too_many", "Too many requests in the last minute. Try again shortly."
+            )
+        identity = await run_in_threadpool(check_engine)
+        watch.seen(identity)
+        if not identity.ok:
+            return _unavailable()
+        try:
+            raw = await asyncio.wait_for(_read_limited(request, MAX_PLAN_BYTES), BODY_TIMEOUT_S)
+        except _TooLarge:
+            return _refusal(
+                413, "too_large", "This is far larger than a setup plan. Nothing was kept."
+            )
+        except asyncio.TimeoutError:
+            return _refusal(408, "too_slow", "The request took too long. Nothing was kept.")
+        try:
+            status_code, body = await run_in_threadpool(prepared, raw)
+        except Exception as exc:  # never log the exception's text: it could carry what was entered
+            logger.error("preparing a setup plan failed: %s", type(exc).__name__)
+            return _refusal(500, "no_plan", "The plan could not be checked. Nothing was kept.")
+        after = await run_in_threadpool(check_engine)
+        watch.seen(after)
+        if not after.ok:
+            return _unavailable()
+        return JSONResponse(body, status_code=status_code)
 
     @app.api_route("/api/status", methods=["GET", "HEAD"])
     def status() -> dict[str, Any]:
@@ -362,7 +499,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         watch.seen(identity)
         if not identity.ok or identity.engine is None:
             return _unavailable_status()
-        return _status_body(portal, identity.engine, samples, own_state)
+        return _status_body(portal, identity.engine, samples, own_state, own_message)
 
     @app.post("/api/samples/{sample_id}/verify")
     async def check_sample(sample_id: str) -> Response:
@@ -406,7 +543,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(
                 503,
                 "not_set_up" if own_state == "not_set_up" else "not_ready",
-                _own_message(own_state),
+                own_message,
             )
         if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
             return _refusal(415, "bad_type", _NOT_A_REPORT)
@@ -447,7 +584,15 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             logger.exception("verification failed")
             return _refusal(503, "no_verdict", _NO_VERDICT)
         verification = result.to_dict()
-        explanation = describe(verification, portal.profile)
-        return JSONResponse(_result_body(verification, explanation, env, raw, identity, None))
+        demonstration = own_state == "demonstration"
+        explanation = describe(
+            verification,
+            portal.profile,
+            demonstration=demonstration,
+            notice=DEMONSTRATION_TRUST_NOTICE,
+        )
+        return JSONResponse(
+            _result_body(verification, explanation, env, raw, identity, None, demonstration)
+        )
 
     return app

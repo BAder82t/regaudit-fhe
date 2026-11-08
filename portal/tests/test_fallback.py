@@ -91,7 +91,7 @@ def test_readiness_is_false_and_says_nothing_else(fallback):
     assert ask(fallback, "HEAD", "/api/status")[2] == b""
 
 
-@pytest.mark.parametrize("path", ["/api/verify", "/api/export"])
+@pytest.mark.parametrize("path", ["/api/verify", "/api/export", "/api/setup/plan"])
 @pytest.mark.parametrize("method", ["POST", "GET", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 def test_verification_and_export_do_not_function_for_any_method(fallback, path, method):
     report = b'{"anything": "an upload"}'

@@ -31,6 +31,7 @@
     <section class="panel">
       <h2>This page only reads</h2>
       <p>It shows what is set up and what is not, and it explains what an administrator has to prepare. It does not create or change anything: no trust list, no key, no setting, no approval. It never asks for a signing key and never shows one.</p>
+      <p id="trust-mode" class="statement" role="status"></p>
       <p id="own-reports" class="statement"></p>
     </section>
 
@@ -38,6 +39,12 @@
       <h2>Status</h2>
       <p id="status-message" class="fine">Looking at what is set up...</p>
       <dl id="rows" class="checks"></dl>
+    </section>
+
+    <section class="panel">
+      <h2>Guided setup</h2>
+      <p>You can prepare a setup plan in the browser, on the <a href="/setup/plan">Prepare a setup plan</a> page. It checks the plan, shows exactly what applying it would write and gives it to you as a file. It writes nothing, keeps nothing and enrols nothing.</p>
+      <p>You apply the plan yourself, outside the browser: with Administrator setup in the application's menu, or with the admin-apply command below in Terminal. Then you type each issuer's fingerprint again, as the issuer gave it to you, and the plan is applied only if every one matches the key in it. No page and no request of this portal can apply a plan.</p>
     </section>
 
     <section class="panel">
@@ -61,7 +68,8 @@
   "verifier_id": "your-organization",
   "max_age_days": 30,
   "replay_mode": "check",
-  "replay_db": "replay.db"
+  "replay_db": "replay.db",
+  "trust_mode": "customer"
 }</pre>
     </section>
 
@@ -71,7 +79,11 @@
       <pre id="cmd-trust-add">regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
   --public-key issuer.pub --fingerprint FINGERPRINT</pre>
       <p>To look at the result, run <code id="cmd-check-config">regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
-      <p><strong>For now, making the trust list needs these commands.</strong> Creating it in the browser would be a separate change that has to be designed and reviewed on its own. This page does not do it.</p>
+      <p>To apply a setup plan in Terminal, look at it first, then apply it with the fingerprint each issuer gave you. Applying refuses to replace an existing configuration or trust list, and it never removes, revokes or replaces a key.</p>
+      <pre id="cmd-admin-describe">regaudit-portal admin-describe setup-plan.json</pre>
+      <pre id="cmd-admin-apply">regaudit-portal admin-apply setup-plan.json \
+  --expect-fingerprint KEY_ID=FINGERPRINT_FROM_THE_ISSUER</pre>
+      <p><strong>For now, making the trust list needs these commands.</strong> The browser cannot create or change the trust list. The Prepare a setup plan page only makes a plan file for these commands, and this page does not do it.</p>
     </section>
 
     <section class="panel">

@@ -29,10 +29,35 @@ The check hashes the installed source files before the engine is imported, refus
 - Uploads are limited to 1 MB (1,048,576 bytes), parsed as data and never executed, and not kept.
 - It gives no verdict when its configuration, its engine or the check itself fails.
 - Verdicts and reason codes are exactly what the verifier returned.
-- The bundled samples are made-up reports checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else. A report that is uploaded is checked against the administrator's policy, or refused if there is none, so a demonstration key can never be taken for a trusted issuer. Every sample result is labelled a synthetic demonstration. The package holds the demonstration issuer's public key and no private key.
+- The bundled samples are made-up reports checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else. A report that is uploaded is checked against the trust list in the portal's configuration, or refused if there is none, and never with the samples' policy. With customer trust that is the administrator's trust, so a demonstration key is never taken for a trusted issuer. In a demonstration configuration every result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`. Every sample result is labelled a synthetic demonstration. The package holds the demonstration issuer's public key and no private key.
 - The administrator setup page only reads. It creates and changes nothing, enrols no key and never accepts or shows a signing key. Without a configuration the portal starts in welcome mode, where only the samples work, and it never creates the per-user configuration folder by itself.
+- The page that prepares a setup plan only computes an answer. It writes nothing, keeps nothing and enrols nothing.
 
 It does not make the published engine enforce anything. It makes a basic start-up check of the file ownership and permission bits of its own configuration, trust store and replay file, and that check is not the protection described in the limitation above.
+
+## Administrator setup
+
+The browser can prepare a setup plan and nothing more. The one route that does it works out an answer from what it is sent and keeps nothing. No page or request can write, change or enrol trust. The portal process never loads the code that applies a plan.
+
+A person applies a plan outside the browser, with `regaudit-portal admin-apply` in Terminal or with Administrator setup in the macOS application's menu. The application shows a native file chooser and a native dialog, which no web page can reach. To apply a plan, the administrator types for each issuer the fingerprint they received from that issuer through another route. It is refused unless each one matches the key in the plan. The plan holds no fingerprint, and its checksum only shows that the file is intact. The page that prepares a plan says only whether each typed fingerprint matches its key and never shows the fingerprint it computes, so the value to check is never offered by the portal. There is no option, setting or file that skips the typed fingerprint.
+
+This adds no privilege. Anyone who can run the command can already enrol a key with `regaudit-fhe trust add`. It does not authenticate the administrator, and it does not add the protections that the limitation above says published v0.2.1 lacks.
+
+The setup pages refuse anything that looks like a private key and do not show it back. The portal's demonstration keys are refused by their fingerprint, and a demonstration trust list is never counted as trust being set up.
+
+Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
+
+`demo-setup` installs the portal's bundled demonstration key and copies the bundled signed sample reports. That key is recognised by its exact fingerprint, never by a file name, issuer name or key id. A trust list that holds it is used only with `"trust_mode": "demonstration"`. With `"trust_mode": "customer"`, or with no `trust_mode`, the configuration is refused: `check-config` exits with code 3, the page gives a plain reason, and an uploaded report gets no verdict. A changed key is a different key: it is treated as an ordinary key, it accepts only reports signed with its own private key, and the bundled samples are `INVALID` against it. A configuration without `trust_mode` and without the bundled key is still customer trust, as configurations made before the setting existed were, with the same verdicts as before. For now it gets this warning, from `check-config` (on standard error, exit status 0), in the portal's start-up log and on the setup page:
+
+```
+This configuration does not specify `trust_mode`. It is currently treated as a legacy customer configuration. Explicitly set `trust_mode: customer` after reviewing the trusted keys. A future release will require this setting.
+```
+
+Nothing rewrites a configuration or a trust list. Review the trusted keys, add `"trust_mode": "customer"` and restart the portal. A later release will require the setting. This one does not. New configurations always state the mode: `admin-apply` writes `"trust_mode": "customer"` and refuses to write a configuration without it. Any value other than `customer` or `demonstration`, or one that is not text, is refused.
+
+Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys apart from real keys. Their folders keep working as a demonstration through `"trust_mode": "demonstration"`, but a copy of such a trust list under a configuration without that setting is treated as customer trust, and its sample reports then verify as trusted. This applies only to folders made by those earlier versions. Never copy demonstration files into a real configuration.
+
+Removing, revoking or replacing a key, and changing an existing configuration, stay manual.
 
 ## Reporting a problem
 

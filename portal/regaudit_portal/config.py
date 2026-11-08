@@ -6,6 +6,7 @@ Licensed under AGPL-3.0-or-later.
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from regaudit_fhe.replay import ReplayStateError, SqliteReplayCache
 from regaudit_fhe.trust import TrustStore, TrustStoreError
 from regaudit_fhe.verification import PolicyError, VerificationPolicy
 
+from .demonstration import is_demonstration_entry
 from .engine import REINSTALL, check_engine
 
 MAX_CONFIG_BYTES = 64 * 1024
@@ -29,16 +31,31 @@ _MEMBERS = {
     "replay_mode",
     "replay_db",
     "allow_self_signed",
+    "trust_mode",
 }
 _REQUIRED = {"trust_store", "profile", "verifier_id", "max_age_days"}
 _PROFILES = ("confidential", "high-assurance", "development")
+CUSTOMER = "customer"
+DEMONSTRATION = "demonstration"
+TRUST_MODES = (CUSTOMER, DEMONSTRATION)
+# Said, word for word, wherever a usable customer configuration without "trust_mode" is read: by check-config (on
+# standard error), by the portal's log when it starts, on the setup page and in its /api/setup answer. The
+# configuration still works as before; nothing rewrites it. Requiring the setting is a later release's change.
+LEGACY_TRUST_MODE_WARNING = (
+    "This configuration does not specify `trust_mode`. It is currently treated as a legacy customer configuration. "
+    "Explicitly set `trust_mode: customer` after reviewing the trusted keys. A future release will require this "
+    "setting."
+)
+logger = logging.getLogger("regaudit_portal.config")
 
 
 class ConfigProblem(Exception):
     """The portal must not give verdicts until the administrator fixes this.
 
     ``kind`` says what sort of trouble it is, for the read-only setup page: ``missing`` (a file is not there),
-    ``unsafe`` (who owns it or who can change it is wrong) or ``invalid`` (what it says is wrong).
+    ``unsafe`` (who owns it or who can change it is wrong), ``invalid`` (what it says is wrong) or
+    ``demonstration_key`` (the trust list holds the bundled demonstration key without ``"trust_mode":
+    "demonstration"``).
     """
 
     def __init__(self, message: str, kind: str = "invalid") -> None:
@@ -60,6 +77,15 @@ class Portal:
     replay_mode: str
     approved_count: int
     engine: dict[str, Any]
+    # Demonstration trust is kept apart from customer trust: see trust_mode_of.
+    trust_mode: str = CUSTOMER
+    trust_mode_reason: str = ""
+    # Warnings about a configuration that is usable as it is: today only LEGACY_TRUST_MODE_WARNING.
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def demonstration(self) -> bool:
+        return self.trust_mode == DEMONSTRATION
 
 
 @dataclass(frozen=True)
@@ -74,6 +100,10 @@ class Settings:
     allow_self_signed: bool
     store_path: Path
     replay_path: Path
+    # Which kind of trust this configuration says it is: "customer", "demonstration" (demo-setup writes it), or ""
+    # when it says nothing: customer trust, unless the trust list holds a bundled demonstration key, which is then
+    # refused (see trust_mode_of). Chosen with the configuration when the portal starts, never later.
+    trust_mode: str = ""
 
 
 def _directory_problem(directory: Path, what: str) -> ConfigProblem | None:
@@ -163,11 +193,82 @@ def read_settings(config_path: str | Path) -> Settings:
     if replay_mode not in ("check", "record"):
         raise ConfigProblem("replay_mode must be 'check' or 'record'")
     allow_self_signed = _member(raw, "allow_self_signed", bool, False)
+    trust_mode = _member(raw, "trust_mode", str, "")
+    if "trust_mode" in raw and trust_mode not in TRUST_MODES:
+        raise ConfigProblem("trust_mode must be 'customer' or 'demonstration'")
     store_path = path.parent / _member(raw, "trust_store", str)
     replay_path = path.parent / _member(raw, "replay_db", str, "replay.db")
     return Settings(
-        path, profile, verifier_id, days, replay_mode, allow_self_signed, store_path, replay_path
+        path,
+        profile,
+        verifier_id,
+        days,
+        replay_mode,
+        allow_self_signed,
+        store_path,
+        replay_path,
+        trust_mode,
     )
+
+
+BUNDLED_KEY_AS_CUSTOMER = (
+    "trust_mode: the trust list holds the portal's bundled demonstration key, and the configuration says "
+    '"trust_mode": "customer". That key can never be customer trust, so this configuration is refused. Remove the '
+    'key from the trust list, or say "trust_mode": "demonstration" to use the list only as a demonstration'
+)
+BUNDLED_KEY_WITHOUT_MODE = (
+    "trust_mode: the trust list holds the portal's bundled demonstration key, and the configuration does not say "
+    'which kind of trust it is. It is refused until it says "trust_mode": "demonstration". That key can never be '
+    "customer trust"
+)
+
+
+def trust_mode_of(settings: Settings, store: TrustStore) -> tuple[str, str]:
+    """The kind of trust this is, and why: demonstration trust is kept apart from customer trust.
+
+    It is a demonstration when the configuration says ``"trust_mode": "demonstration"`` (demo-setup writes it). A
+    trust list that holds one of the portal's bundled demonstration keys, recognised by exact fingerprint and by
+    nothing else, is a demonstration only with that explicit setting: with ``"customer"``, or with no setting, the
+    configuration is refused (:class:`ConfigProblem`, kind ``demonstration_key``), so the bundled key can never be
+    customer trust, whatever the files are called or wherever they were copied. A configuration without the setting
+    and without a bundled key is still customer trust, as configurations made before the setting existed are, for
+    now with a warning (see :func:`legacy_warnings`).
+    """
+    bundled = any(is_demonstration_entry(entry.public_key_pem) for entry in store.entries.values())
+    if settings.trust_mode == DEMONSTRATION:
+        if bundled:
+            return (
+                DEMONSTRATION,
+                'the configuration says "trust_mode": "demonstration", and the trust list holds the portal\'s '
+                "bundled demonstration key",
+            )
+        return DEMONSTRATION, 'the configuration says "trust_mode": "demonstration"'
+    if bundled:
+        raise ConfigProblem(
+            BUNDLED_KEY_AS_CUSTOMER
+            if settings.trust_mode == CUSTOMER
+            else BUNDLED_KEY_WITHOUT_MODE,
+            "demonstration_key",
+        )
+    if settings.trust_mode == CUSTOMER:
+        return CUSTOMER, 'the configuration says "trust_mode": "customer"'
+    return (
+        CUSTOMER,
+        "the configuration does not set trust_mode, and the trust list holds no bundled demonstration key",
+    )
+
+
+def legacy_warnings(settings: Settings, mode: str) -> tuple[str, ...]:
+    """The warning for a customer configuration that does not say ``trust_mode``, or nothing.
+
+    Such a configuration is still used as customer trust, exactly as before: only a warning is added. A configuration
+    whose trust list holds the bundled demonstration key never gets this far without the setting: it is refused.
+    """
+    return (LEGACY_TRUST_MODE_WARNING,) if mode == CUSTOMER and settings.trust_mode == "" else ()
+
+
+def is_demonstration_trust(settings: Settings, store: TrustStore) -> bool:
+    return trust_mode_of(settings, store)[0] == DEMONSTRATION
 
 
 def read_trust_store(settings: Settings) -> TrustStore:
@@ -231,4 +332,19 @@ def load_portal(config_path: str | Path) -> Portal:
         )
     except (ReplayStateError, PolicyError) as exc:
         raise ConfigProblem(f"policy: {exc}") from exc
-    return Portal(policy, settings.profile, settings.replay_mode, len(store.keys), engine)
+    mode, reason = trust_mode_of(settings, store)
+    warnings = legacy_warnings(settings, mode)
+    for warning in warnings:
+        # With no logging set up (check-config), Python prints this text alone on standard error. The portal's own
+        # start-up log shows it with its level.
+        logger.warning(warning)
+    return Portal(
+        policy,
+        settings.profile,
+        settings.replay_mode,
+        len(store.keys),
+        engine,
+        mode,
+        reason,
+        warnings,
+    )

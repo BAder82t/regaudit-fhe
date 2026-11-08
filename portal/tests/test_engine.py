@@ -357,10 +357,22 @@ def test_no_option_flag_or_environment_variable_can_change_which_engine_is_accep
     for path in package.glob("*.py"):
         text = path.read_text()
         assert "os.environ" not in text and "getenv" not in text, path.name
-    flags = set(re.findall(r'add_argument\(\s*"(-[-a-z]+)"', (package / "__main__.py").read_text()))
+    flags = set(
+        re.findall(r'add_argument\(\s*"(-[-a-z0-9]+)"', (package / "__main__.py").read_text())
+    )
     # --exit-when-input-closes is about shutdown only (a launcher that dies takes the portal with it). The assertion
     # below keeps it that way: its code must not mention the engine, its check or its identity.
-    assert flags == {"--config", "--port", "--exit-when-input-closes"}
+    # The administrator commands' options choose a folder, an output format, the typed fingerprints and the plan's
+    # checksum. The same engine check runs before either command does anything (test_admin.py checks that).
+    assert flags == {
+        "--config",
+        "--port",
+        "--exit-when-input-closes",
+        "--config-folder",
+        "--json",
+        "--expect-fingerprint",
+        "--expect-plan-sha256",
+    }
     import inspect
 
     from regaudit_portal import __main__ as entry
