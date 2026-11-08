@@ -741,3 +741,45 @@ def test_the_status_says_what_the_batch_limits_are(portal):
     limits = client.get("/api/status").json()["batch"]
     assert limits == batch_module.limits()
     assert limits["max_files"] == 20 and limits["max_file_bytes"] == MB
+
+
+# ----------------------------------------------------------------------------- the slots are never leaked
+
+
+def test_the_slots_are_released_on_every_error_path(portal, monkeypatch):
+    config, signer, _ = portal
+    monkeypatch.setattr(batch_module, "MAX_UPLOADS", 1)
+    monkeypatch.setattr(batch_module, "MAX_CONCURRENT_BATCHES", 1)
+    client = client_for(config)
+    good = [("a", signed_report(signer))]
+    real = app_module.check_engine
+    state = {"n": 0}
+
+    def failing_after_read(*a):
+        state["n"] += 1
+        return (
+            real(*a)
+            if state["n"] <= 1
+            else types.SimpleNamespace(ok=False, reason="X", detail="", engine=None)
+        )
+
+    def post_raw(raw):
+        return client.post("/api/verify-batch", content=raw, headers=JSON_HEADERS).status_code
+
+    assert post_raw(b"not json") == 422
+    assert post_raw(body_of([(f"{i}", b"{}") for i in range(batch_module.MAX_FILES + 1)])) == 413
+    assert (
+        post_raw(b'{"files": [{"content_b64": "' + b"A" * batch_module.MAX_BODY_BYTES + b'"}]}')
+        == 413
+    )
+    assert send(client, good).status_code == 200
+    # engine failing in the middle of a batch
+    monkeypatch.setattr(app_module, "check_engine", failing_after_read)
+    assert send(client, good * 3).json()["complete"] is False
+    monkeypatch.setattr(app_module, "check_engine", real)
+    assert send(client, good).status_code == 200
+    # a batch that does not fit in the budget
+    monkeypatch.setattr(app_module, "MAX_REQUESTS_PER_MINUTE", 5)
+    small = client_for(config)
+    assert send(small, good * 20).status_code == 429
+    assert send(small, good).status_code == 200

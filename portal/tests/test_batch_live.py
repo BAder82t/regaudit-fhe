@@ -286,3 +286,105 @@ def test_the_open_file_listing_used_above_really_sees_a_file_open_for_writing(tm
         held.write("x")
         seen = writable_files(os.getpid())
     assert str(target.resolve()) in seen or str(target) in seen
+
+
+def test_a_client_that_trickles_or_idles_does_not_keep_a_well_behaved_batch_out(tmp_path):
+    config, signer = make_portal(tmp_path / "p")
+    with serving(config) as port:
+        head, body = batch_request(port, [signed_report(signer)])
+        stalled = []
+        for _ in range(
+            batch_module.MAX_UPLOADS - 1
+        ):  # clients that declare a body and then send almost none
+            sock = socket.create_connection(("127.0.0.1", port))
+            sock.sendall(head + body[:20])
+            stalled.append(sock)
+        time.sleep(0.3)
+        good_head, good_body = batch_request(port, [signed_report(signer)])
+        with socket.create_connection(("127.0.0.1", port)) as sock:
+            sock.sendall(good_head + good_body)
+            sock.settimeout(10)
+            status, answer = read_response(sock)
+        for sock in stalled:
+            sock.close()
+    assert status == 200 and answer["summary"]["trusted"] == 1
+
+
+def test_clients_that_stall_mid_body_are_cut_off_and_no_slot_is_leaked(tmp_path, monkeypatch):
+    config, signer = make_portal(tmp_path / "p")
+    monkeypatch.setattr(app_module, "BODY_TIMEOUT_S", 0.4)
+    with serving(config) as port:
+        for _ in range(
+            batch_module.MAX_UPLOADS + 2
+        ):  # more stalls than there are slots, one after another
+            head, body = batch_request(port, [signed_report(signer)])
+            with socket.create_connection(("127.0.0.1", port)) as sock:
+                sock.sendall(head + body[: len(body) // 2])
+                sock.settimeout(10)
+                status, answer = read_response(sock)
+            assert status == 408 and answer["error"] == "too_slow"
+        head, body = batch_request(port, [signed_report(signer)])
+        with socket.create_connection(("127.0.0.1", port)) as sock:
+            sock.sendall(head + body)
+            sock.settimeout(10)
+            status, answer = read_response(sock)
+    assert status == 200
+
+
+def test_the_slot_is_free_again_after_a_dropped_connection(tmp_path, monkeypatch):
+    config, signer = make_portal(tmp_path / "p")
+    real = app_module._verify_between_checks
+    started = []
+
+    def slow(*args):
+        started.append(1)
+        time.sleep(0.3)
+        return real(*args)
+
+    monkeypatch.setattr(app_module, "_verify_between_checks", slow)
+    with serving(config) as port:
+        head, body = batch_request(port, [signed_report(signer) for _ in range(6)])
+        sock = socket.create_connection(("127.0.0.1", port))
+        sock.sendall(head + body)
+        while not started:
+            time.sleep(0.01)
+        sock.close()
+        time.sleep(1.5)
+        head, body = batch_request(port, [signed_report(signer)])
+        with socket.create_connection(("127.0.0.1", port)) as again:
+            again.sendall(head + body)
+            again.settimeout(10)
+            status, _ = read_response(again)
+    assert status == 200
+
+
+def test_a_batch_that_finds_the_checking_slot_taken_is_refused_whole_and_not_charged_for_its_files(
+    tmp_path, monkeypatch
+):
+    config, signer = make_portal(tmp_path / "p")
+    real = app_module._verify_between_checks
+    started = []
+
+    def slow(*args):
+        started.append(1)
+        time.sleep(0.6)
+        return real(*args)
+
+    monkeypatch.setattr(app_module, "_verify_between_checks", slow)
+    with serving(config) as port:
+        head, body = batch_request(port, [signed_report(signer) for _ in range(3)])
+        first = socket.create_connection(("127.0.0.1", port))
+        first.sendall(head + body)
+        while not started:
+            time.sleep(0.01)
+        head2, body2 = batch_request(port, [signed_report(signer) for _ in range(5)])
+        with socket.create_connection(("127.0.0.1", port)) as second:
+            second.sendall(head2 + body2)
+            second.settimeout(10)
+            status, answer = read_response(second)
+        first.settimeout(20)
+        done_status, done = read_response(first)
+    assert status == 429 and answer["error"] == "busy"
+    assert (
+        done_status == 200 and done["rate"]["remaining"] == 120 - 3 - 1
+    )  # the refused batch cost one check only

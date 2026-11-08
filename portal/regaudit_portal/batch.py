@@ -39,6 +39,8 @@ MAX_BODY_BYTES = (MAX_TOTAL_REPORT_BYTES * 4 + 2) // 3 + (1 << 16)
 MAX_CONCURRENT_BATCHES = (
     1  # batches in progress at once: the largest one needed about 105 MB on top of the idle process
 )
+# Request bodies being received at once. A slow client holds one of these, never the batch slot above.
+MAX_UPLOADS = 4
 MAX_NAME_SHOWN = 120
 
 SCHEMA = "regaudit-portal-batch/1"
@@ -182,6 +184,7 @@ def limits() -> dict[str, int]:
         "max_total_bytes": MAX_TOTAL_REPORT_BYTES,
         "max_request_bytes": MAX_BODY_BYTES,
         "max_concurrent_batches": MAX_CONCURRENT_BATCHES,
+        "max_uploads_at_once": MAX_UPLOADS,
     }
 
 

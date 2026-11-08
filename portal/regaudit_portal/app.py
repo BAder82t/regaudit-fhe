@@ -566,7 +566,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _unavailable_status()
         return _status_body(portal, identity.engine, samples, own_state, own_message)
 
-    busy = {"batches": 0}
+    busy = {"batches": 0, "uploads": 0}
 
     async def judge(raw: bytes) -> tuple[int, dict[str, Any]]:
         """One uploaded report: parse it, check the engine, verify, check the engine again. The status and the body.
@@ -728,19 +728,32 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _too_many(
                 "Too many checks in the last minute. Nothing was verified. Try again shortly."
             )
-        if busy["batches"] >= batch_module.MAX_CONCURRENT_BATCHES:
-            return JSONResponse(
-                {"error": "busy", "message": batch_module.BUSY, "retry_after_seconds": 2},
-                status_code=429,
-                headers={"Retry-After": "2"},
-            )
-        busy["batches"] += 1
-        try:
-            return await _run_batch(request)
-        finally:
-            busy["batches"] -= 1
+        # Only the bodies being received are counted here, so that memory held by slow clients is bounded. The one
+        # batch slot is taken later, after the body has been read and parsed, so a client that is slow or idle can
+        # never keep a well-behaved batch out.
+        if busy["uploads"] >= batch_module.MAX_UPLOADS:
+            return _busy()
+        busy["uploads"] += 1
+        receiving = [True]
 
-    async def _run_batch(request: Request) -> Response:
+        def stop_receiving() -> None:
+            if receiving[0]:
+                receiving[0] = False
+                busy["uploads"] -= 1
+
+        try:
+            return await _run_batch(request, stop_receiving)
+        finally:
+            stop_receiving()
+
+    def _busy() -> JSONResponse:
+        return JSONResponse(
+            {"error": "busy", "message": batch_module.BUSY, "retry_after_seconds": 2},
+            status_code=429,
+            headers={"Retry-After": "2"},
+        )
+
+    async def _run_batch(request: Request, stop_receiving: Any) -> Response:
         assert portal is not None
         identity = await run_in_threadpool(check_engine)
         watch.seen(identity)
@@ -759,6 +772,18 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         except batch_module.BatchFormatError as exc:
             return _refusal(exc.status, exc.code, exc.message)
         del raw
+        stop_receiving()
+        # The batch slot is for the checking only. A batch that finds it taken is refused whole, before it is charged.
+        if busy["batches"] >= batch_module.MAX_CONCURRENT_BATCHES:
+            return _busy()
+        busy["batches"] += 1
+        try:
+            return await _check_files(request, items)
+        finally:
+            busy["batches"] -= 1
+
+    async def _check_files(request: Request, items: list[batch_module.Item]) -> Response:
+        assert portal is not None
         # One check was charged for the request itself. The rest of the files are taken together, or none are.
         if not limit.take(len(items) - 1):
             return _too_many(
