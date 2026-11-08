@@ -43,6 +43,24 @@ def display_path(path: Path | str) -> str:
         return f"{OUTSIDE_HOME}/{place.name}"
 
 
+def finder_steps(folder: Path | str) -> str:
+    """How to open a folder in Finder that Finder does not show: on macOS, one inside ``~/Library``. Empty anywhere
+    else. The folder is shown as ``~/...``, never by its full path. A sentence that starts with a space, to append."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        library = Path.home() / "Library"
+    except RuntimeError:
+        return ""
+    place = Path(folder)
+    if place != library and library not in place.parents:
+        return ""
+    return (
+        " Finder hides that folder. To open it, click Finder in the Dock, choose Go > Go to Folder\u2026 in the menu "
+        f"bar at the top of the screen, type {display_path(place)} and press Return."
+    )
+
+
 def hide_paths(text: str, *paths: Path) -> str:
     """Replace each of these places, wherever the text names it, by how ``display_path`` shows it."""
     shown = text

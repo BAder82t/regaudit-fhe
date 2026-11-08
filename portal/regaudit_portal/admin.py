@@ -64,7 +64,7 @@ from .config import (
     trust_mode_of,
 )
 from .engine import REINSTALL, check_engine
-from .paths import CONFIG_NAME, default_config_folder
+from .paths import CONFIG_NAME, default_config_folder, finder_steps
 from .plan import (
     ADD_ISSUERS,
     FIRST_SETUP,
@@ -479,12 +479,15 @@ class Destination:
             raise Refused(
                 f"There is already a configuration in {self.folder}. This first version never replaces one. "
                 "To start again, move the folder's files somewhere else first."
+                + finder_steps(self.folder)
             )
         if store is not None:
             raise Refused(
                 f"There is already a trust list in {self.folder} but no configuration. An administrator setup that "
                 "was stopped part-way can leave this. The portal does not use a trust list without a configuration. "
-                f"Look at {TRUST_LIST_NAME}, and move it away if you want to start again. {UNCHANGED}"
+                f"Look at {TRUST_LIST_NAME}, and move it away if you want to start again."
+                + finder_steps(self.folder)
+                + f" {UNCHANGED}"
             )
 
     def read_existing(self) -> Existing:
@@ -521,12 +524,13 @@ class Destination:
         ) as exc:  # the bundled demonstration key, without "trust_mode": "demonstration"
             raise Refused(
                 f"The existing configuration cannot be used: {exc}. Real issuers are not added to it. Move it and "
-                "the trust list away, then apply a first-setup plan."
+                "the trust list away, then apply a first-setup plan." + finder_steps(self.folder)
             ) from exc
         if mode != CUSTOMER:
             raise Refused(
                 f"The existing configuration is a demonstration ({reason}). Real issuers are not added to "
                 "demonstration trust. Move it and the trust list away, then apply a first-setup plan."
+                + finder_steps(self.folder)
             )
         data, identity = self._read_store(name)
         try:

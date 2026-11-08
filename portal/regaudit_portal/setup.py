@@ -36,6 +36,7 @@ from .paths import (
     default_config_folder,
     default_config_path,
     display_path,
+    finder_steps,
     hide_paths,
     shell_path,
 )
@@ -217,6 +218,12 @@ def readiness(
     def say(text: str) -> str:
         return hide_paths(text, *places)
 
+    def in_folder(step: str, folder: Path) -> str:
+        """A next step that means opening a file in this folder, with how to reach it in Finder when it is hidden."""
+        return step + finder_steps(folder)
+
+    here = location.parent
+
     unsafe: list[str] = []
     checked_files = (
         settings is not None
@@ -250,7 +257,7 @@ def readiness(
             "problem",
             f"Found, but not read: {say(str(found))}",
             _WHY["unsafe"],
-            _FIX_ACCESS,
+            in_folder(_FIX_ACCESS, here),
         )
     else:
         checked_files = True  # an invalid file was read, so its ownership and its folder's passed
@@ -260,7 +267,7 @@ def readiness(
             "problem",
             say(str(found)),
             _WHY["configuration_invalid"],
-            _STATE_NEXT["configuration_invalid"],
+            in_folder(_STATE_NEXT["configuration_invalid"], here),
         )
 
     warnings: list[str] = []
@@ -300,7 +307,7 @@ def readiness(
                     f"This is demonstration trust, because {reason}. It does not count as trust being set up. The "
                     "portal checks files against it only as a demonstration, and every result says so.",
                     _WHY["demonstration"],
-                    _STATE_NEXT["demonstration"],
+                    in_folder(_STATE_NEXT["demonstration"], here),
                 )
             else:
                 trust = _row(
@@ -318,7 +325,7 @@ def readiness(
                     "problem",
                     f"Found, but not read: {say(str(exc))}",
                     _WHY["unsafe"],
-                    _FIX_ACCESS,
+                    in_folder(_FIX_ACCESS, settings.store_path.parent),
                 )
             elif exc.kind == "demonstration_key":
                 trust = _row(
@@ -327,7 +334,7 @@ def readiness(
                     "problem",
                     say(str(exc)),
                     _WHY["demonstration_key"],
-                    _STATE_NEXT["demonstration_key"],
+                    in_folder(_STATE_NEXT["demonstration_key"], settings.store_path.parent),
                 )
             elif exc.kind == "missing":
                 trust = _row(
@@ -336,7 +343,7 @@ def readiness(
                     "missing",
                     say(str(exc)),
                     _WHY["trust_missing"],
-                    _STATE_NEXT["trust_missing"],
+                    in_folder(_STATE_NEXT["trust_missing"], settings.store_path.parent),
                 )
             else:
                 trust = _row(
@@ -345,7 +352,7 @@ def readiness(
                     "problem",
                     say(str(exc)),
                     _WHY["trust_invalid"],
-                    _STATE_NEXT["trust_invalid"],
+                    in_folder(_STATE_NEXT["trust_invalid"], settings.store_path.parent),
                 )
         if demonstration and days > LONG_AGE_DAYS:
             policy["detail"] += " " + _DEMONSTRATION_AGE
@@ -359,13 +366,20 @@ def readiness(
                 "problem",
                 f"{text} {say(str(problem))}",
                 _WHY["replay"],
-                _FIX_ACCESS,
+                in_folder(_FIX_ACCESS, settings.replay_path.parent),
             )
         else:
             replay = _row("replay", _REPLAY, "ok", text)
 
     if unsafe:
-        files = _row("file_check", _FILES, "problem", " ".join(unsafe), _WHY["unsafe"], _FIX_ACCESS)
+        files = _row(
+            "file_check",
+            _FILES,
+            "problem",
+            " ".join(unsafe),
+            _WHY["unsafe"],
+            in_folder(_FIX_ACCESS, here),
+        )
     elif checked_files:
         files = _row(
             "file_check",
@@ -409,7 +423,7 @@ def readiness(
                 "warning",
                 warnings[0],
                 _WHY["legacy_trust_mode"],
-                _STATE_NEXT["legacy_trust_mode"],
+                in_folder(_STATE_NEXT["legacy_trust_mode"], here),
             ),
         )
     required = ("engine", "configuration", "trust_list", "replay", "file_check")
