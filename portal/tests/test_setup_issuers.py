@@ -81,6 +81,12 @@ def test_the_list_is_hidden_until_there_is_something_to_list_and_says_why_no_fin
     ]
     assert "No fingerprint is shown here, on purpose." in panel
     assert "This page only reads the list." in panel
+    # A compromised or retired key is listed too, so the list does not say every issuer in it is accepted.
+    assert (
+        "The issuers named in the trust list, with the status the list gives each. Only active keys are accepted."
+        in panel
+    )
+    assert "whose reports this portal accepts" not in panel
     assert (
         '<th scope="col">Issuer</th><th scope="col">Key id</th><th scope="col">Status</th>' in panel
     )

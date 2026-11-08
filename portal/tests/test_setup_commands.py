@@ -384,3 +384,13 @@ def test_the_terminal_commands_are_in_a_collapsed_advanced_section():
         '"trust_mode": "customer"' in manual
     )  # the example configuration is for writing it by hand
     assert '<details id="manual" open' not in html  # collapsed until opened
+    # It shows that it opens: a marker that turns when it is open (the summary's own marker is hidden by its layout).
+    css = (STATIC / "app.css").read_text()
+    assert "#manual > summary::before {" in css
+    assert "#manual[open] > summary::before { transform: rotate(90deg); }" in css
+
+
+def test_the_menu_step_ends_cleanly_after_the_ellipsis():
+    html = (STATIC / "setup.html").read_text()
+    assert "<strong>Administrator setup&hellip;</strong> in that menu.</li>" in html
+    assert "&hellip;</strong>.</li>" not in html
