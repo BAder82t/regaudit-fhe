@@ -45,6 +45,8 @@ class El {
   replaceChildren(...items) { this.children = []; this.own = ""; this.append(...items); }
   remove() { if (this.parent) { this.parent.children = this.parent.children.filter((c) => c !== this); this.parent = null; } }
   setAttribute(k, v) { this.attributes[k] = v; }
+  removeAttribute(k) { delete this.attributes[k]; }
+  focus() { log.focus = describe(this); }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
   click() { if (this.tagName === "A") log.downloads.push({ name: this.download, text: lastBlob }); (this.listeners.click || []).forEach((fn) => fn()); }
   *walk() { for (const c of this.children) if (typeof c !== "string") { yield c; yield* c.walk(); } }
@@ -58,7 +60,13 @@ function matches(e, sel) {
   if (m) return e.tagName === "INPUT" && e.name === m[1] && (!m[2] || e.checked);
   return e.tagName === sel.toUpperCase();
 }
-const log = { sent: [], downloads: [], steps: [] };
+const log = { sent: [], downloads: [], steps: [], focus: null };
+// A box as a person would name it: "issuer 1, public_key", or the id or name of a box outside the issuers.
+function describe(e) {
+  const sets = document.getElementById("issuers").querySelectorAll("fieldset");
+  const index = sets.findIndex((set) => set.querySelectorAll("[data-member]").includes(e));
+  return index >= 0 ? "issuer " + (index + 1) + ", " + e.dataset.member : e.name || e.id;
+}
 let lastBlob = null;
 const byId = {};
 const roots = [];
@@ -94,7 +102,8 @@ const everything = () => {
 function fill(values) {
   for (const [member, value] of Object.entries(values.issuer)) $("issuers").querySelector('[data-member="' + member + '"]').value = value;
   $("verifier-id").value = values.verifier_id;
-  for (const radio of document.querySelectorAll('input[name="profile"]')) radio.checked = radio.value === "confidential";
+  const profile = values.profile === undefined ? "confidential" : values.profile;
+  for (const radio of document.querySelectorAll('input[name="profile"]')) radio.checked = radio.value === profile;
 }
 function snapshot(name) {
   const boxes = {};
@@ -105,7 +114,11 @@ function snapshot(name) {
     name, boxes, verifier_id: $("verifier-id").value, rows, message: $("message").textContent, saved: $("saved").textContent,
     prepared: prepared === null ? null : Object.keys(prepared).sort(), writes: $("writes").textContent,
     save_hidden: $("save").hidden, everything: everything(),
+    problems: $("problems").hidden ? [] : $("problems").children.map((li) => li.textContent), focus: log.focus,
+    invalid: [...$("issuers").querySelectorAll("[data-member]"), $("verifier-id"), $("max-age"),
+      ...document.querySelectorAll('input[name="profile"]')].filter((e) => e.attributes["aria-invalid"] === "true").map(describe),
   });
+  log.focus = null;
 }
 (async () => {
   await new Promise((r) => setTimeout(r, 0));
@@ -188,7 +201,12 @@ def test_a_mismatch_shows_only_that_it_does_not_match_and_the_pasted_key_is_clea
         [f"1. {signer.issuer} (key id {signer.key_id})", "No: it does not match this key"]
     ]
     assert step["boxes"]["public_key"] == "" and step["prepared"] is None
-    assert step["message"].endswith("The public keys you pasted were cleared from the page.")
+    assert step["message"].endswith(
+        "The public key box was emptied, as after every check: paste the public key again, then type the fingerprint "
+        "the issuer gave you and press Check the plan."
+    )
+    assert step["focus"] == "issuer 1, public_key"  # the emptied box, to paste the key again
+    assert step["invalid"] == ["issuer 1, public_key", "issuer 1, fingerprint"]
     assert _key_line(signer.public_key_pem()) not in step["everything"]
     assert fingerprint_of(signer) not in step["everything"]
 
@@ -284,6 +302,96 @@ def test_guard_off_without_clearing_the_pasted_key_stays_in_the_page(welcome):
     assert step["boxes"]["public_key"] == signer.public_key_pem()
 
 
+@needs_node
+def test_an_empty_form_lists_everything_missing_sends_nothing_and_says_nothing_about_keys(welcome):
+    done = _run_page(welcome.get("/api/setup").json(), [], [{"name": "empty", "action": "check"}])
+    step = done["steps"][0]
+    assert done["sent"] == []
+    assert (
+        step["message"]
+        == "Nothing was sent. Fill in what is missing, then press Check the plan again."
+    )
+    assert step["problems"] == [
+        "Choose a profile.",
+        "Type your verifier id.",
+        "Issuer 1: type the issuer's name.",
+        "Issuer 1: type the key id.",
+        "Issuer 1: paste the issuer's public key.",
+        "Issuer 1: type the fingerprint the issuer gave you.",
+    ]
+    assert step["focus"] == "profile"  # the first box that needs attention
+    assert "issuer 1, fingerprint" in step["invalid"] and "verifier-id" in step["invalid"]
+    assert "cleared" not in step["message"] and "configuration" not in step["message"]
+
+
+@needs_node
+def test_a_missing_fingerprint_is_listed_and_the_pasted_key_must_be_pasted_again(welcome):
+    signer = issuer_signer()
+    done = _run_page(
+        welcome.get("/api/setup").json(),
+        [],
+        [{"name": "no fingerprint", "fill": _form(signer, ""), "action": "check"}],
+    )
+    step = done["steps"][0]
+    assert done["sent"] == []
+    assert step["problems"] == ["Issuer 1: type the fingerprint the issuer gave you."]
+    assert step["message"].endswith(
+        "The public keys you pasted were cleared from the page, as after every check: paste them again."
+    )
+    assert step["boxes"]["public_key"] == "" and step["focus"] == "issuer 1, fingerprint"
+
+
+@needs_node
+def test_a_problem_the_portal_finds_is_said_in_plain_words_at_its_box(welcome):
+    bundled = json.loads((STATIC.parent / "samples" / "demo-trust-list.json").read_text())
+    pem = bundled["entries"]["demo-only-synthetic-key"]["public_key_pem"]
+    typed = "220618ae027e2cf3c634778f5f4708fc1ea53006973d379ef0d799d936e30df8"
+    request = plan_request([issuer_signer()], fingerprints=[typed])
+    request["issuers"][0]["public_key"] = pem
+    answer = welcome.post(
+        "/api/setup/plan", content=json.dumps(request).encode(), headers=JSON_HEADERS
+    ).json()
+    assert answer["where"] == "issuer 1, public key"
+    done = _run_page(
+        welcome.get("/api/setup").json(),
+        [answer],
+        [
+            {
+                "name": "demo key",
+                "fill": _form(issuer_signer(), typed, public_key=pem),
+                "action": "check",
+            }
+        ],
+    )
+    step = done["steps"][0]
+    assert step["message"].startswith(
+        "Issuer 1, public key: This is one of the portal's demonstration keys"
+    )
+    assert step["focus"] == "issuer 1, public_key" and step["boxes"]["public_key"] == ""
+    assert "paste them again" in step["message"]
+
+
+@needs_node
+def test_a_configuration_problem_has_no_technical_prefix_and_focuses_its_box(welcome):
+    signer = issuer_signer()
+    request = plan_request([signer], verifier_id=" spaced")
+    answer = welcome.post(
+        "/api/setup/plan", content=json.dumps(request).encode(), headers=JSON_HEADERS
+    ).json()
+    assert answer["where"] == "configuration"
+    form = _form(signer, fingerprint_of(signer))
+    form["verifier_id"] = " spaced"
+    done = _run_page(
+        welcome.get("/api/setup").json(),
+        [answer],
+        [{"name": "spaced", "fill": form, "action": "check"}],
+    )
+    step = done["steps"][0]
+    assert step["message"].startswith(answer["message"])
+    assert "configuration:" not in step["message"]
+    assert step["focus"] == "verifier-id" and step["invalid"] == ["verifier-id"]
+
+
 # ----------------------------------------------------------------------------- the script's text, always checked
 
 
@@ -300,3 +408,10 @@ def test_the_script_clears_the_keys_on_every_outcome_of_a_check_and_keeps_only_t
     save = script.split("function save() {")[1].split("\nfunction showMode()")[0]
     assert save.index("prepared = null;") < save.index("link.click();")
     assert 'control.dataset.member === "public_key" || SECRET.test(control.value)' in script
+
+
+def test_the_script_never_puts_the_technical_place_in_front_of_a_message():
+    script = (STATIC / "plan.js").read_text()
+    assert 'body.where + ": "' not in script
+    assert "Nothing was sent. Fill in what is missing, then press Check the plan again." in script
+    assert "paste the public key again" in script

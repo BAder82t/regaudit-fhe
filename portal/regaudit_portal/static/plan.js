@@ -190,11 +190,86 @@ function showWrites(body) {
 }
 
 const KEYS_CLEARED = " The public keys you pasted were cleared from the page.";
+const PASTE_AGAIN = " The public keys you pasted were cleared from the page, as after every check: paste them again.";
+const MISMATCH_NEXT =
+  " The public key box was emptied, as after every check: paste the public key again, then type the fingerprint the " +
+  "issuer gave you and press Check the plan.";
+
+function issuerControl(number, member) {
+  const set = $("issuers").querySelectorAll("fieldset")[number - 1];
+  return set ? set.querySelector('[data-member="' + member + '"]') : null;
+}
+
+// Everything that is missing or out of range, not only the first, in plain words, each with the box it is about. It is
+// checked here before anything is sent, so that one press lists it all; the portal checks everything again.
+function missing(request) {
+  const found = [];
+  const settings = request.configuration;
+  if (settings) {
+    if (!settings.profile) found.push(["Choose a profile.", document.querySelector('input[name="profile"]')]);
+    if (!String(settings.verifier_id).trim()) found.push(["Type your verifier id.", $("verifier-id")]);
+    const days = settings.max_age_days;
+    if (!(Number.isInteger(days) && days >= 1 && days <= 3650)) {
+      found.push(["Type the maximum report age as a whole number of days, from 1 to 3650.", $("max-age")]);
+    }
+    if (!settings.replay_mode) found.push(["Choose a replay mode.", document.querySelector('input[name="replay"]')]);
+  }
+  const boxes = [
+    ["issuer", "type the issuer's name"],
+    ["key_id", "type the key id"],
+    ["public_key", "paste the issuer's public key"],
+    ["fingerprint", "type the fingerprint the issuer gave you"],
+  ];
+  request.issuers.forEach((issuer, index) => {
+    for (const [member, words] of boxes) {
+      if (!String(issuer[member] || "").trim()) {
+        found.push(["Issuer " + (index + 1) + ": " + words + ".", issuerControl(index + 1, member)]);
+      }
+    }
+  });
+  return found;
+}
+
+// Where the portal says a problem is, in plain words, and the box it is about. "configuration" adds nothing to a
+// message that already names the setting, so it is left out.
+const MEMBERS = { name: "issuer", "key id": "key_id", "public key": "public_key", fingerprint: "fingerprint" };
+function place(where, message) {
+  const issuer = /^issuer (\d+)(?:, (name|key id|public key|fingerprint))?$/.exec(where || "");
+  if (issuer) {
+    const label = "Issuer " + issuer[1] + (issuer[2] ? ", " + issuer[2] : "") + ": ";
+    return [label, issuerControl(Number(issuer[1]), MEMBERS[issuer[2] || "name"])];
+  }
+  if (/verifier id/i.test(message)) return ["", $("verifier-id")];
+  if (/maximum report age/i.test(message)) return ["", $("max-age")];
+  if (/profile/i.test(message)) return ["", document.querySelector('input[name="profile"]')];
+  if (/replay mode/i.test(message)) return ["", document.querySelector('input[name="replay"]')];
+  return ["", null];
+}
+
+// The message, the list of problems that have words of their own, a mark on each box concerned, and the focus on the
+// first of them.
+function showProblems(lead, problems) {
+  $("message").textContent = lead;
+  const listed = problems.filter(([text]) => text);
+  $("problems").replaceChildren(...listed.map(([text]) => element("li", text)));
+  $("problems").hidden = listed.length === 0;
+  for (const [, control] of problems) if (control) control.setAttribute("aria-invalid", "true");
+  const first = problems.find(([, control]) => control);
+  if (first) first[1].focus();
+}
+
+function clearProblems() {
+  $("problems").replaceChildren();
+  $("problems").hidden = true;
+  for (const control of $("plan-form").querySelectorAll("[aria-invalid]")) control.removeAttribute("aria-invalid");
+}
 
 async function check() {
   forget();
+  clearProblems();
   let request = collect();
   const secret = looksSecret(request);
+  const pasted = request.issuers.some((issuer) => String(issuer.public_key || "").trim() !== "");
   clearKeyMaterial(); // from here the keys are only in this one request, which is dropped below
   if (secret) {
     request = null;
@@ -202,6 +277,15 @@ async function check() {
       "Something you entered looks like a private or secret key, so nothing was sent and it was cleared from the page." +
       KEYS_CLEARED +
       " Only the issuer's public key belongs in a plan.";
+    return;
+  }
+  const problems = missing(request);
+  if (problems.length) {
+    request = null;
+    showProblems(
+      "Nothing was sent. Fill in what is missing, then press Check the plan again." + (pasted ? PASTE_AGAIN : ""),
+      problems,
+    );
     return;
   }
   $("message").textContent = "Checking...";
@@ -227,7 +311,22 @@ async function check() {
   }
   if (!body.ok) {
     $("written").hidden = true;
-    $("message").textContent = (body.where ? body.where + ": " : "") + body.message + KEYS_CLEARED;
+    if (body.error === "fingerprint_mismatch") {
+      // Only whether each fingerprint matched is known here. The key box of the first that did not is emptied, as
+      // after every check, so the focus goes there to paste the key again.
+      const wrong = (body.issuers || []).filter((row) => !row.matches);
+      showProblems(
+        body.message + MISMATCH_NEXT,
+        wrong.map((row) => ["", issuerControl(row.number, "public_key")]),
+      );
+      for (const row of wrong) {
+        const typed = issuerControl(row.number, "fingerprint");
+        if (typed) typed.setAttribute("aria-invalid", "true");
+      }
+      return;
+    }
+    const [label, control] = place(body.where, body.message || "");
+    showProblems(label + body.message + (pasted ? PASTE_AGAIN : ""), control ? [["", control]] : []);
     return;
   }
   prepared = { plan_text: body.plan_text, file_name: body.file_name };
