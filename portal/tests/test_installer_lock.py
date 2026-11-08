@@ -93,3 +93,24 @@ def test_the_administrator_programs_find_the_application_through_a_symbolic_link
 def test_the_launcher_does_not_tell_a_local_copy_to_be_downloaded_again():
     swift = (HERE / "launcher" / "main.swift").read_text()
     assert "Download it again" not in swift and "disk image again" in swift
+
+
+def test_the_build_ships_no_pip_after_the_install_and_so_no_pip_notices():
+    text = (HERE / "build_app.py").read_text()
+    install = text.index('"--require-hashes",')
+    wheel = text.index('(lib / "ensurepip" / "_bundled").glob("pip-*.whl")')
+    scripts = text.index('for script in ("pip", "pip3", "pip" + lib.name.removeprefix("python")):')
+    assert (
+        install < wheel and install < scripts
+    )  # pip is used once, to install the locked wheels, then removed
+    assert 'raise SystemExit(f"pip is still in the bundle:' in text
+    assert "without_pip=True,  # the build ships no pip" in text
+    # Nothing that runs inside the application calls pip or ensurepip.
+    for path in [
+        *(HERE.parents[1] / "regaudit_portal").rglob("*.py"),
+        HERE / "launcher" / "main.swift",
+    ]:
+        source = path.read_text()
+        assert "ensurepip" not in source and "-m pip" not in source and '"pip"' not in source, path
+    smoke = (HERE / "smoke_test.py").read_text()
+    assert "nor the pip wheel ensurepip installs from, nor the pip scripts" in smoke

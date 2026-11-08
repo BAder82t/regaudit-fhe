@@ -577,7 +577,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--without-pip-notices",
         action="store_true",
-        help="Leave out the notices for pip: the pip-section folder and the pip part of the notices.",
+        help="Leave out the notices for pip. The build ships no pip, so they are always left out now and this "
+        "changes nothing; it is kept so that older build commands still work.",
     )
     return ap.parse_args(argv)
 
@@ -611,7 +612,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.compliance_dir),
             signed_by=signed_by,
             allow_placeholders=args.allow_compliance_placeholders,
-            without_pip=args.without_pip_notices,
+            without_pip=True,  # the build ships no pip, so its notices are never needed
         )
         print(
             f"licence notices: {len(compliance.files)} files from {COMPLIANCE_MANIFEST} "
@@ -679,6 +680,19 @@ def main(argv: list[str] | None = None) -> int:
     # The runtime brings pip and nothing in the bundle needs it. Leaving it would let the bundle install more.
     for leftover in [site / "pip", *site.glob("pip-*.dist-info")]:
         shutil.rmtree(leftover)
+    # The runtime also brings the pip wheel that ensurepip installs from, and the pip scripts. Nothing runs pip after the
+    # install above (not the launcher, the portal, the administrator programs or the smoke test), so they go too.
+    lib = site.parent
+    for wheel in (lib / "ensurepip" / "_bundled").glob("pip-*.whl"):
+        wheel.unlink()
+    for script in ("pip", "pip3", "pip" + lib.name.removeprefix("python")):
+        (resources / "python" / "bin" / script).unlink(missing_ok=True)
+    left = [
+        *(lib / "ensurepip" / "_bundled").glob("pip-*"),
+        *(resources / "python" / "bin").glob("pip*"),
+    ]
+    if left:
+        raise SystemExit(f"pip is still in the bundle: {[p.name for p in left]}")
     shutil.copytree(
         PORTAL_DIR / "regaudit_portal",
         site / "regaudit_portal",

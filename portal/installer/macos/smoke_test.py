@@ -453,6 +453,13 @@ def main(app_path: str) -> int:
     check(
         "pip is not shipped", not (site / "pip").exists() and not list(site.glob("pip-*.dist-info"))
     )
+    python = app / "Contents" / "Resources" / "python"
+    check(
+        "nor the pip wheel ensurepip installs from, nor the pip scripts",
+        not list(site.parent.glob("ensurepip/_bundled/pip-*"))
+        and not list((python / "bin").glob("pip*")),
+        str([p.name for p in (python / "bin").glob("pip*")]),
+    )
     check("no bytecode is shipped for the installed packages", not list(site.rglob("__pycache__")))
     leaks = subprocess.run(
         ["grep", "-r", "-a", "-l", "-F", *_builder_traces(app), str(app)],
