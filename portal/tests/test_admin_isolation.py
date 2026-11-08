@@ -38,6 +38,7 @@ ALLOWED = {
     ("/api/setup", frozenset({"GET", "HEAD"})),
     ("/api/status", frozenset({"GET", "HEAD"})),
     ("/api/verify", frozenset({"POST"})),
+    ("/api/verify-batch", frozenset({"POST"})),
     ("/api/samples/{sample_id}/verify", frozenset({"POST"})),
     ("/api/setup/plan", frozenset({"POST"})),  # stateless: computes and returns, writes nothing
 }
@@ -60,7 +61,12 @@ def test_every_route_and_method_of_the_portal_is_on_the_allow_list(
 
 def test_the_only_post_routes_are_the_two_checks_and_the_stateless_plan():
     posts = {path for path, methods in ALLOWED if "POST" in methods}
-    assert posts == {"/api/verify", "/api/samples/{sample_id}/verify", "/api/setup/plan"}
+    assert posts == {
+        "/api/verify",
+        "/api/verify-batch",
+        "/api/samples/{sample_id}/verify",
+        "/api/setup/plan",
+    }
     assert not any(methods & {"PUT", "DELETE", "PATCH"} for _, methods in ALLOWED)
 
 
