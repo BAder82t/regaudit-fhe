@@ -141,8 +141,9 @@ _TRUST_INTRO = (
 )
 _APPLICATION_INTRO = (
     "This portal is running from the application, which does not install these commands on your computer under their "
-    "usual names. Each one is run by the full path of its program inside the application, as shown here. For now they "
-    "are run in Terminal, in the folder above. Run the command below once for each issuer key. It refuses a key whose "
+    "usual names. You do not need them to apply a setup plan: Administrator setup in the application's menu does that. "
+    "To work by hand instead, run each one in Terminal by the full path of its program inside the application, as "
+    "shown here, in the folder above. Run the command below once for each issuer key. It refuses a key whose "
     "fingerprint does not match the one you received."
 )
 

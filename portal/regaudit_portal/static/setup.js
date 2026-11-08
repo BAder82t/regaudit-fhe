@@ -47,6 +47,9 @@ function render(body) {
     list.append(name, value);
   }
   $("status-message").textContent = "Configuration location: " + body.configuration_in_use;
+  // Show only the steps for how this portal was started: the application's menu, or Terminal in a plain install.
+  $("steps-app").hidden = !body.commands.in_application;
+  $("steps-plain").hidden = body.commands.in_application;
   // How to type the commands on this computer: by their plain names, or by the full path of the programs in the application.
   $("cmd-intro").textContent = body.commands.intro;
   $("cmd-trust-add").textContent = body.commands.trust_add;

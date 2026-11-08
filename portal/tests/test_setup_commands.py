@@ -286,6 +286,7 @@ run(document, fetch);
 setTimeout(() => {
   const text = {};
   for (const id of ["cmd-intro", "cmd-trust-add", "cmd-check-config", "status-message"]) text[id] = element(id).textContent;
+  for (const id of ["steps-app", "steps-plain"]) text[id + " hidden"] = element(id).hidden === true;
   process.stdout.write(JSON.stringify(text));
 }, 50);
 """
@@ -314,15 +315,72 @@ def test_the_page_shows_the_commands_the_portal_answers_with(tmp_path, home, mon
     assert shown["cmd-check-config"] == answer["commands"]["check_config"]
     assert ("Terminal" in shown["cmd-intro"]) is inside
     assert shown["status-message"].startswith("Configuration location: ")
+    # Only the steps for how this portal was started: the application's menu, or Terminal in a plain install.
+    assert shown["steps-app hidden"] is not inside
+    assert shown["steps-plain hidden"] is inside
 
 
 def test_the_page_says_the_browser_can_prepare_a_plan_but_cannot_create_the_trust_list():
     html = (STATIC / "setup.html").read_text()
-    assert "For now, making the trust list needs these commands." in html
+    assert "For now" not in html
     assert "The browser cannot create or change the trust list." in html
-    assert "this page does not do it." in html
+    assert (
+        "The Prepare a setup plan page only makes a plan file, and this page does not do that either."
+        in html
+    )
     readme = (PORTAL / "README.md").read_text()
     assert (
         "The browser can prepare a setup plan, but it cannot create or change the trust list."
         in readme
     )
+
+
+def test_in_the_application_the_page_leads_with_the_menu_and_no_terminal():
+    html = (STATIC / "setup.html").read_text()
+    app = html[html.index('<div id="steps-app">') : html.index('<div id="steps-plain">')]
+    for said in (
+        "no Terminal needed",
+        "The application has no window of its own, so nothing new opens.",
+        "Its menu is in the menu bar at the top of the screen while the application is in front.",
+        "click <strong>Evidence Verification Portal</strong>, next to the Apple menu, then click "
+        "<strong>Administrator setup&hellip;</strong>",
+        "Do not copy it from this computer.",
+    ):
+        assert said in app, said
+    assert "Terminal" not in app.replace("no Terminal needed", "")
+    # The menu item the steps name is the one the launcher has, under the application's own name.
+    swift = (PORTAL / "installer" / "macos" / "launcher" / "main.swift").read_text()
+    assert 'let appName = "Evidence Verification Portal"' in swift
+    assert 'menu.addItem(withTitle: "Administrator setup\\u{2026}"' in swift
+    assert "app.setActivationPolicy(.regular)" in swift  # it is in the Dock, as the steps say
+
+
+def test_a_plain_install_is_told_terminal_is_the_only_way_by_design():
+    html = (STATIC / "setup.html").read_text()
+    plain = html[
+        html.index('<div id="steps-plain">') : html.index(
+            "</section>", html.index('<div id="steps-plain">')
+        )
+    ]
+    assert "There, a plan is applied in Terminal, and that is the only way, by design" in plain
+    assert "Manual setup in Terminal (advanced)" in plain
+
+
+def test_the_terminal_commands_are_in_a_collapsed_advanced_section():
+    html = (STATIC / "setup.html").read_text()
+    start = html.index('<details id="manual">')
+    manual = html[start : html.index("</details>", start)]
+    assert "<summary>Manual setup in Terminal (advanced)</summary>" in manual
+    for name in (
+        "cmd-intro",
+        "cmd-trust-add",
+        "cmd-check-config",
+        "cmd-admin-describe",
+        "cmd-admin-apply",
+    ):
+        assert f'id="{name}"' in manual, name
+        assert html.count(f'id="{name}"') == 1, name
+    assert (
+        '"trust_mode": "customer"' in manual
+    )  # the example configuration is for writing it by hand
+    assert '<details id="manual" open' not in html  # collapsed until opened
