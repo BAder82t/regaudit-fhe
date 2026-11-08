@@ -3,8 +3,9 @@
 Without the option nothing changes. With it, only the files the folder's manifest marks SHIP-CANDIDATE are copied, each
 checked against its SHA-256 first, and never anything under evidence/. They go into a visible folder next to the
 application on the disk image and into the application itself, with a plain read-me, and READ ME FIRST.txt says where
-they are. A Developer ID build refuses notices that still hold a draft placeholder unless told otherwise. The build
-manifest records only the status, the number of files and the hash of the folder's manifest, never a path.
+they are. A Developer ID build refuses notices that still hold a draft placeholder, and needs counsel's sign-off for
+exactly this manifest, unless told otherwise. The build manifest records only the status, the number of files and the
+hash of the folder's manifest, never a path.
 """
 
 from __future__ import annotations
@@ -50,13 +51,13 @@ def make_folder(root: Path, *, draft: bool = False, extra_rows: list[str] | None
         "pip-section/licences-pip/LICENSE.txt": "pip licence text\n",
         "PRIVATE_NOTES.md": "private notes\n",
         "evidence/list.txt": "private evidence\n",
-        "evidence/flagged-ship-by-mistake.txt": "still private\n",
+        "Evidence/odd-case.txt": "private evidence in a folder named in another case\n",
         "UNLISTED.txt": "not in the manifest\n",
     }
     flags = {
         "PRIVATE_NOTES.md": "PRIVATE-EVIDENCE",
         "evidence/list.txt": "PRIVATE-EVIDENCE",
-        "evidence/flagged-ship-by-mistake.txt": "SHIP-CANDIDATE",
+        "Evidence/odd-case.txt": "PRIVATE-EVIDENCE",
     }
     rows = ["# sha256  flag  path. A made-up manifest for the test."]
     for name, text in files.items():
@@ -69,6 +70,36 @@ def make_folder(root: Path, *, draft: bool = False, extra_rows: list[str] | None
     rows += extra_rows or []
     (folder / "bundle-manifest.txt").write_text("\n".join(rows) + "\n")
     return folder
+
+
+def rehash(folder: Path) -> None:
+    """Give every line of the folder's manifest the SHA-256 of its file as it is now, flags unchanged."""
+    manifest = folder / "bundle-manifest.txt"
+    rows = []
+    for line in manifest.read_text().splitlines():
+        if line.startswith("#") or not line.strip():
+            rows.append(line)
+            continue
+        _sha, flag, name = line.split(maxsplit=2)
+        rows.append(f"{hashlib.sha256((folder / name).read_bytes()).hexdigest()}  {flag}  {name}")
+    manifest.write_text("\n".join(rows) + "\n")
+
+
+def sign_off(folder: Path, **lines: str | None) -> Path:
+    """Counsel's sign-off for the folder's manifest as it is now; a line given as None is left out."""
+    sha = hashlib.sha256((folder / "bundle-manifest.txt").read_bytes()).hexdigest()
+    fields = {
+        "Bundle revision": "1",
+        "Bundle manifest sha256": sha,
+        "Counsel name": "A. Made-Up Counsel",
+        "Date": "2026-11-09",
+        "Scope": "this made-up test folder",
+        "Statement": "Approved for this test.",
+        **lines,
+    }
+    path = folder / build_app.SIGNOFF
+    path.write_text("".join(f"{k}: {v}\n" for k, v in fields.items() if v is not None))
+    return path
 
 
 def files_under(root: Path) -> set[str]:
@@ -217,8 +248,8 @@ def test_a_developer_id_build_refuses_draft_notices_unless_told_otherwise(tmp_pa
     allowed = build_app.check_compliance(
         folder, signed_by=NAME, allow_placeholders=True, without_pip=False
     )
-    assert allowed.draft is True
-    assert allowed.manifest_entries()["compliance"] == "draft, contains placeholders"
+    assert allowed.draft is True and allowed.overridden is True and allowed.warn is True
+    assert allowed.manifest_entries()["compliance"] == "draft, not signed off"
 
 
 @pytest.mark.parametrize(
@@ -230,26 +261,32 @@ def test_a_developer_id_build_refuses_draft_notices_unless_told_otherwise(tmp_pa
         "[COUNSEL: settle this",
         "[name to be confirmed",  # any bracket about counsel or a confirmation
         "[ask Counsel later",
+        "[FOR\nCOUNSEL",  # across a line break
+        "DRAFT   FOR\tCOUNSEL",  # other white space
+        "\uff3bFOR COUNSEL",  # a fullwidth bracket
+        "\uff24\uff32\uff21\uff26\uff34 FOR COUNSEL",  # fullwidth letters
+        "(short form, ask counsel)",  # round brackets
+        "{counsel: settle}",  # curly brackets
+        "\uff08counsel to settle\uff09",  # fullwidth round brackets
+        "\u3010counsel\u3011",  # lenticular brackets
+        "has Not Been Reviewed By Counsel yet",
+        "holder: to be\nconfirmed",
+        "TODO: add the contact",
+        "the address is TBC",
+        "FIXME",
+        "This is a Draft.",
     ],
 )
 def test_each_placeholder_marker_is_caught(tmp_path, marker):
     folder = make_folder(tmp_path)
-    offer = folder / "SOURCE_OFFER.txt"
-    offer.write_text(f"Write to {marker}]\n")
-    manifest = folder / "bundle-manifest.txt"
-    rows = [
-        (
-            f"{hashlib.sha256(offer.read_bytes()).hexdigest()}  SHIP-CANDIDATE  SOURCE_OFFER.txt"
-            if line.endswith("  SOURCE_OFFER.txt")
-            else line
-        )
-        for line in manifest.read_text().splitlines()
-    ]
-    manifest.write_text("\n".join(rows) + "\n")
-    with pytest.raises(SystemExit, match="draft placeholders"):
+    (folder / "SOURCE_OFFER.txt").write_text(f"Write to {marker}]\n")
+    rehash(folder)
+    sign_off(folder)  # so that the placeholder alone is what refuses the build
+    with pytest.raises(SystemExit, match="draft placeholders") as refused:
         build_app.check_compliance(
             folder, signed_by=NAME, allow_placeholders=False, without_pip=False
         )
+    assert "sign-off is not in order" not in str(refused.value)
 
 
 def test_the_marker_list_holds_every_marker_the_guard_must_refuse():
@@ -260,10 +297,15 @@ def test_the_marker_list_holds_every_marker_the_guard_must_refuse():
         "[holder to be confirmed",
         "[Counsel:",
         "DRAFT FOR COUNSEL",
+        "not been reviewed by counsel",
+        "to be confirmed",
     ):
         assert marker in build_app.COMPLIANCE_MARKERS, marker
         assert build_app.has_placeholder(f"text {marker} more]"), marker
         assert build_app.has_placeholder(f"text {marker.lower()} more]"), marker
+        # An explicit marker counts in a licence text too.
+        assert build_app.has_placeholder(f"text {marker.upper()} more]", licence_text=True), marker
+    assert set(build_app.DRAFT_WORDS) == {"tbc", "todo", "fixme", "draft"}
 
 
 @pytest.mark.parametrize(
@@ -271,11 +313,31 @@ def test_the_marker_list_holds_every_marker_the_guard_must_refuse():
     [
         "Copyright [yyyy] [name of copyright owner]",  # the Apache licence's own appendix
         "Licensed under the MIT licence. [See LICENSE.]",
-        "The counsel of the project is not a placeholder, and nothing here is to be confirmed.",
+        "Consult your own legal counsel before relying on this.",
+        "Copyright (c) 2020 The Authors. All rights reserved.",
+        "The drafted text and its todos are not words on their own.",
     ],
 )
 def test_ordinary_licence_text_is_not_taken_for_a_placeholder(text):
     assert not build_app.has_placeholder(text)
+    assert not build_app.has_placeholder(text, licence_text=True)
+
+
+@pytest.mark.parametrize("word", ["draft", "TODO", "tbc", "FixMe"])
+def test_the_draft_words_alone_are_not_looked_for_in_upstream_licence_texts(tmp_path, word):
+    """A licence text is a copy of an upstream text, where "draft" can be ordinary prose (the GPL speaks of drafts)."""
+    assert build_app.has_placeholder(f"see the {word} here")
+    assert not build_app.has_placeholder(f"see the {word} here", licence_text=True)
+    folder = make_folder(tmp_path)
+    (folder / "licences" / "one" / "LICENSE").write_text(f"An upstream {word} of the licence.\n")
+    rehash(folder)
+    sign_off(folder)
+    compliance = build_app.check_compliance(
+        folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+    )
+    assert (
+        compliance.draft is False and compliance.status == "no placeholder marker found, signed off"
+    )
 
 
 def test_an_ad_hoc_build_takes_draft_notices_and_says_so_loudly(tmp_path):
@@ -296,6 +358,7 @@ def test_an_ad_hoc_build_takes_draft_notices_and_says_so_loudly(tmp_path):
 
 def test_complete_notices_are_not_called_drafts_and_nothing_claims_compliance(tmp_path):
     folder = make_folder(tmp_path)
+    sign_off(folder)
     compliance = build_app.check_compliance(
         folder, signed_by=NAME, allow_placeholders=False, without_pip=False
     )
@@ -418,3 +481,144 @@ def test_the_manifest_records_only_the_status_the_count_and_the_manifest_hash(tm
     )
     text = json.dumps(entries)
     assert "private place" not in text and str(tmp_path) not in text and "/" not in text
+
+
+# ----------------------------------------------------------------------------- text that cannot be checked
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "UTF-16 text".encode("utf-16"),  # with its byte order mark
+        b"plain\x00text",
+        b"caf\xe9 in Latin-1",
+    ],
+)
+def test_a_file_that_is_not_plain_utf8_stops_the_build(tmp_path, data):
+    folder = make_folder(tmp_path)
+    (folder / "licences" / "two" / "LICENSE").write_bytes(data)
+    rehash(folder)
+    with pytest.raises(SystemExit, match="cannot be checked as text"):
+        build_app.check_compliance(
+            folder, signed_by=None, allow_placeholders=False, without_pip=False
+        )
+
+
+# ----------------------------------------------------------------------------- evidence and links
+
+
+@pytest.mark.parametrize("name", ["evidence/x.txt", "Evidence/x.txt", "EVIDENCE/x.txt"])
+def test_a_manifest_that_marks_evidence_to_ship_is_refused_in_any_case(tmp_path, name):
+    folder = make_folder(tmp_path)
+    (folder / name).parent.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_text("private\n")
+    sha = hashlib.sha256(b"private\n").hexdigest()
+    with open(folder / "bundle-manifest.txt", "a") as manifest:
+        manifest.write(f"{sha}  SHIP-CANDIDATE  {name}\n")
+    with pytest.raises(SystemExit, match="nothing under evidence/ is ever shipped"):
+        build_app.check_compliance(
+            folder, signed_by=None, allow_placeholders=False, without_pip=False
+        )
+
+
+def test_private_evidence_in_another_case_is_listed_but_never_copied(tmp_path):
+    folder = make_folder(tmp_path)
+    compliance = build_app.check_compliance(
+        folder, signed_by=None, allow_placeholders=False, without_pip=False
+    )
+    build_app.write_licences(compliance, tmp_path / "Licences")
+    copied = files_under(tmp_path / "Licences")
+    assert not any(name.casefold().startswith("evidence/") for name in copied)
+
+
+@pytest.mark.parametrize("target", ["outside", "inside"])
+def test_a_folder_reached_through_a_link_stops_the_build(tmp_path, target):
+    folder = make_folder(tmp_path)
+    real = folder / "licences" / "one"
+    moved = (tmp_path / "elsewhere") if target == "outside" else (folder / "moved-one")
+    real.rename(moved)
+    os.symlink(moved, real)
+    with pytest.raises(SystemExit, match="through a link"):
+        build_app.check_compliance(
+            folder, signed_by=None, allow_placeholders=False, without_pip=False
+        )
+
+
+# ----------------------------------------------------------------------------- counsel's sign-off
+
+
+def test_a_resolved_and_signed_off_folder_is_accepted_for_a_developer_id_build(tmp_path):
+    folder = make_folder(tmp_path)
+    sign_off(folder)
+    compliance = build_app.check_compliance(
+        folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+    )
+    assert compliance.signed_off and not compliance.draft and not compliance.overridden
+    assert compliance.manifest_entries()["compliance"] == "no placeholder marker found, signed off"
+    build_app.write_licences(compliance, tmp_path / "Licences")
+    assert build_app.SIGNOFF not in files_under(tmp_path / "Licences")  # private, never copied
+
+
+@pytest.mark.parametrize(
+    "change, said",
+    [
+        (None, "there is no COUNSEL_SIGNOFF.txt"),
+        ({"Bundle manifest sha256": "0" * 64}, "does not name the sha256"),
+        ({"Counsel name": ""}, "no Counsel line filled in"),
+        ({"Counsel name": None}, "no Counsel line filled in"),
+        ({"Date": "2026-13-40"}, "no Date: YYYY-MM-DD"),
+        ({"Date": "9 November 2026"}, "no Date: YYYY-MM-DD"),
+        ({"Statement": None}, "no Statement filled in"),
+        ({"Statement": "[FOR COUNSEL: wording]"}, "still holds a placeholder"),
+    ],
+)
+def test_a_developer_id_build_needs_counsels_sign_off_for_this_manifest(tmp_path, change, said):
+    folder = make_folder(tmp_path)
+    if change is not None:
+        sign_off(folder, **change)
+    with pytest.raises(SystemExit, match="sign-off is not in order") as refused:
+        build_app.check_compliance(
+            folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+        )
+    assert said in str(refused.value)
+    # An ad hoc build goes ahead, and says it is not signed off.
+    ad_hoc = build_app.check_compliance(
+        folder, signed_by=None, allow_placeholders=False, without_pip=False
+    )
+    assert ad_hoc.status == "no placeholder marker found, not signed off"
+
+
+def test_a_sign_off_for_an_earlier_manifest_no_longer_counts(tmp_path):
+    folder = make_folder(tmp_path)
+    sign_off(folder)
+    (folder / "licences" / "two" / "LICENSE").write_text("changed licence text\n")
+    rehash(folder)  # a changed file means a changed manifest
+    with pytest.raises(SystemExit, match="does not name the sha256"):
+        build_app.check_compliance(
+            folder, signed_by=NAME, allow_placeholders=False, without_pip=False
+        )
+
+
+def test_a_manifest_that_lists_the_sign_off_is_refused(tmp_path):
+    folder = make_folder(tmp_path)
+    with open(folder / "bundle-manifest.txt", "a") as manifest:
+        manifest.write(f"{'0' * 64}  PRIVATE-EVIDENCE  COUNSEL_SIGNOFF.txt\n")
+    with pytest.raises(SystemExit, match="private and never listed"):
+        build_app.check_compliance(
+            folder, signed_by=None, allow_placeholders=False, without_pip=False
+        )
+
+
+def test_the_override_skips_placeholders_and_sign_off_but_is_recorded_and_said_loudly(tmp_path):
+    folder = make_folder(tmp_path)  # complete notices, but no sign-off
+    compliance = build_app.check_compliance(
+        folder, signed_by=NAME, allow_placeholders=True, without_pip=False
+    )
+    assert compliance.overridden and compliance.warn
+    assert compliance.manifest_entries()["compliance"] == "draft, not signed off"
+    assert "counsel has not signed them off" in build_app.draft_warning()
+    source = inspect.getsource(build_app.main)
+    assert (
+        source.count("if compliance.warn:") == 1
+        and "compliance.warn:" in source.split("built", 1)[1]
+    )

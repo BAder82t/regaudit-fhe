@@ -51,9 +51,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import unicodedata
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
 
 HERE = Path(__file__).resolve().parent
@@ -250,8 +251,10 @@ The licence texts, the third-party notices and how to get the source code are in
 "{LICENCES_FOLDER}" next to the application, and inside the application in
 Contents/Resources/{LICENCES_IN_APP}.
 """
-# Text a draft still carries, matched without regard to case. A Developer ID build refuses notices that hold any of
-# them, unless told otherwise. Any bracket that mentions counsel or something "to be confirmed" counts as well.
+# Text a draft still carries. Every text is normalised before it is searched (Unicode NFKC, so fullwidth and other
+# compatibility forms become plain ones; every run of white space, line breaks included, becomes one space; and case
+# is folded), so a marker cannot hide behind a line break, a different case or a lookalike form. These markers are
+# refused in every file. A Developer ID build refuses notices that hold any of them, unless told otherwise.
 COMPLIANCE_MARKERS = (
     "[FOR COUNSEL",
     "[contact to be added",
@@ -259,22 +262,63 @@ COMPLIANCE_MARKERS = (
     "[holder to be confirmed",
     "[Counsel:",
     "DRAFT FOR COUNSEL",
+    "not been reviewed by counsel",
+    "to be confirmed",
 )
-_OPEN_BRACKET = re.compile(r"\[[^\]\n]*?(?:counsel|to be confirmed)", re.IGNORECASE)
+# Whole words that mark a draft in notices written for this product. The licence texts under licences/ are copies of
+# upstream texts, where such a word can be ordinary prose, so these words alone are not looked for there.
+DRAFT_WORDS = ("tbc", "todo", "fixme", "draft")
+LICENCE_TEXTS = "licences"
+_DRAFT_WORD = re.compile(r"\b(?:" + "|".join(DRAFT_WORDS) + r")\b")
+# Any bracket, of whichever kind, that mentions counsel. Fullwidth brackets are plain ones after normalising.
+_BRACKETED = re.compile(r"[\[({【〔〈《「『][^\])}】〕〉》」』]*?counsel")
 
 
-def has_placeholder(text: str) -> bool:
-    """Whether a text still holds a draft placeholder: one of the markers, or a bracket about counsel or a confirmation."""
-    folded = text.casefold()
-    return any(marker.casefold() in folded for marker in COMPLIANCE_MARKERS) or bool(
-        _OPEN_BRACKET.search(text)
-    )
+def normalised(text: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).casefold()
+
+
+def placeholders_in(text: str, *, licence_text: bool = False) -> list[str]:
+    """The draft placeholders a text still holds, in its normalised form. ``licence_text`` is a copy of an upstream
+    licence, in which the general draft words alone are not taken for placeholders."""
+    plain = normalised(text)
+    found = [marker for marker in COMPLIANCE_MARKERS if normalised(marker) in plain]
+    found += [
+        f"a bracket mentioning counsel ({m.group(0)[:40]})" for m in _BRACKETED.finditer(plain)
+    ]
+    if not licence_text:
+        found += sorted({f"the word {m.group(0)!r}" for m in _DRAFT_WORD.finditer(plain)})
+    return found
+
+
+def has_placeholder(text: str, *, licence_text: bool = False) -> bool:
+    """Whether a text still holds a draft placeholder: one of the markers, a bracket about counsel, or (outside the
+    licence texts) one of the draft words on its own."""
+    return bool(placeholders_in(text, licence_text=licence_text))
+
+
+def text_of(name: str, data: bytes) -> str:
+    """A notices file as text. It must be UTF-8: a file with NUL bytes or a UTF-16 mark, or one that does not decode,
+    cannot be checked for placeholders, so it stops the build."""
+    if b"\x00" in data or data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        raise SystemExit(
+            f"--compliance-dir: {name} has NUL bytes or a UTF-16 mark, so it cannot be checked as text. Nothing "
+            "was copied."
+        )
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(
+            f"--compliance-dir: {name} is not valid UTF-8, so it cannot be checked as text. Nothing was copied."
+        ) from exc
 
 
 COMPLIANCE_MANIFEST = "bundle-manifest.txt"
 SHIP = "SHIP-CANDIDATE"
 _FLAGS = (SHIP, "PRIVATE-EVIDENCE")
-NEVER_SHIPPED = "evidence"  # a top-level folder that is never copied, whatever a manifest line says
+NEVER_SHIPPED = "evidence"  # a top-level folder that is never copied, in any case of its name
+# Counsel's sign-off, which a Developer ID build needs. It is private: never listed in the manifest, never copied.
+SIGNOFF = "COUNSEL_SIGNOFF.txt"
 PIP_NOTICES = "pip-section"  # the notices for pip, which --without-pip-notices leaves out
 PIP_BEGIN = "===== BEGIN PIP SECTION ====="
 PIP_END = "===== END PIP SECTION ====="
@@ -289,13 +333,28 @@ class Compliance:
     manifest_sha256: str
     draft: bool  # a file to ship still holds a placeholder marker
     without_pip: bool
+    signed_off: bool = False  # COUNSEL_SIGNOFF.txt names this manifest and is filled in
+    overridden: bool = False  # a Developer ID build went ahead with --allow-compliance-placeholders
+
+    @property
+    def status(self) -> str:
+        if self.overridden:
+            return "draft, not signed off"
+        if self.draft:
+            return "draft, contains placeholders"
+        return "no placeholder marker found, " + (
+            "signed off" if self.signed_off else "not signed off"
+        )
+
+    @property
+    def warn(self) -> bool:
+        """Whether the build log must say loudly that this build is not to be given to anyone."""
+        return self.draft or self.overridden
 
     def manifest_entries(self) -> dict[str, object]:
         """What the build manifest records: the status, how many files and the manifest's hash. Never a path."""
         return {
-            "compliance": "draft, contains placeholders"
-            if self.draft
-            else "notices included, no placeholder marker found",
+            "compliance": self.status,
             "compliance_files_copied": len(self.files),
             "compliance_manifest_sha256": self.manifest_sha256,
             "compliance_pip_notices": "left out" if self.without_pip else "included",
@@ -320,6 +379,15 @@ def read_compliance_manifest(folder: Path) -> list[tuple[str, str, str]]:
         if name.is_absolute() or ".." in name.parts or "\\" in parts[2] or not name.parts:
             raise SystemExit(
                 f"--compliance-dir: line {number} of {COMPLIANCE_MANIFEST} names a path outside the folder"
+            )
+        if normalised(parts[2]) == normalised(SIGNOFF):
+            raise SystemExit(
+                f"--compliance-dir: {COMPLIANCE_MANIFEST} lists {SIGNOFF}, which is private and never listed"
+            )
+        if normalised(parts[2]).startswith(NEVER_SHIPPED + "/") and parts[1] == SHIP:
+            raise SystemExit(
+                f"--compliance-dir: {COMPLIANCE_MANIFEST} marks {parts[2]} {SHIP}, but nothing under evidence/ "
+                "is ever shipped"
             )
         if parts[2] in seen:
             raise SystemExit(
@@ -352,11 +420,20 @@ def shipped_bytes(folder: Path, name: str, sha: str, without_pip: bool) -> bytes
     """A file to ship, read without following a link and checked against its SHA-256; with the pip part left out of
     the notices when asked."""
     path = folder / name
+    here = folder
+    for part in PurePosixPath(name).parts[:-1]:  # no folder on the way may be a link
+        here = here / part
+        if here.is_symlink() or not here.is_dir():
+            raise SystemExit(
+                f"--compliance-dir: {name} is reached through a link or a missing folder. Nothing was copied."
+            )
     info = os.lstat(path) if os.path.lexists(path) else None
     if info is None or not stat.S_ISREG(info.st_mode):
         raise SystemExit(
             f"--compliance-dir: {name} is listed but is not a regular file in the folder"
         )
+    if not path.resolve().is_relative_to(folder.resolve()):
+        raise SystemExit(f"--compliance-dir: {name} is outside the folder. Nothing was copied.")
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != sha:
         raise SystemExit(
@@ -367,18 +444,52 @@ def shipped_bytes(folder: Path, name: str, sha: str, without_pip: bool) -> bytes
     return data
 
 
+def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
+    """What is wrong with counsel's sign-off, or None. It must be a plain UTF-8 file in the folder that names the sha256
+    of the current bundle-manifest.txt and has a filled-in Counsel line, a Date (YYYY-MM-DD) and a Statement, and no
+    placeholder of its own."""
+    path = folder / SIGNOFF
+    if not os.path.lexists(path):
+        return f"there is no {SIGNOFF} in the folder"
+    if not stat.S_ISREG(os.lstat(path).st_mode):
+        return f"{SIGNOFF} is not a regular file"
+    text = text_of(SIGNOFF, path.read_bytes())
+    lines = [line.strip() for line in text.splitlines()]
+    if manifest_sha256 not in re.findall(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])", text.lower()):
+        return f"{SIGNOFF} does not name the sha256 of the current {COMPLIANCE_MANIFEST}"
+    if not any(re.match(r"counsel( name)?:\s*\S", line, re.IGNORECASE) for line in lines):
+        return f"{SIGNOFF} has no Counsel line filled in"
+    dated = False
+    for line in lines:
+        found = re.fullmatch(r"date:\s*(\d{4}-\d{2}-\d{2})", line, re.IGNORECASE)
+        if found:
+            try:
+                date.fromisoformat(found.group(1))
+                dated = True
+            except ValueError:
+                pass
+    if not dated:
+        return f"{SIGNOFF} has no Date: YYYY-MM-DD line with a real date"
+    if not any(re.match(r"statement:\s*\S", line, re.IGNORECASE) for line in lines):
+        return f"{SIGNOFF} has no Statement filled in"
+    if has_placeholder(text, licence_text=True):
+        return f"{SIGNOFF} still holds a placeholder"
+    return None
+
+
 def check_compliance(
     folder: Path, *, signed_by: str | None, allow_placeholders: bool, without_pip: bool
 ) -> Compliance:
     """Choose the files to ship and check every one before anything is copied. A Developer ID build stops if any of
-    them still holds a placeholder, unless ``allow_placeholders``."""
+    them still holds a placeholder, or if counsel's sign-off is missing or does not match, unless
+    ``allow_placeholders``, which is then recorded as a draft that is not signed off."""
     folder = folder.resolve()
     if not folder.is_dir():
         raise SystemExit("--compliance-dir must be a folder")
     rows = read_compliance_manifest(folder)
     files = []
     for sha, flag, name in rows:
-        top = PurePosixPath(name).parts[0]
+        top = normalised(PurePosixPath(name).parts[0])
         if flag != SHIP or top == NEVER_SHIPPED or (without_pip and top == PIP_NOTICES):
             continue
         files.append((name, sha))
@@ -386,21 +497,35 @@ def check_compliance(
         raise SystemExit(f"--compliance-dir: {COMPLIANCE_MANIFEST} marks no file {SHIP}")
     draft = []
     for name, sha in files:
-        text = shipped_bytes(folder, name, sha, without_pip).decode("utf-8", errors="replace")
-        if has_placeholder(text):
+        text = text_of(name, shipped_bytes(folder, name, sha, without_pip))
+        if has_placeholder(
+            text, licence_text=normalised(PurePosixPath(name).parts[0]) == LICENCE_TEXTS
+        ):
             draft.append(name)
-    if draft and signed_by is not None and not allow_placeholders:
+    manifest_sha256 = sha256_file(folder / COMPLIANCE_MANIFEST)
+    unsigned = signoff_problem(folder, manifest_sha256)
+    blocked = signed_by is not None and (draft or unsigned is not None)
+    if blocked and not allow_placeholders:
+        reasons = []
+        if draft:
+            reasons.append(
+                f"{len(draft)} of the notices still hold draft placeholders ({', '.join(draft)})"
+            )
+        if unsigned is not None:
+            reasons.append(f"counsel's sign-off is not in order: {unsigned}")
         raise SystemExit(
-            f"--compliance-dir: {len(draft)} of the notices still hold draft placeholders ({', '.join(draft)}). A "
-            "Developer ID build is meant to be given to people, so it is refused. Complete the notices, or pass "
-            "--allow-compliance-placeholders for a local candidate that nobody else receives."
+            f"--compliance-dir: {'; and '.join(reasons)}. A Developer ID build is meant to be given to people, so it "
+            "is refused. Complete the notices and the sign-off, or pass --allow-compliance-placeholders for a local "
+            "candidate that nobody else receives."
         )
     return Compliance(
         folder=folder,
         files=tuple(files),
-        manifest_sha256=sha256_file(folder / COMPLIANCE_MANIFEST),
+        manifest_sha256=manifest_sha256,
         draft=bool(draft),
         without_pip=without_pip,
+        signed_off=unsigned is None,
+        overridden=bool(blocked),
     )
 
 
@@ -408,8 +533,8 @@ def draft_warning() -> str:
     return (
         "\n"
         + "!" * 100
-        + "\nWARNING: the licence notices in this build are a DRAFT and still contain placeholders. "
-        "Do not give this build to anyone.\n" + "!" * 100
+        + "\nWARNING: the licence notices in this build are a DRAFT: they still contain placeholders, or counsel "
+        "has not signed them off. Do not give this build to anyone.\n" + "!" * 100
     )
 
 
@@ -638,7 +763,7 @@ def main(argv: list[str] | None = None) -> int:
             f"(sha256 {compliance.manifest_sha256})",
             flush=True,
         )
-        if compliance.draft:
+        if compliance.warn:
             print(draft_warning(), flush=True)
 
     out = Path(args.out).resolve()
@@ -928,7 +1053,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest["dmg"] = {"name": dmg.name, "sha256": sha256_file(dmg)}
     (out / "BUILD_MANIFEST.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print("built", app, flush=True)
-    if compliance is not None and compliance.draft:
+    if compliance is not None and compliance.warn:
         print(draft_warning(), flush=True)
     return 0
 
