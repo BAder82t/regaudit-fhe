@@ -1,6 +1,4 @@
-# whitepaper sources are kept locally only; the published artefact is the PDF.
-*.tex
-*.png
+# The manuscript, its logo and the generated PDF are tracked. Only build output is ignored.
 *.aux
 *.log
 *.out
