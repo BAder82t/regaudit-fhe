@@ -48,6 +48,11 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      # init, analyze and upload-sarif must run the same version; bumped one by one, each pull request fails CodeQL.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # Dockerfile base-image updates.
   - package-ecosystem: "docker"
