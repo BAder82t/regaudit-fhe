@@ -5,7 +5,7 @@ For every primitive the matrix asserts four properties:
     1. abs(fhe_result - plaintext_result) <= tolerance.
     2. depth_consumed <= declared_depth.
     3. No bootstrapping was used.
-    4. Runtime below the documented benchmark bound.
+    4. Runtime within a bound relative to a reference workload timed on the same machine.
 
 Plus a regulatory-threshold-stability check: with inputs near the
 breach threshold, the encrypted and plaintext circuits must agree on
@@ -35,14 +35,23 @@ from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
 
 RNG = np.random.default_rng(20260426)
 EQUIVALENCE_TOL = 5e-2  # CKKS noise after up to six multiplications
-RUNTIME_BOUND_S = 5.0  # encrypted call must complete in under 5 s
-# at N=2^14 in the test ring
-# Hosted CI runners (notably macOS) run ~1.5x slower than the dev machine the
-# bounds were measured on; allow headroom there. Override with
-# REGAUDIT_RUNTIME_SLACK.
-RUNTIME_SLACK = float(
-    os.environ.get("REGAUDIT_RUNTIME_SLACK", "2.0" if os.environ.get("CI") else "1.0")
-)
+# Runtime is checked relative to a reference workload, not in seconds. A bound in seconds measures the machine as much as
+# the code: the encrypted concordance took 6.4 s on a laptop, 11.5 s on a 2-core Linux VM, and 30 to 52 s on hosted macOS
+# runners, against a bound of 15 s times a CI slack of 2.0, so unrelated pull requests failed at random (F-021). Each check
+# now divides the wall time of the encrypted call by the wall time of a fixed workload of the same kind of operations (CKKS
+# multiplications and rotations) run on the same context in the same process, so the speed of the machine cancels out. A
+# primitive that becomes several times more expensive still fails. Wall time, not CPU time: TenSEAL spreads some operations
+# over threads, so CPU time grows with the number of cores and the ratios then differed between machines (drift 0.4 by wall
+# time, 2.6 to 2.9 by CPU time).
+#
+# RUNTIME_RATIO per case is the largest wall-time ratio seen in any run on 2026-11-14 (macOS arm64 CPython 3.12, three runs;
+# Linux x86-64 CPython 3.12 and 3.13, three runs), against a reference of REFERENCE_ROUNDS rounds. The check allows RUNTIME_RATIO_MARGIN times that, and never
+# less than RUNTIME_RATIO_FLOOR, so a call much cheaper than the reference is not judged on timer noise.
+RUNTIME_RATIO_MARGIN = 3.0
+RUNTIME_RATIO_FLOOR = 0.5
+REFERENCE_ROUNDS = 8
+# Extra headroom if ever needed, for example on an unusual machine. The default is 1.0 everywhere, CI included.
+RUNTIME_SLACK = float(os.environ.get("REGAUDIT_RUNTIME_SLACK", "1.0"))
 
 
 @pytest.fixture(scope="module")
@@ -50,11 +59,34 @@ def ctx():
     return build_d6_context()
 
 
+def _reference_s(ctx) -> float:
+    """Wall seconds for a fixed workload on ``ctx``: one ciphertext multiplication (with relinearisation and rescale) and one
+    rotate-and-add sum, REFERENCE_ROUNDS times, on a fresh vector each round so no level is used up."""
+    v = tenseal.ckks_vector(ctx.context, np.linspace(-1.0, 1.0, 4096).tolist())
+    start = time.perf_counter()
+    for _ in range(REFERENCE_ROUNDS):
+        (v * v).sum()
+    return time.perf_counter() - start
+
+
+@pytest.fixture(scope="module")
+def reference_s(ctx) -> float:
+    _reference_s(ctx)  # warm up
+    runs = sorted(_reference_s(ctx) for _ in range(3))
+    return runs[1]  # the median
+
+
+def _runtime_bound_ratio(case: Case) -> float:
+    return max(RUNTIME_RATIO_FLOOR, case.runtime_ratio * RUNTIME_RATIO_MARGIN) * RUNTIME_SLACK
+
+
 @dataclass
 class Case:
     name: str
     declared_depth: int
-    runtime_bound_s: float
+    runtime_ratio: (
+        float  # wall time of the encrypted call / wall time of the reference workload, as measured
+    )
     abs_tol: float
     plaintext: Callable[..., Any]
     encrypted: Callable[..., Any]
@@ -159,7 +191,7 @@ CASES = [
     Case(
         name="fairness",
         declared_depth=4,
-        runtime_bound_s=RUNTIME_BOUND_S,
+        runtime_ratio=0.72,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_fairness,
         encrypted=fhe_p.fairness_encrypted,
@@ -171,7 +203,7 @@ CASES = [
     Case(
         name="provenance",
         declared_depth=3,
-        runtime_bound_s=RUNTIME_BOUND_S,
+        runtime_ratio=0.82,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_provenance,
         encrypted=fhe_p.topk_provenance_encrypted,
@@ -183,7 +215,7 @@ CASES = [
     Case(
         name="concordance",
         declared_depth=5,
-        runtime_bound_s=15.0,
+        runtime_ratio=8.7,
         # The encrypted Harrell C-index reconstructs four concordance
         # bins from three sign-poly aggregates per shift. With
         # ``sign_poly_d3``'s ~30% worst-case error near zero,
@@ -203,7 +235,7 @@ CASES = [
     Case(
         name="calibration",
         declared_depth=4,
-        runtime_bound_s=RUNTIME_BOUND_S,
+        runtime_ratio=0.05,
         # set_size can drift by ±2 from sign-poly-d3 noise on scores
         # near the quantile threshold; absolute tolerance scales with
         # K (16 here).
@@ -218,7 +250,7 @@ CASES = [
     Case(
         name="drift",
         declared_depth=2,
-        runtime_bound_s=RUNTIME_BOUND_S,
+        runtime_ratio=0.76,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_drift,
         encrypted=fhe_p.w1_encrypted,
@@ -230,7 +262,7 @@ CASES = [
     Case(
         name="disagreement",
         declared_depth=5,
-        runtime_bound_s=RUNTIME_BOUND_S,
+        runtime_ratio=0.19,
         abs_tol=EQUIVALENCE_TOL,
         plaintext=rf.audit_disagreement,
         encrypted=fhe_p.disagreement_encrypted,
@@ -294,16 +326,17 @@ def test_no_bootstrapping(case: Case, ctx) -> None:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
-def test_runtime_within_documented_bound(case: Case, ctx) -> None:
-    """Runtime below the documented benchmark bound."""
+def test_runtime_within_documented_bound(case: Case, ctx, reference_s) -> None:
+    """Runtime within the bound, relative to the reference workload on this machine."""
     args = case.inputs()
     case.encrypted(ctx, **args)  # warm up
-    t0 = time.perf_counter()
+    start = time.perf_counter()
     case.encrypted(ctx, **args)
-    elapsed = time.perf_counter() - t0
-    bound = case.runtime_bound_s * RUNTIME_SLACK
-    assert elapsed <= bound, (
-        f"{case.name}: encrypted call took {elapsed:.2f}s, exceeding documented bound {bound:.2f}s"
+    elapsed = time.perf_counter() - start
+    ratio, bound = elapsed / reference_s, _runtime_bound_ratio(case)
+    assert ratio <= bound, (
+        f"{case.name}: encrypted call took {elapsed:.2f} s, {ratio:.2f} times the reference workload "
+        f"({reference_s:.2f} s); the bound is {bound:.2f} times"
     )
 
 
@@ -330,7 +363,7 @@ def test_threshold_decision_is_stable_under_encryption(case: Case, ctx) -> None:
     )
 
 
-def test_full_matrix_summary(ctx) -> None:
+def test_full_matrix_summary(ctx, reference_s) -> None:
     """One report-style assertion that every primitive cleared the
     matrix on a single random seed. This is the test a reviewer reads
     first to verify coverage."""
@@ -339,9 +372,9 @@ def test_full_matrix_summary(ctx) -> None:
         fhe_p.reset_last_depth()
         args = case.inputs()
         plain = case.plaintext(**args)
-        t0 = time.perf_counter()
+        start = time.perf_counter()
         enc = case.encrypted(ctx, **args)
-        elapsed = time.perf_counter() - t0
+        elapsed = time.perf_counter() - start
         rows.append(
             {
                 "primitive": case.name,
@@ -349,8 +382,8 @@ def test_full_matrix_summary(ctx) -> None:
                 "tolerance": case.abs_tol,
                 "depth_consumed": fhe_p.last_depth(case.name),
                 "declared_depth": fhe_p.declared_depth(case.name),
-                "runtime_s": elapsed,
-                "runtime_bound_s": case.runtime_bound_s * RUNTIME_SLACK,
+                "runtime_ratio": elapsed / reference_s,
+                "runtime_bound_ratio": _runtime_bound_ratio(case),
             }
         )
     failures: list[str] = []
@@ -363,8 +396,9 @@ def test_full_matrix_summary(ctx) -> None:
             failures.append(
                 f"{r['primitive']}: depth {r['depth_consumed']} > declared {r['declared_depth']}"
             )
-        if r["runtime_s"] > r["runtime_bound_s"]:
+        if r["runtime_ratio"] > r["runtime_bound_ratio"]:
             failures.append(
-                f"{r['primitive']}: runtime {r['runtime_s']:.2f}s > bound {r['runtime_bound_s']}s"
+                f"{r['primitive']}: runtime {r['runtime_ratio']:.2f} times the reference > bound "
+                f"{r['runtime_bound_ratio']:.2f} times"
             )
     assert not failures, "matrix failures:\n  " + "\n  ".join(failures)
