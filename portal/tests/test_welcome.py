@@ -379,7 +379,10 @@ def test_the_start_page_offers_three_choices_and_the_third_is_the_setup_page():
         and 'id="choose-own"' in welcome
         and 'id="choose-setup" href="/setup"' in welcome
     )
-    assert "<form" not in html and "<input" in html and html.count('type="file"') == 1
+    # Two file pickers, deliberately: the single-report one, and the one for several reports at once (multiple). No form.
+    assert "<form" not in html and html.count('type="file"') == 2
+    batch_input = re.search(r'<input id="batch-files"[^>]*>', html)
+    assert batch_input is not None and "multiple" in batch_input.group(0) and 'id="file"' in html
 
 
 def test_the_page_does_not_offer_an_upload_that_cannot_work():

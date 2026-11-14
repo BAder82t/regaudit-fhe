@@ -244,6 +244,10 @@ def _tamper_cases(answer: dict) -> dict[str, dict]:
             else "INVALID"
         ),
     )
+    case(
+        "verdict_not_word_shaped",
+        lambda a: a["files"][ok_index]["result"]["verification"].update(trust_status="trusted-ish"),
+    )
     case("total_wrong", lambda a: a["summary"].update(total=a["summary"]["total"] + 1))
     case("trusted_count_wrong", lambda a: a["summary"].update(trusted=a["summary"]["trusted"] + 1))
     case("refused_count_wrong", lambda a: a["summary"].update(refused=0))

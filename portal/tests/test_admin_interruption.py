@@ -381,7 +381,13 @@ def test_a_stop_in_the_first_moments_never_changes_anything_and_ends_plainly_or_
         proc.send_signal(getattr(signal, sig))
         out, err = proc.communicate(timeout=120)
         assert not default_config_folder().exists(), delay
-        if proc.returncode == 1:
+        if proc.returncode == 1 and "Fatal Python error: init_import_site" in err:
+            # The stop landed while CPython itself was still starting up (importing its own ``site`` module), before any
+            # of our code. CPython reports that as a fatal error with status 1. Measured: about 1 run in 4 at a 20 ms delay,
+            # on the admin branch alone as well, and never after 100 ms. The Portal cannot take a stop it has not started to
+            # run for. What must still hold is checked above: nothing was written.
+            assert delay <= 0.1, (delay, err[-300:])
+        elif proc.returncode == 1:
             assert (out + err).strip().splitlines()[-1] == "stopped: Nothing was changed.", delay
         else:
             assert proc.returncode == -getattr(signal, sig), (delay, proc.returncode, err[-300:])

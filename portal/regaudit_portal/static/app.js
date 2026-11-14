@@ -345,7 +345,8 @@ async function download() {
 // row per file with the verifier's own verdict, and checks that what it would save is consistent before it saves it.
 const BATCH_SCHEMA = "regaudit-portal-batch/1";
 const BATCH_FALLBACK = { max_files: 20, max_file_bytes: 1048576, max_total_bytes: 8388608 };
-const VERDICTS = ["TRUSTED", "SELF_SIGNED_ONLY", "INVALID", "UNTRUSTED_ISSUER"];
+// The page does not list the verifier's verdict words: it never decides one. It only checks that a verdict is word-shaped.
+const VERDICT_SHAPE = /^[A-Z][A-Z_]{1,63}$/;
 let lastBatch = null;
 let batchAbort = null;
 
@@ -421,7 +422,7 @@ function validateBatch(answer) {
     if (file.index !== index || file.id !== "file-" + (index + 1)) problems.push(where + ": out of order or mislabelled");
     if (file.ok === true) {
       const v = file.result && file.result.verification;
-      if (!v || !VERDICTS.includes(v.trust_status)) { problems.push(where + ": no recognised verdict"); return; }
+      if (!v || typeof v.trust_status !== "string" || !VERDICT_SHAPE.test(v.trust_status)) { problems.push(where + ": no verdict word"); return; }
       if (file.error) problems.push(where + ": has both a result and an error");
       if (typeof file.report_sha256 !== "string" || file.report_sha256.length !== 64) problems.push(where + ": no report digest");
       const s = file.result.statuses;
