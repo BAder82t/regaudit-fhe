@@ -84,12 +84,30 @@
       <p id="record-notice" class="notice-line" hidden>Checking records this report as used. A second check of the same report is refused as a repeat.</p>
       <button id="verify" type="button" disabled>Verify report</button>
       <p class="fine">The report is checked and not kept. It stays on this computer.</p>
+      <details id="batch-section">
+        <summary>Check several reports at once</summary>
+        <p class="fine">Choose up to 20 report files, each up to 1 MB and 8 MB together. Each file is checked on its own, exactly as a single report is, and gets its own result. A file that cannot be read does not stop the others. Nothing is kept.</p>
+        <input id="batch-files" type="file" accept=".json,application/json" multiple>
+        <button id="batch-verify" type="button">Verify these reports</button>
+        <button id="batch-cancel" type="button" class="quiet" hidden>Cancel</button>
+      </details>
       <button type="button" class="back quiet">Back to the start</button>
     </section>
 
     <section id="failure" class="panel notice" role="alert" hidden>
       <h2>No verdict</h2>
       <p id="failure-message"></p>
+    </section>
+
+    <section id="batch-result" class="panel" aria-live="polite" hidden>
+      <h2>Results for several reports</h2>
+      <p id="batch-summary"></p>
+      <table>
+        <thead><tr><th>File</th><th>Verdict</th><th>What was and was not settled</th></tr></thead>
+        <tbody id="batch-rows"></tbody>
+      </table>
+      <p id="batch-note" class="fine"></p>
+      <button id="batch-download" type="button">Download batch result</button>
     </section>
 
     <section id="result" class="panel" aria-live="polite" hidden>

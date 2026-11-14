@@ -19,6 +19,7 @@ function show(id, visible) {
 function unavailable() {
   for (const view of VIEWS) show(view, false);
   show("result", false);
+  show("batch-result", false);
   show("failure", false);
   show("record-notice", false);
   show("saved", false);
@@ -28,6 +29,9 @@ function unavailable() {
     $(id).textContent = "";
   }
   $("sample-list").replaceChildren();
+  $("batch-rows").replaceChildren();
+  $("batch-summary").textContent = "";
+  lastBatch = null;
   $("verdict").removeAttribute("data-status");
   $("result").classList.remove("demonstration");
   chosen = null;
@@ -40,6 +44,7 @@ function showView(name) {
   for (const each of VIEWS) show(each, each === view);
   show("failure", false);
   show("result", false);
+  show("batch-result", false);
   show("saved", false);
   if (name === "welcome" || name === "samples" || name === "own") lastView = name;
 }
@@ -334,6 +339,205 @@ async function download() {
   show("saved", true);
 }
 
+// ---- Several reports at once ---------------------------------------------------------------------------------------------
+// Each file is checked exactly as a single upload is, by the same portal function, and each gets its own result. The page
+// plans the batch against the portal's stated limits before sending anything, sends it as one bounded request, shows one
+// row per file with the verifier's own verdict, and checks that what it would save is consistent before it saves it.
+const BATCH_SCHEMA = "regaudit-portal-batch/1";
+const BATCH_FALLBACK = { max_files: 20, max_file_bytes: 1048576, max_total_bytes: 8388608 };
+const VERDICTS = ["TRUSTED", "SELF_SIGNED_ONLY", "INVALID", "UNTRUSTED_ISSUER"];
+let lastBatch = null;
+let batchAbort = null;
+
+function batchLimits(status) {
+  const given = status && status.batch;
+  if (!given) return BATCH_FALLBACK;
+  const pick = (k) => (Number.isInteger(given[k]) && given[k] > 0 ? given[k] : BATCH_FALLBACK[k]);
+  return { max_files: pick("max_files"), max_file_bytes: pick("max_file_bytes"), max_total_bytes: pick("max_total_bytes") };
+}
+
+// Pure. Whether these files may be sent at all. All or nothing, as the portal itself does: a batch that is over a limit
+// is refused whole, and the message says which limit and by how much, so the person can send smaller groups.
+function planBatch(files, limits) {
+  if (!files || files.length === 0) return { ok: false, message: "Choose at least one report file." };
+  if (files.length > limits.max_files) {
+    return { ok: false, message: "A batch can hold at most " + limits.max_files + " files and " + files.length + " were chosen. Nothing was verified. Send the files in smaller groups." };
+  }
+  let total = 0;
+  for (const file of files) {
+    if (file.size > limits.max_file_bytes) {
+      return { ok: false, message: "A file is over the " + Math.floor(limits.max_file_bytes / 1048576) + " MB limit. Nothing was verified. Check the files you chose." };
+    }
+    total += file.size;
+  }
+  if (total > limits.max_total_bytes) {
+    return { ok: false, message: "The files together are over the " + Math.floor(limits.max_total_bytes / 1048576) + " MB limit for a batch. Nothing was verified. Send the files in smaller groups." };
+  }
+  return { ok: true, message: "" };
+}
+
+function toBase64(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+
+// Pure. The request body, exactly as the portal expects it, and nothing else.
+function batchRequestBody(entries) {
+  return JSON.stringify({ files: entries.map((e) => ({ name: e.name, content_b64: toBase64(e.bytes) })) });
+}
+
+// Pure. One row per file, in the order the portal answered. The verdict is the verifier's word for that file, unchanged;
+// a file the portal could not check has no verdict and says why.
+function batchRows(answer) {
+  const rows = [];
+  for (const file of (answer && Array.isArray(answer.files)) ? answer.files : []) {
+    const base = { id: String(file.id), name: String(file.name), ok: file.ok === true };
+    if (file.ok === true && file.result && file.result.verification) {
+      rows.push(Object.assign(base, {
+        verdict: String(file.result.verification.trust_status),
+        statements: statementRows(file.result.statuses),
+        message: "",
+      }));
+    } else {
+      const error = file.error || {};
+      rows.push(Object.assign(base, { verdict: null, statements: [], message: String(error.message || "No verdict.") }));
+    }
+  }
+  return rows;
+}
+
+// Pure. Is this batch answer consistent with itself and with the single-file results it contains? It returns a list of
+// problems; an empty list means nothing contradicts anything. It does not re-verify any report: the verdicts are the
+// verifier's and stay as they are. What it refuses to pass on is an answer whose parts do not agree, such as a count that
+// does not match the files, a verdict word the verifier does not use, or statements that contradict the verdict.
+function validateBatch(answer) {
+  const problems = [];
+  if (!answer || typeof answer !== "object" || answer.schema !== BATCH_SCHEMA) return ["not a batch result of this portal"];
+  if (!Array.isArray(answer.files) || !answer.summary) return ["the batch result has no files or no summary"];
+  let trusted = 0, notAccepted = 0, refused = 0, notRun = 0;
+  answer.files.forEach((file, index) => {
+    const where = "file " + (index + 1);
+    if (file.index !== index || file.id !== "file-" + (index + 1)) problems.push(where + ": out of order or mislabelled");
+    if (file.ok === true) {
+      const v = file.result && file.result.verification;
+      if (!v || !VERDICTS.includes(v.trust_status)) { problems.push(where + ": no recognised verdict"); return; }
+      if (file.error) problems.push(where + ": has both a result and an error");
+      if (typeof file.report_sha256 !== "string" || file.report_sha256.length !== 64) problems.push(where + ": no report digest");
+      const s = file.result.statuses;
+      if (s && s.verdict !== v.trust_status) problems.push(where + ": the statements name a different verdict than the verifier gave");
+      if (v.trust_status === "TRUSTED") trusted += 1; else notAccepted += 1;
+    } else {
+      if (file.result) problems.push(where + ": has a result and no ok flag");
+      const code = file.error && file.error.error;
+      if (code === "not_run") notRun += 1; else refused += 1;
+    }
+  });
+  const sum = answer.summary;
+  if (sum.total !== answer.files.length) problems.push("the summary counts " + sum.total + " files and the result holds " + answer.files.length);
+  if (sum.trusted !== trusted || sum.not_accepted !== notAccepted || sum.refused !== refused || sum.not_run !== notRun) {
+    problems.push("the summary counts do not match the per-file results");
+  }
+  if (answer.complete === true && notRun !== 0) problems.push("marked complete but some files were not run");
+  return problems;
+}
+
+function renderBatch(answer) {
+  const rows = batchRows(answer);
+  const body = $("batch-rows");
+  body.replaceChildren();
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.dataset.id = row.id;
+    const name = document.createElement("td");
+    name.textContent = row.name;
+    const verdict = document.createElement("td");
+    if (row.verdict !== null) { verdict.textContent = row.verdict; verdict.dataset.status = row.verdict; }
+    else verdict.textContent = "No verdict";
+    const detail = document.createElement("td");
+    if (row.verdict !== null) {
+      const parts = row.statements.map((s) => s.label + ": " + s.stateText);
+      detail.textContent = parts.join(" · ");
+    } else detail.textContent = row.message;
+    tr.append(name, verdict, detail);
+    body.append(tr);
+  }
+  const sum = answer.summary;
+  $("batch-summary").textContent = sum.total + " file(s): " + sum.trusted + " with the verdict TRUSTED, " + sum.not_accepted +
+    " with another verdict, " + sum.refused + " refused, " + sum.not_run + " not run." +
+    (answer.complete === true ? "" : " The batch did not finish: files marked not run were not checked.");
+  $("batch-note").textContent = answer.not_a_claim || "";
+  show("batch-result", true);
+}
+
+async function verifyBatch() {
+  const picked = Array.from($("batch-files").files || []);
+  const status = await (await fetch("/api/status")).json();
+  if (status.state === "unavailable") { unavailable(); return; }
+  const plan = planBatch(picked, batchLimits(status));
+  if (!plan.ok) { fail(plan.message); return; }
+  $("batch-verify").disabled = true;
+  show("batch-cancel", true);
+  show("failure", false);
+  show("batch-result", false);
+  show("saved", false);
+  lastBatch = null;
+  batchAbort = new AbortController();
+  try {
+    // Read one file at a time into one list, then send once. The list is dropped as soon as the request is built.
+    let entries = [];
+    for (const file of picked) entries.push({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+    const request = batchRequestBody(entries);
+    entries = null;
+    const response = await fetch("/api/verify-batch", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: request, signal: batchAbort.signal,
+    });
+    const answer = JSON.parse(await response.text());
+    if (answer.state === "unavailable") { unavailable(); return; }
+    if (!response.ok || answer.schema !== BATCH_SCHEMA) {
+      fail(answer.message || "The batch could not be checked, so there is no verdict for any file. Treat the reports as not accepted.");
+      return;
+    }
+    const problems = validateBatch(answer);
+    if (problems.length > 0) {
+      fail("The portal's answer was not consistent, so it is not shown: " + problems[0] + ". Treat the reports as not accepted.");
+      return;
+    }
+    lastBatch = answer;
+    renderBatch(answer);
+  } catch (error) {
+    if (error && error.name === "AbortError") fail("The batch was cancelled. Files not yet checked have no verdict.");
+    else fail("The batch could not be completed, so there is no verdict for any file. Treat the reports as not accepted.");
+  } finally {
+    batchAbort = null;
+    show("batch-cancel", false);
+    $("batch-verify").disabled = false;
+  }
+}
+
+async function downloadBatch() {
+  if (lastBatch === null) return;
+  const status = await (await fetch("/api/status")).json();
+  const result = { synthetic_demonstration: lastBatch.demonstration_label !== undefined };
+  if (!savePermitted(status, result)) {
+    if (status.state === "unavailable") unavailable();
+    else fail("This portal cannot save a result right now. Contact your administrator.");
+    return;
+  }
+  // Checked again at the moment of saving: a file that would contradict the verifier is never written.
+  const problems = validateBatch(lastBatch);
+  if (problems.length > 0) { fail("The batch result was not saved: " + problems[0] + "."); return; }
+  const kind = result.synthetic_demonstration ? "demonstration-batch-result-" : "verification-batch-result-";
+  const fileName = kind + String(lastBatch.batch_id).slice(0, 12) + ".json";
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(lastBatch, null, 2) + "\n"], { type: "application/json" }));
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  $("saved").textContent = "Saved to your downloads as " + fileName;
+  show("saved", true);
+}
+
 async function start() {
   const body = await (await fetch("/api/status")).json();
   if (body.state === "unavailable") {
@@ -362,6 +566,9 @@ async function start() {
 $("file").addEventListener("change", (event) => choose(event.target.files[0]));
 $("verify").addEventListener("click", verifyChosen);
 $("download").addEventListener("click", download);
+$("batch-verify").addEventListener("click", verifyBatch);
+$("batch-cancel").addEventListener("click", () => { if (batchAbort) batchAbort.abort(); });
+$("batch-download").addEventListener("click", downloadBatch);
 $("again").addEventListener("click", () => {
   $("file").value = "";
   choose(null);
