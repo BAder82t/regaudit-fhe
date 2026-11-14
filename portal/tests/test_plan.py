@@ -22,7 +22,7 @@ from regaudit_portal.config import read_settings, read_trust_store
 from regaudit_portal.plan import PlanProblem, notices, prepared, read_plan, shown, summary_lines
 
 import regaudit_fhe as rf
-from regaudit_fhe import cli as engine_cli
+import regaudit_fhe.cli as engine_cli
 
 SAMPLES = Path(__file__).parents[1] / "regaudit_portal" / "samples"
 

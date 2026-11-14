@@ -272,11 +272,13 @@ def _given_fingerprints(plan: Plan, given: list[str]) -> dict[str, str]:
 def ask_on_terminal(question: str) -> str:
     """Ask on the terminal itself, never through standard input. Raises ``OSError`` when there is no terminal."""
     fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY | os.O_CLOEXEC)
+    try:
+        raw = io.FileIO(fd, "w+")
+    except BaseException:
+        os.close(fd)  # the descriptor is not owned by anything yet
+        raise
     # A terminal cannot seek, so it is read and written through one unbuffered file, as getpass does.
-    with (
-        io.FileIO(fd, "w+") as raw,
-        io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as tty,
-    ):
+    with raw, io.TextIOWrapper(raw, encoding="utf-8", errors="replace") as tty:
         tty.write(question)
         tty.flush()
         return tty.readline(1024)

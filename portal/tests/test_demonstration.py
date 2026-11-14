@@ -38,7 +38,7 @@ def test_every_bundled_demonstration_key_is_recognised(monkeypatch):
 
 def test_the_pinned_list_still_works_if_the_sample_files_could_not_be_read(monkeypatch):
     demonstration.fingerprints.cache_clear()
-    monkeypatch.setattr(demonstration, "_sample_keys", lambda: set())
+    monkeypatch.setattr(demonstration, "_sample_keys", set)
     try:
         assert demonstration.fingerprints() == demonstration.PINNED_FINGERPRINTS
     finally:

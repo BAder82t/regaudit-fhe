@@ -892,7 +892,7 @@ def test_if_taking_the_trust_list_away_fails_too_it_says_exactly_what_state_the_
 
 
 def test_a_stop_while_enrolling_leaves_nothing_behind(home, tmp_path, run, northwind, monkeypatch):
-    from regaudit_fhe import cli
+    import regaudit_fhe.cli as cli
 
     def interrupted(_argv):
         raise KeyboardInterrupt
@@ -1461,3 +1461,40 @@ def test_a_first_setup_plan_on_an_existing_configuration_points_to_an_add_issuer
     assert code == 2 and "There is already a configuration" in problem
     assert 'To add issuers to it, prepare an "Add issuers" plan instead.' in problem
     assert "To start again, move the folder's files somewhere else first." in problem
+
+
+def test_a_failure_to_open_the_terminal_as_a_file_does_not_leak_the_descriptor(monkeypatch):
+    read_end, write_end = os.pipe()
+    monkeypatch.setattr(admin.os, "open", lambda *a, **k: read_end)
+
+    def refuse(*args, **kwargs):
+        raise OSError("not a usable file")
+
+    monkeypatch.setattr(admin.io, "FileIO", refuse)
+    try:
+        with pytest.raises(OSError, match="not a usable file"):
+            admin.ask_on_terminal("question?")
+        with pytest.raises(OSError):
+            os.fstat(read_end)  # closed by ask_on_terminal
+    finally:
+        os.close(write_end)
+        with contextlib.suppress(OSError):
+            os.close(read_end)
+
+
+def test_the_terminal_is_closed_after_an_answer(monkeypatch, tmp_path):
+    path = tmp_path / "tty"
+    path.write_text("")
+    seen = []
+    real_open = os.open
+
+    def opening(name, flags, *args, **kwargs):
+        fd = real_open(path, os.O_RDWR)
+        seen.append(fd)
+        return fd
+
+    monkeypatch.setattr(admin.os, "open", opening)
+    admin.ask_on_terminal("question?")
+    assert path.read_text() == "question?"  # it was written to the descriptor that was opened
+    with pytest.raises(OSError):
+        os.fstat(seen[0])

@@ -454,6 +454,18 @@ def shipped_bytes(folder: Path, name: str, sha: str, without_pip: bool) -> bytes
     return data
 
 
+def _is_real_date_line(line: str) -> bool:
+    """A ``Date: YYYY-MM-DD`` line whose date exists (2026-02-30 does not). A line that is not one is simply not a date line."""
+    found = re.fullmatch(r"date:\s*(\d{4}-\d{2}-\d{2})", line, re.IGNORECASE)
+    if found is None:
+        return False
+    try:
+        date.fromisoformat(found.group(1))
+    except ValueError:
+        return False
+    return True
+
+
 def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
     """What is wrong with counsel's sign-off, or None. It must be a plain UTF-8 file in the folder with exactly one line
     ``Manifest sha256: <64 hex>`` naming the sha256 of the current bundle-manifest.txt, a filled-in Counsel line, a Date
@@ -474,16 +486,7 @@ def signoff_problem(folder: Path, manifest_sha256: str) -> str | None:
         )
     if not any(re.match(r"counsel( name)?:\s*\S", line, re.IGNORECASE) for line in lines):
         return f"{SIGNOFF} has no Counsel line filled in"
-    dated = False
-    for line in lines:
-        found = re.fullmatch(r"date:\s*(\d{4}-\d{2}-\d{2})", line, re.IGNORECASE)
-        if found:
-            try:
-                date.fromisoformat(found.group(1))
-                dated = True
-            except ValueError:
-                pass
-    if not dated:
+    if not any(_is_real_date_line(line) for line in lines):
         return f"{SIGNOFF} has no Date: YYYY-MM-DD line with a real date"
     if not any(re.match(r"statement:\s*\S", line, re.IGNORECASE) for line in lines):
         return f"{SIGNOFF} has no Statement filled in"

@@ -340,10 +340,11 @@ def test_the_guard_on_the_configuration_folder_is_real(tmp_path, monkeypatch):
     tried = _guard_folder(monkeypatch, folder, folder / "replay.db")
     with pytest.raises(AssertionError):
         (folder / "portal-config.json").write_text("{}")
+    with pytest.raises(AssertionError), open(folder / "trust-store.json", "w"):
+        pytest.fail("the guard let a write into the configuration folder through")
     with pytest.raises(AssertionError):
-        open(folder / "trust-store.json", "w")  # noqa: SIM115 - the attempt is the point
-    with pytest.raises(AssertionError):
-        os.open(folder / "trust-store.json", os.O_WRONLY | os.O_CREAT, 0o600)
+        # closed at once, in case the guard ever let it through, so a failure here cannot leak a descriptor
+        os.close(os.open(folder / "trust-store.json", os.O_WRONLY | os.O_CREAT, 0o600))
     with pytest.raises(AssertionError):
         sqlite3.connect(folder / "other.db")
     sqlite3.connect(folder / "replay.db").close()  # the named replay database is allowed
