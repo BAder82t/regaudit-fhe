@@ -35,21 +35,38 @@ from regaudit_fhe.fhe import primitives as fhe_p  # noqa: E402
 
 RNG = np.random.default_rng(20260426)
 EQUIVALENCE_TOL = 5e-2  # CKKS noise after up to six multiplications
-# Runtime is checked relative to a reference workload, not in seconds. A bound in seconds measures the machine as much as
-# the code: the encrypted concordance took 6.4 s on a laptop, 11.5 s on a 2-core Linux VM, and 30 to 52 s on hosted macOS
-# runners, against a bound of 15 s times a CI slack of 2.0, so unrelated pull requests failed at random (F-021). Each check
-# now divides the wall time of the encrypted call by the wall time of a fixed workload of the same kind of operations (CKKS
-# multiplications and rotations) run on the same context in the same process, so the speed of the machine cancels out. A
-# primitive that becomes several times more expensive still fails. Wall time, not CPU time: TenSEAL spreads some operations
-# over threads, so CPU time grows with the number of cores and the ratios then differed between machines (drift 0.4 by wall
-# time, 2.6 to 2.9 by CPU time).
+# How runtime is checked (F-021)
+# -------------------------------
+# Not in seconds. A bound in seconds measures the machine as much as the code: the encrypted concordance took 6.4 s on a
+# laptop, 11.5 s on a 2-core Linux VM and 30 to 52 s on hosted macOS runners, against a bound of 15 s times a CI slack of
+# 2.0, so unrelated pull requests failed at random.
 #
-# RUNTIME_RATIO per case is the largest wall-time ratio seen in any run on 2026-11-14 (macOS arm64 CPython 3.12, three runs;
-# Linux x86-64 CPython 3.12 and 3.13, three runs), against a reference of REFERENCE_ROUNDS rounds. The check allows RUNTIME_RATIO_MARGIN times that, and never
-# less than RUNTIME_RATIO_FLOOR, so a call much cheaper than the reference is not judged on timer noise.
-RUNTIME_RATIO_MARGIN = 3.0
+# The reference workload is a fixed piece of the same kind of work the primitives do: on the same CKKS context, square a
+# 4096-value vector (one ciphertext multiplication with relinearisation and rescale) and sum its slots (a rotate-and-add
+# tree), REFERENCE_ROUNDS times, on a fresh copy each round so no level is used up. It is timed in the same process as the
+# primitive, with time.perf_counter, which is monotonic and has the highest available resolution.
+#
+# The check divides the primitive's time by the reference's time. A machine that is uniformly slower slows both, so the
+# ratio stays put; a primitive whose own work grows makes the ratio grow, and fails. Scheduling on a shared runner only ever
+# adds time to a measurement, never removes it, so each of the two is measured more than once, interleaved (reference, call,
+# reference, call, reference), and the fastest of each is used. Taking the fastest reference is also the conservative
+# choice: a reference slowed by a scheduling spike would make the ratio smaller and could hide a regression, and the
+# minimum cannot be inflated that way. What the ratio cannot see is a slowdown of the CKKS library itself that affects the
+# reference and the primitives alike; that is a dependency change, reviewed as such, and the absolute times are printed in
+# every failure message.
+#
+# Wall time, not CPU time: TenSEAL spreads some operations over threads, so CPU time grows with the number of cores, and the
+# ratios then differed between machines (drift 0.4 by wall time, 2.6 to 2.9 by CPU time).
+#
+# RUNTIME_RATIO per case is the largest ratio seen in any run on 2026-11-14 (macOS arm64 CPython 3.12, three runs; Linux
+# x86-64 CPython 3.12 and 3.13, three runs). The check allows RUNTIME_RATIO_MARGIN times that, and never less than
+# RUNTIME_RATIO_FLOOR, so a call much cheaper than the reference is not judged on timer resolution. A primitive that becomes
+# five times more expensive fails on both platforms (measured for concordance, and pinned by
+# test_the_runtime_check_fails_a_primitive_five_times_slower_than_its_ratio).
+RUNTIME_RATIO_MARGIN = 2.5
 RUNTIME_RATIO_FLOOR = 0.5
 REFERENCE_ROUNDS = 8
+RUNTIME_REPEATS = 2  # timed calls per check; the first also serves as the warm-up
 # Extra headroom if ever needed, for example on an unusual machine. The default is 1.0 everywhere, CI included.
 RUNTIME_SLACK = float(os.environ.get("REGAUDIT_RUNTIME_SLACK", "1.0"))
 
@@ -69,15 +86,30 @@ def _reference_s(ctx) -> float:
     return time.perf_counter() - start
 
 
-@pytest.fixture(scope="module")
-def reference_s(ctx) -> float:
-    _reference_s(ctx)  # warm up
-    runs = sorted(_reference_s(ctx) for _ in range(3))
-    return runs[1]  # the median
-
-
 def _runtime_bound_ratio(case: Case) -> float:
     return max(RUNTIME_RATIO_FLOOR, case.runtime_ratio * RUNTIME_RATIO_MARGIN) * RUNTIME_SLACK
+
+
+def _measure_ratio(ctx, call: Callable[[], Any]) -> tuple[float, float, float]:
+    """(ratio, fastest call in seconds, fastest reference in seconds), interleaved as described above."""
+    _reference_s(ctx)  # warm up the reference's own code paths
+    references, calls = [_reference_s(ctx)], []
+    for _ in range(RUNTIME_REPEATS):
+        start = time.perf_counter()
+        call()
+        calls.append(time.perf_counter() - start)
+        references.append(_reference_s(ctx))
+    fastest_call, fastest_reference = min(calls), min(references)
+    return fastest_call / fastest_reference, fastest_call, fastest_reference
+
+
+def _check_runtime(case: Case, ctx, args: dict[str, Any]) -> None:
+    ratio, seconds, reference = _measure_ratio(ctx, lambda: case.encrypted(ctx, **args))
+    bound = _runtime_bound_ratio(case)
+    assert ratio <= bound, (
+        f"{case.name}: encrypted call took {seconds:.2f} s, {ratio:.2f} times the reference workload "
+        f"({reference:.2f} s); the bound is {bound:.2f} times"
+    )
 
 
 @dataclass
@@ -326,18 +358,31 @@ def test_no_bootstrapping(case: Case, ctx) -> None:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
-def test_runtime_within_documented_bound(case: Case, ctx, reference_s) -> None:
+def test_runtime_within_documented_bound(case: Case, ctx) -> None:
     """Runtime within the bound, relative to the reference workload on this machine."""
-    args = case.inputs()
-    case.encrypted(ctx, **args)  # warm up
-    start = time.perf_counter()
-    case.encrypted(ctx, **args)
-    elapsed = time.perf_counter() - start
-    ratio, bound = elapsed / reference_s, _runtime_bound_ratio(case)
-    assert ratio <= bound, (
-        f"{case.name}: encrypted call took {elapsed:.2f} s, {ratio:.2f} times the reference workload "
-        f"({reference_s:.2f} s); the bound is {bound:.2f} times"
+    _check_runtime(case, ctx, case.inputs())
+
+
+def _sleeping_case(case_ratio: float, times: float, reference: float) -> Case:
+    """A stand-in primitive whose call takes ``times`` its documented ratio of the reference workload."""
+    template = CASES[0]
+    return Case(
+        **{
+            **template.__dict__,
+            "name": f"stand-in at {times}x",
+            "runtime_ratio": case_ratio,
+            "encrypted": lambda ctx, **_: time.sleep(times * case_ratio * reference),
+        }
     )
+
+
+def test_the_runtime_check_fails_a_primitive_five_times_slower_than_its_ratio(ctx) -> None:
+    """Negative test: the check must still catch a regression. A stand-in whose call takes five times its documented ratio
+    of the reference fails; the same stand-in at its documented ratio passes."""
+    reference = min(_reference_s(ctx) for _ in range(2))
+    _check_runtime(_sleeping_case(0.4, 1.0, reference), ctx, {})
+    with pytest.raises(AssertionError, match="times the reference workload"):
+        _check_runtime(_sleeping_case(0.4, 5.0, reference), ctx, {})
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.name for c in CASES])
@@ -363,18 +408,18 @@ def test_threshold_decision_is_stable_under_encryption(case: Case, ctx) -> None:
     )
 
 
-def test_full_matrix_summary(ctx, reference_s) -> None:
+def test_full_matrix_summary(ctx) -> None:
     """One report-style assertion that every primitive cleared the
     matrix on a single random seed. This is the test a reviewer reads
-    first to verify coverage."""
+    first to verify coverage. Runtime is checked once per primitive, in
+    test_runtime_within_documented_bound, with repeated interleaved timing;
+    timing it again here, from a single call, would only add noise."""
     rows: list[dict[str, Any]] = []
     for case in CASES:
         fhe_p.reset_last_depth()
         args = case.inputs()
         plain = case.plaintext(**args)
-        start = time.perf_counter()
         enc = case.encrypted(ctx, **args)
-        elapsed = time.perf_counter() - start
         rows.append(
             {
                 "primitive": case.name,
@@ -382,8 +427,6 @@ def test_full_matrix_summary(ctx, reference_s) -> None:
                 "tolerance": case.abs_tol,
                 "depth_consumed": fhe_p.last_depth(case.name),
                 "declared_depth": fhe_p.declared_depth(case.name),
-                "runtime_ratio": elapsed / reference_s,
-                "runtime_bound_ratio": _runtime_bound_ratio(case),
             }
         )
     failures: list[str] = []
@@ -395,10 +438,5 @@ def test_full_matrix_summary(ctx, reference_s) -> None:
         if r["depth_consumed"] > r["declared_depth"]:
             failures.append(
                 f"{r['primitive']}: depth {r['depth_consumed']} > declared {r['declared_depth']}"
-            )
-        if r["runtime_ratio"] > r["runtime_bound_ratio"]:
-            failures.append(
-                f"{r['primitive']}: runtime {r['runtime_ratio']:.2f} times the reference > bound "
-                f"{r['runtime_bound_ratio']:.2f} times"
             )
     assert not failures, "matrix failures:\n  " + "\n  ".join(failures)
