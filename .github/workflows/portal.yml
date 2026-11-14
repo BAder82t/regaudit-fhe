@@ -7,13 +7,14 @@ name: portal
 # the Portal's tests against the installed copy, so that what the package holds (its pages, fonts, licences and samples)
 # is tested too.
 
+# The job below is a REQUIRED status check on the default branch. A required check that a path filter keeps from running
+# is never reported, so every pull request that does not touch portal/ (a dependency bump, a workflow bump) waits for it
+# forever and cannot merge. So this workflow runs on every push and pull request to the default branch, with no path filter.
 on:
   push:
     branches: [main, master]
-    paths: ["portal/**", ".github/workflows/portal.yml"]
   pull_request:
     branches: [main, master]
-    paths: ["portal/**", ".github/workflows/portal.yml"]
   workflow_dispatch: {}
 
 permissions:
