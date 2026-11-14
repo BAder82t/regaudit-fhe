@@ -154,11 +154,15 @@ def test_the_readme_describes_the_welcome_screen_the_standard_location_and_what_
         "DEMO-ONLY synthetic issuer",
         "no private key: the key that signed the samples was thrown away",
         "Verification of your own reports is not set up yet. An administrator has to set up trust first.",
-        "checked against the administrator's policy, never against the demonstration's",
+        "is checked against the trust list in the portal's configuration, never with the separate policy for the "
+        "bundled samples",
+        "With customer trust that is the administrator's trust, so a demonstration key is never taken for a trusted "
+        "issuer.",
         "It creates nothing and changes nothing, and it never accepts or shows a signing key",
         "only as `~/...`, and never on the verification pages",
-        "Making the trust list still needs those existing commands",
-        "Creating it in the browser would be a separate change that has to be designed and reviewed on its own",
+        "Making the trust list still needs a command run outside the browser",
+        "The browser can prepare a setup plan, but it cannot create or change the trust list.",
+        "For anything missing or failing it says what is missing, why it matters and the one next step",
         "`~/Library/Application Support/Evidence Verification Portal/portal-config.json`",
         "`~/.config/evidence-verification-portal/portal-config.json`",
         "welcome mode: the samples work and your own reports are not set up",
@@ -180,7 +184,8 @@ def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_
     text = (README.parent / "SECURITY.md").read_text()
     for said in (
         "checked against a demonstration trust list, by their id from a list, with a policy that is used for nothing else",
-        "so a demonstration key can never be taken for a trusted issuer",
+        "so a demonstration key is never taken for a trusted issuer",
+        "In a demonstration configuration every result is labelled",
         "Every sample result is labelled a synthetic demonstration",
         "no private key",
         "The administrator setup page only reads",
@@ -188,3 +193,88 @@ def test_the_security_document_says_how_the_samples_and_the_setup_page_are_kept_
         "never creates the per-user configuration folder by itself",
     ):
         assert said in text, said
+
+
+def test_the_readme_and_the_security_document_describe_administrator_setup_and_what_stays_manual():
+    readme = README.read_text()
+    section = readme[
+        readme.index("### Guided administrator setup") : readme.index("### Running these commands")
+    ]
+    for said in (
+        "It writes nothing, keeps nothing and enrols nothing",
+        "It refuses anything that looks like a private key and does not show it back",
+        "It shows no fingerprint, on purpose",
+        "It refuses unless each one equals the fingerprint computed from the key in the plan",
+        "It enrols keys with the same code as `regaudit-fhe trust add`",
+        "The plan never chooses where files go",
+        "Nothing is ever removed, revoked or replaced",
+        "What stays manual",
+        "says nothing about who made the plan",
+        "never from the plan or from this computer",
+        "does not authenticate the trust list",
+    ):
+        assert said in section, said
+    security = (README.parent / "SECURITY.md").read_text()
+    part = security[
+        security.index("## Administrator setup") : security.index("## Reporting a problem")
+    ]
+    for said in (
+        "No page or request can write, change or enrol trust",
+        "The portal process never loads the code that applies a plan",
+        "There is no option, setting or file that skips the typed fingerprint",
+        "This adds no privilege",
+        "It does not authenticate the administrator",
+        "does not add the protections that the limitation above says published v0.2.1 lacks",
+        "stay manual",
+    ):
+        assert said in part, said
+    for text in (section, part):
+        # The exact demonstration label has a dash of its own; no other text in these sections does.
+        text = text.replace("DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED", "")
+        assert "\u2014" not in text and "owner" not in text.lower() and "round" not in text.lower()
+
+
+def test_the_docs_describe_the_explicit_trust_mode_the_label_and_the_limit_of_demo_setup_keys():
+    for text in (README.read_text(), (README.parent / "SECURITY.md").read_text()):
+        for said in (
+            "Demonstration trust is kept apart from customer trust.",
+            "The mode is an explicit setting in the configuration, `trust_mode`",
+            "recognised by its exact fingerprint, never by a file name, issuer name or key id.",
+            'A trust list that holds it is used only with `"trust_mode": "demonstration"`.',
+            "or with no `trust_mode`",
+            "the configuration is refused",
+            "A changed key is",
+            "the bundled samples are `INVALID` against it",
+            "labels every result and every saved result `DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED`",
+            "next to the verifier's own verdict and reason codes",
+            "Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys "
+            "apart from real keys.",
+            "This applies only to folders made by those earlier versions.",
+        ):
+            assert said in text, said
+        assert "whatever the setting says" not in text
+        assert "is still accepted for verification" not in text
+        assert "key or name" not in text and "keys or names" not in text
+    readme = README.read_text()
+    assert "`demonstration` (the trust list is a demonstration" in readme
+    assert 'It always writes `"trust_mode": "customer"`' in readme
+
+
+def test_the_docs_hold_no_sentence_that_a_demonstration_portal_makes_false_and_no_bullet_twice():
+    readme = README.read_text()
+    security = (README.parent / "SECURITY.md").read_text()
+    for text in (readme, security):
+        assert "never against the demonstration's" not in text
+        assert "checked against the administrator's policy, never" not in text
+    bullets = [line for line in readme.splitlines() if line.startswith("- ")]
+    assert len(bullets) == len(set(bullets)), [b for b in bullets if bullets.count(b) > 1]
+    assert "- It refuses the portal's demonstration keys." not in readme
+
+
+def test_the_docs_say_which_ids_that_look_like_secret_bytes_are_refused_and_why_the_others_are_not():
+    said = (
+        "A key id, verifier id or fingerprint that is the private key of one of the plan's own public keys is refused. "
+        "Other ids made of hexadecimal or base64 characters are accepted, because an id derived from a key's "
+        "fingerprint looks exactly like random secret bytes."
+    )
+    assert said in README.read_text()

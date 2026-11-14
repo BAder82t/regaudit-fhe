@@ -24,7 +24,7 @@ function unavailable() {
   show("saved", false);
   show("unavailable", true);
   // Nothing that names the engine, the policy or a result may stay on screen once the engine has stopped passing.
-  for (const id of ["policy", "claim", "engine-summary", "engine-scope", "check-key", "raw", "verdict", "result-file", "demo-banner"]) {
+  for (const id of ["policy", "claim", "engine-summary", "engine-scope", "check-key", "raw", "verdict", "result-file", "demo-banner", "demo-label", "trust-mode"]) {
     $(id).textContent = "";
   }
   $("sample-list").replaceChildren();
@@ -79,7 +79,17 @@ function render(body, fileName) {
   verdict.dataset.status = v.trust_status; // the style picks its shape and colour from this, and never the wording
   const demonstration = body.synthetic_demonstration === true;
   $("result").classList.toggle("demonstration", demonstration);
-  $("demo-banner").textContent = demonstration ? body.demonstration.notice : "";
+  // A demonstration result carries one label, exactly as the portal wrote it, next to the verifier's own verdict,
+  // which stays as it is.
+  $("demo-label").textContent = demonstration ? body.demonstration_label : "";
+  show("demo-label", demonstration);
+  const banner = $("demo-banner");
+  banner.replaceChildren();
+  if (demonstration) {
+    const label = document.createElement("strong");
+    label.textContent = body.demonstration.label;
+    banner.append(label, document.createElement("br"), body.demonstration.notice);
+  }
   show("demo-banner", demonstration);
   $("result-file").textContent = fileName ? "Result for: " + fileName : "";
   $("verdict-meaning").textContent = e.verdict;
@@ -255,7 +265,16 @@ async function start() {
     return;
   }
   $("claim").textContent = body.not_a_claim;
+  // Which mode the portal is in, from the configuration it was started with. Nothing on this page can change it.
+  $("trust-mode").textContent = body.trust_mode_text || "";
+  $("trust-mode").className = body.trust_mode === "demonstration" ? "statement demo-banner" : "statement";
   ownReady = body.ready === true;
+  // A demonstration trust list is never trust set up by an administrator: files are checked against it only as a
+  // demonstration, and the upload screen says so before anything is chosen.
+  const demonstrationOnly = body.state === "demonstration" && body.demonstration_checks === true;
+  $("upload-demo-note").textContent = demonstrationOnly ? body.message : "";
+  show("upload-demo-note", demonstrationOnly);
+  ownReady = ownReady || demonstrationOnly;
   $("not-ready-message").textContent = ownReady ? "" : body.message;
   show("record-notice", body.replay_mode === "record");
   $("policy").textContent = (body.policy_text ? body.policy_text + " " : "") + body.engine.summary;

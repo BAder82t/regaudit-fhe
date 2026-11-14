@@ -128,3 +128,33 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -m pytest "$GITHUB_WORKSPACE/portal/tests" -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/portal-junit.xml"
       - name: No test may be skipped unexpectedly, and none may have been dropped
         run: python portal/ci/check_skips.py "$RUNNER_TEMP/portal-junit.xml" portal/ci/allowed_skips.txt portal/ci/minimum_tests.txt
+
+  # The launcher's Swift type check needs swiftc, which the ubuntu runner does not have, so it is skipped there (the one
+  # reason allowed in portal/ci/allowed_skips.txt). It is executed here, alone, and here no skip is allowed at all.
+  launcher-macos:
+    name: launcher (Swift type check on macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+      - name: swiftc is present
+        run: swiftc --version
+      - name: Install pytest alone, by hash only
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps --no-cache-dir -r portal/ci/requirements-launcher.lock
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+      - name: The launcher type-checks
+        # --noconftest: the shared conftest imports the portal and the engine, which this test does not use and this job
+        # does not install.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pytest "$GITHUB_WORKSPACE/portal/tests/test_launcher_admin.py::test_the_launcher_type_checks" --noconftest -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/launcher-junit.xml"
+      - name: The type check ran and passed, and nothing was skipped
+        # No allowed skip reasons (an empty list), and the one test must have passed.
+        run: |
+          printf '1\n' > "$RUNNER_TEMP/minimum.txt"
+          python portal/ci/check_skips.py "$RUNNER_TEMP/launcher-junit.xml" /dev/null "$RUNNER_TEMP/minimum.txt"

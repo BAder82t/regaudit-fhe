@@ -3,14 +3,35 @@
 // This page only reads. It asks the portal what is set up and shows the answer with textContent. It sends nothing, and it has no form.
 
 const $ = (id) => document.getElementById(id);
-const STATES = { ok: "Ready", missing: "Not set up", problem: "Needs attention", not_checked: "Not checked yet" };
+const STATES = {
+  ok: "Ready",
+  missing: "Not set up",
+  problem: "Needs attention",
+  not_checked: "Not checked yet",
+  warning: "Warning",
+  demonstration: "DEMONSTRATION — NOT CUSTOMER-TRUSTED", // the one label, exactly
+};
+
+function line(label, text) {
+  const item = document.createElement("span");
+  item.className = "fine";
+  item.textContent = label + text;
+  return item;
+}
+
+function statement(body) {
+  if (body.own_reports.ready && body.trust_configured) return "Verification of your own reports is ready.";
+  if (body.own_reports.ready) return "The portal can check your own reports, but a requirement below needs attention.";
+  return body.own_reports.message;
+}
 
 function render(body) {
   $("folder").textContent = body.location_for_this_computer;
   $("file-name").textContent = body.config_file_name;
-  $("own-reports").textContent = body.own_reports.ready
-    ? "Verification of your own reports is ready."
-    : body.own_reports.message;
+  // Which mode the running portal is in, from the configuration it was started with.
+  $("trust-mode").textContent = body.trust_mode_text || "";
+  $("trust-mode").className = body.trust_mode === "demonstration" ? "statement demo-banner" : "statement";
+  $("own-reports").textContent = statement(body);
   const list = $("rows");
   list.replaceChildren();
   for (const row of body.rows) {
@@ -21,13 +42,33 @@ function render(body) {
     state.textContent = STATES[row.state] || row.state;
     state.dataset.state = row.state;
     value.append(state, " ", row.detail);
+    if (row.why) value.append(document.createElement("br"), line("Why it matters: ", row.why));
+    if (row.next_step) value.append(document.createElement("br"), line("Next step: ", row.next_step));
     list.append(name, value);
   }
+  // Customer trust only: the enrolled issuers' names, key ids and status, read-only. Never a key or a fingerprint.
+  const enrolled = $("enrolled-rows");
+  enrolled.replaceChildren();
+  for (const issuer of body.issuers || []) {
+    const tr = document.createElement("tr");
+    for (const text of [issuer.issuer, issuer.key_id, issuer.status]) {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      tr.append(cell);
+    }
+    enrolled.append(tr);
+  }
+  $("enrolled").hidden = !(body.issuers && body.issuers.length);
   $("status-message").textContent = "Configuration location: " + body.configuration_in_use;
+  // Show only the steps for how this portal was started: the application's menu, or Terminal in a plain install.
+  $("steps-app").hidden = !body.commands.in_application;
+  $("steps-plain").hidden = body.commands.in_application;
   // How to type the commands on this computer: by their plain names, or by the full path of the programs in the application.
   $("cmd-intro").textContent = body.commands.intro;
   $("cmd-trust-add").textContent = body.commands.trust_add;
   $("cmd-check-config").textContent = body.commands.check_config;
+  $("cmd-admin-describe").textContent = body.commands.admin_describe;
+  $("cmd-admin-apply").textContent = body.commands.admin_apply;
 }
 
 async function start() {

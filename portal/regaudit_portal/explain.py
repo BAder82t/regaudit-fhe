@@ -27,6 +27,16 @@ DEMONSTRATION_NOTICE = (
     "trust list. It says nothing about any real report or issuer."
 )
 
+# The one label every demonstration result carries, exactly as written here: on the page, in the banner, in the result's
+# own members and in every saved file. It never changes, and it is never left out.
+DEMONSTRATION_LABEL = "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED"
+
+# On every result checked against a demonstration trust list that is in the configuration, and in every saved one.
+DEMONSTRATION_TRUST_NOTICE = (
+    "This portal is set up with a demonstration trust list, so this file was checked only as a demonstration. The "
+    "result says nothing about any real issuer, and it is not a check against trust set up by an administrator."
+)
+
 TRUSTED_MEANS = (
     "This means it came from an issuer your administrator approved and has not changed since it was signed. It does "
     "not mean the report's findings are correct."
@@ -81,6 +91,12 @@ _REASONS = {
 }
 _UNKNOWN_REASON = "No plain-language explanation is available for this code."
 
+# Said wherever a repeat check is described: the record is this portal's own file, and nothing wider.
+REPLAY_LOCAL_ONLY_TEXT = (
+    "Repeats are detected only against this portal's own record file. The same report could still be used "
+    "somewhere else."
+)
+
 
 def _reasons(result: dict[str, Any]) -> list[dict[str, Any]]:
     blocking = list(result["blocking_reasons"])
@@ -112,11 +128,7 @@ def _warnings(result: dict[str, Any], profile: str) -> list[dict[str, str]]:
                 "No durable local record of seen reports was available for this check.",
             )
         if result["consumption"] == "RECORDED_LOCAL":
-            warn(
-                "REPLAY_LOCAL_ONLY",
-                "Repeats are detected only against this portal's own record file. The same report could still be "
-                "used somewhere else.",
-            )
+            warn("REPLAY_LOCAL_ONLY", REPLAY_LOCAL_ONLY_TEXT)
         if result["chronology"] != "AUTHENTICATED":
             warn("TIME_NOT_INDEPENDENT", "The signing time is only what the signer stated.")
         if result["trust_history"] != "FRESH":
@@ -338,16 +350,28 @@ _DEMONSTRATION_WORDS = (
         "Do not rely on this report. Ask whoever sent it for a new copy, or ask your administrator.",
         "This is a demonstration, so there is nothing to act on.",
     ),
-    ("an issuer your administrator approved", "the demonstration issuer"),
-    ("an issuer your administrator trusts", "the demonstration issuer"),
+    # The issuer line never says "approved" for a demonstration: a key in a demonstration trust list is listed there,
+    # nothing more. Whatever key it is, it is never called "the demonstration issuer": a demonstration configuration
+    # can list any key, so the words say only where the key was found.
+    (
+        "Passed: this key is approved for this issuer under your administrator's rules.",
+        "Passed: this key is listed for this issuer in the demonstration trust list.",
+    ),
+    ("Not approved for this report:", "Not accepted for this report:"),
+    ("Not approved:", "Not accepted:"),
+    ("Nobody your administrator trusts", "No key in the demonstration trust list"),
+    ("an issuer your administrator approved", "an issuer listed in the demonstration trust list"),
+    ("an issuer your administrator trusts", "an issuer listed in the demonstration trust list"),
     ("the key your administrator enrolled", "the key in the demonstration trust list"),
     ("your administrator's list of trusted keys", "the demonstration trust list"),
     ("your administrator's list", "the demonstration trust list"),
     ("your administrator's trust list", "the demonstration trust list"),
+    ("your administrator's rules for a", "the demonstration's rules for a"),
     ("your administrator's rules", "the demonstration trust list"),
     ("your administrator's maximum age", "the demonstration's maximum age"),
     ("your administrator", "the demonstration setup"),
     ("the administrator", "the demonstration setup"),
+    ("The administrator", "The demonstration setup"),
 )
 
 
@@ -360,7 +384,11 @@ def _about_the_demonstration(text: str | None) -> str | None:
 
 
 def describe(
-    result: dict[str, Any], profile: str, *, demonstration: bool = False
+    result: dict[str, Any],
+    profile: str,
+    *,
+    demonstration: bool = False,
+    notice: str = DEMONSTRATION_NOTICE,
 ) -> dict[str, Any]:
     """Added beside the verifier's result, which is returned untouched."""
     explained = {
@@ -379,7 +407,8 @@ def describe(
             reason["meaning"] = _about_the_demonstration(reason["meaning"])
         for warning in explained["warnings"]:
             warning["message"] = _about_the_demonstration(warning["message"])
-        explained["warnings"].insert(
-            0, {"code": "DEMONSTRATION_ONLY", "message": DEMONSTRATION_NOTICE}
+        explained["display"]["issuer_note"] = _about_the_demonstration(
+            explained["display"]["issuer_note"]
         )
+        explained["warnings"].insert(0, {"code": "DEMONSTRATION_ONLY", "message": notice})
     return explained

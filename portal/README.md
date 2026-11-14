@@ -41,17 +41,22 @@ You need an internet connection for the install. These steps use only made-up ke
 
 In the file chooser, press Cmd+Shift+G on a Mac (Ctrl+L on Linux), paste `~/portal-demo/sample-reports` and press Enter. The full path is `/Users/YOURNAME/portal-demo/sample-reports` on a Mac and `/home/YOURNAME/portal-demo/sample-reports` on Linux. Or open that folder in Finder or your file manager and drag a file onto the page.
 
+These files are a demonstration. `demo-setup` copies the demonstration trust list and the signed sample reports that come with the portal, and writes `"trust_mode": "demonstration"` into its configuration. The portal checks them only as a demonstration: the page shows the mode and says so before you choose a file, every result and every saved result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, and the portal says your own reports are not set up. Nothing in these files can sign anything: the key that signed the reports was thrown away when they were made.
+
+The sample reports were signed once, on 2026-10-01, so the demonstration configuration allows reports up to 3650 days old, the longest a configuration may give. They verify until 2036-09-28. That long age is accepted only because this is a demonstration, and the setup page says so. The profile is confidential and the replay mode is check, as in a real setup.
+
 Press Ctrl-C in the terminal to stop the portal. It stops cleanly and prints one line. The sample reports are synthetic and show each outcome:
 
 | File | What you should see |
 |---|---|
 | `1-trusted.json` | `TRUSTED`. The report says it was computed on plaintext, so the page says there was no encryption |
 | `2-untrusted-signer.json` | `INVALID`, because the signing key is not enrolled |
-| `3-valid-signature-wrong-issuer.json` | `INVALID`. The signature is valid, but the report names the wrong issuer |
-| `4-changed-after-signing.json` | `INVALID`, because the contents no longer match the signature |
-| `5-not-a-report.json` | No verdict, because this is not a report |
-| `6-too-large.json` | No verdict, because it is over the 1 MB limit (1,048,576 bytes) |
-| `7-declares-encrypted-backend.json` | `TRUSTED`. The report says it used an encrypted backend. Nothing was encrypted: the file only says so, and the page says it cannot verify that |
+| `3-changed-after-signing.json` | `INVALID`, because the contents no longer match the signature |
+| `4-not-a-report.json` | No verdict, because this is not a report |
+| `5-too-large.json` | No verdict, because it is over the 1 MB limit (1,048,576 bytes) |
+| `6-declares-encrypted-backend.json` | `TRUSTED`. The report says it used an encrypted backend. Nothing was encrypted: the file only says so, and the page says it cannot verify that |
+
+Earlier versions of `demo-setup` also made a report with a valid signature that names the wrong issuer. It cannot be made again, because no private key for the demonstration key exists, so it is no longer part of the demonstration.
 
 ## Keeping it running
 
@@ -69,10 +74,11 @@ Stop it later with `kill $(cat portal.pid)`, which stops it as cleanly as Ctrl-C
 The first screen offers three choices. All of them sit behind the same engine check as everything else: if the engine is not the recognised release, none of them is offered and the "Verification unavailable" page is shown instead.
 
 - **Try a sample report.** A short list of made-up demonstration reports, chosen from the list and never uploaded: one the demonstration issuer signed, one signed by a key nobody enrolled, one changed after it was signed, one that says it was computed on plaintext and one that names an encrypted backend although nothing was encrypted. No trust setup is needed. They are checked against a demonstration trust list with a separate demonstration policy that is used for these samples only, selected by their id. Every sample result, on the page and in the saved file, says it is a synthetic demonstration made with made-up data and a demonstration trust list. The saved file carries `synthetic_demonstration: true`, and the issuer is named "DEMO-ONLY synthetic issuer". The verdicts and reason codes are the engine's own. The package holds the demonstration issuer's public key and trust list, and no private key: the key that signed the samples was thrown away when they were made (`tools/make_demo_samples.py` makes them), so nothing in the package can sign anything.
-- **Verify your own report.** This uses the administrator's trust policy, as before. If none is set up, the page says "Verification of your own reports is not set up yet. An administrator has to set up trust first.", links to the administrator setup page and offers no upload, and the upload endpoint refuses without a verdict. A sample report uploaded here is checked against the administrator's policy, never against the demonstration's, so a demonstration key can never be taken for a trusted issuer.
-- **Administrator setup.** A separate page, `/setup`, with plain instructions and a read-only readiness status: the engine, the configuration, the trust list, the replay setting, the file ownership and permission check, and the port. It creates nothing and changes nothing, and it never accepts or shows a signing key. It shows places only as `~/...`, and never on the verification pages. It says what an administrator has to prepare (the trust list and the issuers' fingerprints received by another route than the report), where the files go and the existing commands that make a trust list.
+- **Verify your own report.** This uses the administrator's trust policy, as before. If none is set up, the page says "Verification of your own reports is not set up yet. An administrator has to set up trust first.", links to the administrator setup page and offers no upload, and the upload endpoint refuses without a verdict. A report uploaded here, a sample included, is checked against the trust list in the portal's configuration, never with the separate policy for the bundled samples. With customer trust that is the administrator's trust, so a demonstration key is never taken for a trusted issuer. In a demonstration configuration every result is labelled `DEMONSTRATION — NOT CUSTOMER-TRUSTED`.
+- **Verify several of your own reports at once.** `POST /api/verify-batch` checks up to 20 individual JSON report files in one request, up to 8 MB in all, with each file still limited to 1 MB. The request is JSON, `{"files": [{"name": "...", "content_b64": "..."}]}`, so each file arrives as its exact bytes. No archive is opened and no file name is used as a path. Each file is checked on its own, exactly as a single upload is: the same parsing, the same engine check before and after, the same trust rules, so its result is the same as if it had been sent alone. Results come back in the order sent, each with an id, and a file that cannot be read is reported on its own and does not stop the others. A batch counts one check per file towards the limit of 120 a minute, and one that does not fit in what is left is refused whole, with `Retry-After`, before anything is checked. Only one batch is checked at a time. In `record` replay mode each accepted report is recorded as its file is checked; if the connection closes, the files already checked stay recorded, the rest are not checked, and sending the same files again shows the recorded ones as repeats. Nothing else is kept, and no result is stored on the server. Uploads are read into memory. In tests, a batch of the largest size allowed opened no file for writing and left nothing in the temporary folder. That does not cover what the operating system does with memory.
+- **Administrator setup.** A separate page, `/setup`, with plain instructions and a read-only readiness status: the engine, the configuration, the trust policy, the trust list, the replay setting, the file ownership and permission check, and the port. For anything missing or failing it says what is missing, why it matters and the one next step. It creates nothing and changes nothing, and it never accepts or shows a signing key. With customer trust it lists the enrolled issuers, read-only: each name, key id and status, as the trust list file states them in plain text. It shows no public key and no fingerprint: check each fingerprint with its issuer by another route. It shows places only as `~/...`, and never on the verification pages. It says what an administrator has to prepare (the trust list and the issuers' fingerprints received by another route than the report), where the files go and the commands that make a trust list. It links to the page that prepares a setup plan.
 
-Making the trust list still needs those existing commands (`regaudit-fhe trust add`, below; run them in Terminal for now, and inside the macOS application by their full path, which the setup page shows). Creating it in the browser would be a separate change that has to be designed and reviewed on its own. The setup page does not do it.
+Making the trust list still needs a command run outside the browser: the existing `regaudit-fhe trust add` (below), or `regaudit-portal admin-apply` with a setup plan (see [Guided administrator setup](#guided-administrator-setup)). In the macOS application no Terminal is needed to apply a setup plan: bring the application to the front and choose Administrator setup under the application's name in the menu bar at the top of the screen. The application has no window of its own, so that menu is its only control. In an install with pip, run the commands in Terminal; that is the only way there, by design. Inside the application they can also be run in Terminal by their full path, which the setup page shows. The browser can prepare a setup plan, but it cannot create or change the trust list.
 
 ### Where the configuration is looked for
 
@@ -91,7 +97,7 @@ An application that starts the portal for someone who never opens a terminal can
 portal-listening url=http://127.0.0.1:PORT/ mode=MODE
 ```
 
-`MODE` is `ready` (your own reports can be checked), `welcome` (no configuration: the samples work), `needs-attention` (a configuration that cannot be used: the samples work) or `unavailable` (the engine check failed: only the page saying so is served). The launcher stops the portal with SIGTERM, which stops it as cleanly as Ctrl-C does.
+`MODE` is `ready` (your own reports can be checked), `welcome` (no configuration: the samples work), `demonstration` (the trust list is a demonstration: files are checked against it only as a demonstration), `needs-attention` (a configuration that cannot be used: the samples work) or `unavailable` (the engine check failed: only the page saying so is served). The launcher stops the portal with SIGTERM, which stops it as cleanly as Ctrl-C does.
 
 ## Reading the result
 
@@ -176,7 +182,8 @@ The page cannot change the trust rules. They live in a configuration file that i
   "verifier_id": "your-organization",
   "max_age_days": 30,
   "replay_mode": "check",
-  "replay_db": "replay.db"
+  "replay_db": "replay.db",
+  "trust_mode": "customer"
 }
 ```
 
@@ -193,10 +200,68 @@ Paths are relative to the configuration file.
 - `verifier_id` is the name your organization is known by to report issuers. A report that names its intended recipients (an `audience`) is refused unless that list includes this `verifier_id`. A report that names no audience is not refused for this reason, except under `high-assurance`, which refuses any report that names no audience. The demo uses `demo-verifier`.
 - `max_age_days` is the oldest report you will accept. Do not raise it while you keep using the same replay file: the published [replay limitations](../docs/advisories/replay-limitations-0.2.1.md) explain why.
 - `replay_mode` is `check` or `record`. With `check`, looking at a report twice gives the same answer, and each result warns that the report was not recorded as used. With `record`, the second check of a report is refused as a repeat. Either way, repeat detection only knows what this portal's own replay file holds.
+- `trust_mode` is `customer` for trust you set up, or `demonstration` for the files `demo-setup` makes. Write it in every configuration. A configuration without it still works for now, with a warning: see [Guided administrator setup](#guided-administrator-setup) below.
 
 The configuration file, trust store, replay file and the folders holding them must belong to the account running the portal, or to root for the first two, and must not be writable by group or others. Otherwise the page says it is not ready and gives no verdicts. This is a basic start-up check the portal makes itself, from owner and permission bits. It is not the protection that the [security limitation](#security-limitation--published-v021) below says published v0.2.1 lacks, and it does not stop the same account, or an administrator, changing the files after start-up. Keep these files in a folder that only administrators can use.
 
 Without `--config`, the portal looks in the standard per-user folder (see [Where the configuration is looked for](#where-the-configuration-is-looked-for)). The setup page, `/setup`, shows what is in place and what is not, read-only.
+
+### Guided administrator setup
+
+The setup page, `/setup`, shows each requirement and its state. For anything that is missing or failing, it shows what is missing, why it matters and what the next step is. It also shows the trust mode the portal is in. A configuration in demonstration mode is shown as a demo, and this never counts as setting up trust.
+
+The page `/setup/plan` prepares a setup plan. You can choose one of the three profiles and enter your verifier id, the oldest report you accept and the replay mode. For each issuer you need to enter the name, the key id, the public key and the fingerprint the issuer gave you through another route. The portal checks all of it and says, for each issuer, only whether the fingerprint you typed matches the key. It never shows the fingerprint it computes from a key, not even when yours does not match, because that is the value you must check with the issuer. If any fingerprint does not match, no plan is made. It shows exactly what applying the plan would write and gives you the plan as a file. It writes nothing, keeps nothing and enrols nothing. It refuses anything that looks like a private key and does not show it back.
+
+The page explains each profile by what published 0.2.1 does with it. Confidential refuses a report that names its recipients without your verifier id, a report in the older v1 format, and any report when the replay file cannot be used. High-assurance also refuses a report that does not name your verifier id at all. Development does not refuse a report because the replay file cannot be used, and every result says not to rely on it. In 0.2.1, high-assurance does not authenticate the trust list, share the replay record or ask for a verified timestamp.
+
+You apply a plan yourself, outside the browser:
+
+```
+.venv/bin/regaudit-portal admin-describe setup-plan.json
+.venv/bin/regaudit-portal admin-apply setup-plan.json --expect-fingerprint KEY_ID=FINGERPRINT
+```
+
+`admin-describe` says what the plan would do, worked out from its content, and whether it can be applied here. It shows no fingerprint, on purpose. A key id, verifier id or fingerprint that is the private key of one of the plan's own public keys is refused. Other ids made of hexadecimal or base64 characters are accepted, because an id derived from a key's fingerprint looks exactly like random secret bytes. It starts with a notice when the plan uses the development profile, a maximum report age over 30 days (the age 0.2.1 applies on its own, and the value this portal suggests) or the replay mode check, and it names the verifier id that reports must name. `admin-apply` needs, for every issuer, the fingerprint you received from that issuer. It refuses unless each one equals the fingerprint computed from the key in the plan. Without `--expect-fingerprint` it asks in the terminal. In the macOS application, Administrator setup in the application's menu does the same with a file chooser and a dialog, and then restarts the portal.
+
+What `admin-apply` holds to:
+
+- It runs only if the engine is the published 0.2.1.
+- It enrols keys with the same code as `regaudit-fhe trust add`, so the trust list is the same file.
+- It always writes `"trust_mode": "customer"`, never adds issuers to a demonstration configuration, and refuses the bundled demonstration keys.
+- The plan never chooses where files go. They go to the standard folder, or to the folder you give with `--config-folder`.
+- It refuses a symbolic link anywhere on the way, and a folder or file that belongs to another account or that group or others can change. It does not run as root.
+- A first setup refuses to replace an existing configuration or trust list. A plan can also add issuers to an existing trust list. Nothing is ever removed, revoked or replaced.
+- It makes the folder with mode 0700 and the files with mode 0600, and moves them into place in one step. If it fails or is stopped before that step, nothing has changed, and it says so. A stop that arrives during that step waits until the files are in place and flushed to the disk. If something after that step fails, it says the files are in place and exits with status 4. Once they are in place it never says that nothing has changed. It reports success, status 0, only after the files are flushed and the portal's own checks accept them. If standard output or standard error was closed when it started, it still completes, says what it can on the other one, and the status tells the rest. Once the files are in place and checked, a stop no longer changes its result or its status. Known limit: a stop sent in the first fraction of a second, before the command's own code runs, ends it by the signal itself. A hang-up then can also leave a private temporary folder behind. Nothing is written in that case. When the folder already exists, the trust list and the configuration go in one after the other. Only a hard kill or a power cut at that exact moment can leave the trust list without the configuration. The portal does not use it, and the next apply says what to move away.
+- Only one can run at a time for a folder.
+- It prints exactly what it wrote. The portal reads its configuration only when it starts, so restart it afterwards.
+
+Demonstration trust is kept apart from customer trust. The mode is an explicit setting in the configuration, `trust_mode`, chosen with the configuration when the portal starts: `customer`, or `demonstration`, which `demo-setup` writes. The status and the pages show the mode. In demonstration mode the portal says it is not ready for your own reports, checks files only as a demonstration, and labels every result and every saved result `DEMONSTRATION — NOT CUSTOMER-TRUSTED`, next to the verifier's own verdict and reason codes. `check-config` refuses it.
+
+The portal's bundled demonstration key is recognised by its exact fingerprint, never by a file name, issuer name or key id. A trust list that holds it is used only with `"trust_mode": "demonstration"`. With `"trust_mode": "customer"`, or with no `trust_mode` at all, the configuration is refused: `check-config` says why and exits with code 3, the page says the portal cannot check your own reports and why, and an uploaded report gets no verdict. So copying or renaming the demonstration files never makes the demonstration key customer trust. A changed key is simply a different key. It is treated as an ordinary key, it accepts only reports signed with its own private key, and the bundled samples are `INVALID` against it.
+
+Every new configuration says its trust mode. `admin-apply` always writes `"trust_mode": "customer"` and refuses to write a configuration without it, `demo-setup` writes `"demonstration"`, and the example above includes it. Any other value, or a value that is not text, is refused, as is the bundled demonstration key without `"trust_mode": "demonstration"`.
+
+A configuration without `trust_mode`, whose trust list does not hold the bundled key, is still used as customer trust, as configurations made before the setting existed were. Its verdicts are exactly as before. For now it gets this warning, word for word:
+
+```
+This configuration does not specify `trust_mode`. It is currently treated as a legacy customer configuration. Explicitly set `trust_mode: customer` after reviewing the trusted keys. A future release will require this setting.
+```
+
+`check-config` prints the warning on standard error and still exits with status 0, then prints `usable: ...` as usual. The portal's start-up log shows it, the setup page shows it as a "Trust mode setting" row marked Warning, and `/api/setup` lists it under `warnings`. `admin-describe` and `admin-apply` also print it when they add issuers to such a configuration. Nothing rewrites the configuration or the trust list for you.
+
+To move such a configuration on, do this yourself:
+
+1. Review every key in the trust list with its issuer, by a call or another route than the one the key came by.
+2. Add `"trust_mode": "customer"` to the configuration file.
+3. Restart the portal. `check-config` then prints no warning.
+
+A later release will refuse a configuration without `trust_mode`. That is a change for that release. This one still accepts it, with the warning.
+
+Known limit: earlier versions of `demo-setup` made new keys each time, and nothing can tell those keys apart from real keys. Their folders keep working as a demonstration through `"trust_mode": "demonstration"`, but a copy of such a trust list under a configuration without that setting is treated as customer trust, and its sample reports then verify as trusted. This applies only to folders made by those earlier versions. Never copy demonstration files into a real configuration.
+
+What stays manual is getting each issuer's public key and fingerprint by a route you trust, removing or revoking a key, replacing a key, changing an existing configuration, and key ids with characters other than letters, digits, dots, dashes and underscores. Use `regaudit-fhe trust add` and a text editor for those, then restart the portal.
+
+The checksum in the plan only shows that the file is intact. Anyone can calculate it, so it says nothing about who made the plan. A web page can make a browser download a file that looks like a plan. The fingerprint you type when you apply it is what matters, so type it from what the issuer gave you, never from the plan or from this computer.
 
 If the page says your own reports cannot be checked, nothing of yours can be verified. To see why, run:
 
@@ -208,7 +273,7 @@ If the page says your own reports cannot be checked, nothing of yours can be ver
 
 ### Running these commands from the macOS application
 
-The macOS application does not put console commands on your computer's search path. Inside it, in `Contents/Resources/tools`, there is a small program for each of the two commands above, `regaudit-fhe` and `regaudit-portal`, which runs it with the application's own Python. For now they are run in Terminal, by their full path, with the same arguments as everywhere else in this section. For an application in `/Applications`:
+The macOS application does not put console commands on your computer's search path. Inside it, in `Contents/Resources/tools`, there is a small program for each of the two commands above, `regaudit-fhe` and `regaudit-portal`, which runs it with the application's own Python. You do not need them to apply a setup plan: Administrator setup in the application's menu does that, with no Terminal. To work by hand instead, run them in Terminal, by their full path, with the same arguments as everywhere else in this section. For an application in `/Applications`:
 
 ```
 '/Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-fhe' trust add \
@@ -217,7 +282,7 @@ The macOS application does not put console commands on your computer's search pa
 '/Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-portal' check-config
 ```
 
-The name has spaces, so the path is in quotes. For an application under your home folder, write `~/` first and quote the rest, so the `~` still means your home folder: `~/'Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-fhe'`. `check-config` without `--config` looks in the standard location (see above). The setup page, `/setup`, shows both commands ready to copy, with the right path for the copy you are running, and the plain command names when the portal is not running from the application. It only shows them and runs nothing. Guided creation of the trust list in the browser is not built.
+The name has spaces, so the path is in quotes. For an application under your home folder, write `~/` first and quote the rest, so the `~` still means your home folder: `~/'Applications/Evidence Verification Portal.app/Contents/Resources/tools/regaudit-fhe'`. `check-config` without `--config` looks in the standard location (see above). `admin-describe` and `admin-apply` are run the same way, with the `regaudit-portal` program. The setup page, `/setup`, shows these commands ready to copy, with the right path for the copy you are running, and the plain command names when the portal is not running from the application. It only shows them and runs nothing. The browser can prepare a setup plan, but it cannot create or change the trust list.
 
 ## Deployment
 

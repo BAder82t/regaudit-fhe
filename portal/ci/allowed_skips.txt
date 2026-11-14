@@ -1,3 +1,7 @@
 # Reasons for which a Portal test may be skipped in CI. Every other skip fails the job. One regular expression per line.
-# On the ubuntu runner with the tags fetched and Node installed, no test is expected to be skipped, so this is empty.
+# On the ubuntu runner with the tags fetched and Node installed, only the one test below is expected to be skipped.
 # Add a line here, in a reviewed change, only for a test that cannot run on the runner, with a comment saying why.
+
+# test_launcher_admin.py::test_the_launcher_type_checks needs the Swift compiler, which only macOS has. It is executed
+# in the macOS job of portal.yml (launcher-macos), where no skip is allowed.
+^needs swiftc on macOS$

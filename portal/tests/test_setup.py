@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 import regaudit_portal.engine as engine_module
-from helpers import client_for, fake_home, install_configuration, snapshot
+from helpers import client_for, fake_home, install_configuration, make_portal, snapshot
 from regaudit_portal.config import ConfigProblem, load_portal
+from regaudit_portal.demo import create
 from regaudit_portal.paths import default_config_folder, default_config_path, display_path
 
 PORTAL = Path(__file__).parents[1]
@@ -23,6 +24,7 @@ REFUSED_STATUS = {"ready": False, "state": "unavailable"}
 GOOD = {
     "engine": "ok",
     "configuration": "ok",
+    "trust_policy": "ok",
     "trust_list": "ok",
     "replay": "ok",
     "file_check": "ok",
@@ -129,29 +131,57 @@ def _given_and_missing(demo, tmp_path):
     return tmp_path / "nowhere" / "portal-config.json"
 
 
+def _demonstration(_source, tmp_path):
+    """The configuration and trust list that demo-setup makes, installed as if they were an administrator's."""
+    return install_configuration(create(tmp_path / "demonstration"), default_config_folder())
+
+
+def _development(source, **_):
+    config = install_configuration(source, default_config_folder())
+    data = json.loads(config.read_text())
+    _edit(config, json.dumps({**data, "profile": "development"}))
+    return config
+
+
+NOT_YET = {"trust_policy": "not_checked", "trust_list": "not_checked", "replay": "not_checked"}
+
+
 SCENARIOS = {
     "good": (_installed, GOOD),
-    "absent": (_absent, {**GOOD, "configuration": "missing", "trust_list": "not_checked", "replay": "not_checked", "file_check": "not_checked"}),
-    "empty-folder": (_empty_folder, {**GOOD, "configuration": "missing", "trust_list": "not_checked", "replay": "not_checked", "file_check": "not_checked"}),
-    "bad-json": (_bad_json, {**GOOD, "configuration": "problem", "trust_list": "not_checked", "replay": "not_checked"}),
-    "unknown-member": (_unknown_member, {**GOOD, "configuration": "problem", "trust_list": "not_checked", "replay": "not_checked"}),
+    "absent": (_absent, {**GOOD, **NOT_YET, "configuration": "missing", "file_check": "not_checked"}),
+    "empty-folder": (_empty_folder, {**GOOD, **NOT_YET, "configuration": "missing", "file_check": "not_checked"}),
+    "bad-json": (_bad_json, {**GOOD, **NOT_YET, "configuration": "problem"}),
+    "unknown-member": (_unknown_member, {**GOOD, **NOT_YET, "configuration": "problem"}),
     "no-trust-list": (_no_trust_list, {**GOOD, "trust_list": "missing"}),
     "bad-trust-list": (_bad_trust_list, {**GOOD, "trust_list": "problem"}),
     "legacy-trust-list": (_legacy_trust_list, {**GOOD, "trust_list": "problem"}),
-    "unsafe-folder": (_unsafe_folder, {**GOOD, "configuration": "problem", "trust_list": "not_checked", "replay": "not_checked", "file_check": "problem"}),
-    "unsafe-config-file": (_unsafe_config_file, {**GOOD, "configuration": "problem", "trust_list": "not_checked", "replay": "not_checked", "file_check": "problem"}),
+    "unsafe-folder": (_unsafe_folder, {**GOOD, **NOT_YET, "configuration": "problem", "file_check": "problem"}),
+    "unsafe-config-file": (_unsafe_config_file, {**GOOD, **NOT_YET, "configuration": "problem", "file_check": "problem"}),
     "unsafe-trust-list": (_unsafe_trust_list, {**GOOD, "trust_list": "problem", "file_check": "problem"}),
     "unsafe-replay-file": (_unsafe_replay_file, {**GOOD, "replay": "problem", "file_check": "problem"}),
     "given-outside-home": (_given_outside_home, GOOD),
-    "given-and-missing": (_given_and_missing, {**GOOD, "configuration": "missing", "trust_list": "not_checked", "replay": "not_checked", "file_check": "not_checked"}),
+    "given-and-missing": (_given_and_missing, {**GOOD, **NOT_YET, "configuration": "missing", "file_check": "not_checked"}),
+    "demonstration": (_demonstration, {**GOOD, "trust_list": "demonstration"}),
+    "development": (_development, {**GOOD, "trust_policy": "problem"}),
 }  # fmt: skip
 
 
+REAL_ISSUER = "Northwind Test Issuer"
+
+
+@pytest.fixture
+def issuer_config(tmp_path):
+    """A configuration and trust list for an issuer that is not one of the portal's demonstrations."""
+    return make_portal(tmp_path / "issuer-config", issuer=REAL_ISSUER, key_id="northwind-2026")[
+        0
+    ].parent
+
+
 @pytest.fixture(params=sorted(SCENARIOS))
-def scenario(request, tmp_path, monkeypatch, demo):
+def scenario(request, tmp_path, monkeypatch, issuer_config):
     home = fake_home(tmp_path, monkeypatch)
     build, expected = SCENARIOS[request.param]
-    given = build(demo, tmp_path=tmp_path)
+    given = build(issuer_config, tmp_path=tmp_path)
     return request.param, given, expected, home, client_for(given)
 
 
@@ -165,6 +195,7 @@ def test_each_row_reports_its_own_state_correctly(scenario):
     assert [row["id"] for row in body["rows"]] == [
         "engine",
         "configuration",
+        "trust_policy",
         "trust_list",
         "replay",
         "file_check",
@@ -173,7 +204,18 @@ def test_each_row_reports_its_own_state_correctly(scenario):
     assert body["read_only"] is True and all(row["detail"] for row in body["rows"])
 
 
+def test_every_missing_or_failed_requirement_says_why_it_matters_and_the_next_step(scenario):
+    name, _, _, _, client = scenario
+    for row in client.get("/api/setup").json()["rows"]:
+        if row["state"] in ("missing", "problem", "demonstration"):
+            assert row["why"] and row["next_step"], (name, row["id"])
+            assert row["why"] != row["next_step"] and row["why"] not in row["detail"]
+        else:
+            assert row["why"] is None and row["next_step"] is None, (name, row["id"])
+
+
 def test_the_report_agrees_with_what_loading_the_configuration_decides(scenario):
+    """Trust counts as set up exactly when the configuration loads and its trust list is not a demonstration."""
     name, given, _, _, client = scenario
     body = client.get("/api/setup").json()
     checks = [
@@ -186,8 +228,70 @@ def test_the_report_agrees_with_what_loading_the_configuration_decides(scenario)
         loads = True
     except ConfigProblem:
         loads = False
-    assert all(checks) is loads is body["own_reports"]["ready"], name
-    assert client.get("/api/status").json()["ready"] is loads
+    demonstration = body["demonstration_trust_list"]
+    assert demonstration is (name == "demonstration")
+    # A demonstration trust list loads, but it is never trust set up by an administrator: not ready, not configured.
+    assert body["own_reports"]["ready"] is (loads and not demonstration), name
+    assert all(checks) is body["trust_configured"] is (loads and not demonstration)
+    assert client.get("/api/status").json()["ready"] is (loads and not demonstration)
+
+
+def test_a_demonstration_trust_list_is_labelled_and_never_counted_as_trust(tmp_path, monkeypatch):
+    fake_home(tmp_path, monkeypatch)
+    client = client_for(_demonstration(None, tmp_path))
+    body = client.get("/api/setup").json()
+    row = next(r for r in body["rows"] if r["id"] == "trust_list")
+    assert row["state"] == "demonstration" and row["ok"] is False
+    assert "demonstration trust" in row["detail"] and "does not count as trust" in row["detail"]
+    assert body["trust_configured"] is False and body["demonstration_trust_list"] is True
+    assert "DEMO-ONLY synthetic issuer" not in json.dumps(
+        body
+    ) and "demo-only-synthetic-key" not in json.dumps(body)
+
+
+@pytest.mark.parametrize("source", ["bundled", "renamed"])
+def test_the_bundled_demonstration_key_is_recognised_by_its_fingerprint_whatever_it_is_called(
+    tmp_path, monkeypatch, issuer_config, source
+):
+    """Someone copies the bundled demonstration key into a real trust list, even under another name and key id."""
+    fake_home(tmp_path, monkeypatch)
+    config = install_configuration(issuer_config, default_config_folder())
+    bundled = json.loads((STATIC.parent / "samples" / "demo-trust-list.json").read_text())
+    pem = bundled["entries"]["demo-only-synthetic-key"]["public_key_pem"]
+    store = default_config_folder() / "trust-store.json"
+    data = json.loads(store.read_text())
+    key_id, issuer = (
+        ("demo-only-synthetic-key", "DEMO-ONLY synthetic issuer")
+        if source == "bundled"
+        else ("acme-1", "Acme Ltd")
+    )
+    data["entries"][key_id] = {"issuer": issuer, "public_key_pem": pem, "status": "active"}
+    _edit(store, json.dumps(data))
+    # The configuration does not say it is a demonstration, so it is refused, not merely labelled.
+    with pytest.raises(ConfigProblem, match="bundled demonstration key") as caught:
+        load_portal(config)
+    assert caught.value.kind == "demonstration_key"
+    body = client_for(config).get("/api/setup").json()
+    assert states(body)["trust_list"] == "problem" and body["trust_configured"] is False
+    assert body["own_reports"]["ready"] is False
+
+
+def test_the_trust_policy_row_says_which_profile_and_what_it_means(
+    tmp_path, monkeypatch, issuer_config
+):
+    fake_home(tmp_path, monkeypatch)
+    body = client_for(_installed(issuer_config)).get("/api/setup").json()
+    row = next(r for r in body["rows"] if r["id"] == "trust_policy")
+    assert row["state"] == "ok" and row["detail"].startswith(
+        "Profile confidential: Between the other two: stricter than development, less strict than "
+        "high-assurance about who a report is addressed to."
+    )
+    assert "Maximum report age 30 days." in row["detail"]
+    assert [p["name"] for p in body["guide"]["profiles"]] == [
+        "confidential",
+        "high-assurance",
+        "development",
+    ]
 
 
 def test_the_port_and_loopback_row_tells_the_port_and_that_only_this_computer_can_reach_it(
@@ -464,7 +568,7 @@ def test_the_two_setup_routes_only_look():
         "watch.seen",
         "_unavailable_status",
         "readiness",
-        "_own_message",
+        "trust_mode_fields",
     }, called
 
 
@@ -496,22 +600,29 @@ def test_the_setup_page_has_no_form_and_sends_nothing():
         assert write not in script, write
 
 
-def test_the_setup_answer_never_carries_key_material_or_the_trust_lists_contents(
-    tmp_path, monkeypatch, demo
-):
+def test_the_setup_answer_never_carries_key_material_or_a_fingerprint(tmp_path, monkeypatch, demo):
+    """The enrolled issuers' names and key ids are listed, as the trust list file states them in plain text. Nothing
+    else from the trust list is: no public key, no part of one, and no fingerprint, computed or stored."""
+    from regaudit_fhe._keys import spki_fingerprint
+
     fake_home(tmp_path, monkeypatch)
     config = install_configuration(demo, default_config_folder())
-    text = client_for(config).get("/api/setup").text
+    body = client_for(config).get("/api/setup").json()
     store = json.loads((demo / "trust-store.json").read_text())
     key_id, entry = next(iter(store["entries"].items()))
+    name = entry["issuer"]
+    assert body["issuers"] == [{"issuer": name, "key_id": key_id, "status": "active"}]
+    text = json.dumps(body)
     for secret in (
         "PUBLIC KEY",
         "PRIVATE KEY",
         entry["public_key_pem"].strip().splitlines()[1],
-        key_id,
-        "Example Synthetic Issuer",
+        spki_fingerprint(entry["public_key_pem"]),
     ):
         assert secret not in text, secret
+    # The name and the key id are in that list and nowhere else in the answer.
+    rest = json.dumps({name: value for name, value in body.items() if name != "issuers"})
+    assert key_id not in rest and name not in rest
 
 
 # ----------------------------------------------------------------------------- what the page tells an administrator
@@ -533,8 +644,10 @@ def test_the_setup_page_explains_what_to_prepare_where_it_goes_and_the_existing_
         "regaudit-fhe trust add --store trust-store.json --key-id KEY_ID",
         "--public-key issuer.pub --fingerprint FINGERPRINT",
         "regaudit-portal check-config",
-        "For now, making the trust list needs these commands",
-        "Creating it in the browser would be a separate change",
+        "The browser cannot create or change the trust list",
+        "only makes a plan file, and this page does not do that either",
+        "No page and no request of this portal can apply a plan",
+        'href="/setup/plan"',
         "Read the full limitation",
     ):
         assert said in html, said
@@ -556,3 +669,15 @@ def test_when_the_engine_stops_passing_the_setup_answer_is_the_unavailable_one(c
     assert client.get("/api/setup").json()["own_reports"]["ready"] is True
     monkeypatch.setattr(engine_module, "files_digest", _crashes)
     assert client.get("/api/setup").json() == REFUSED_STATUS
+
+
+def test_a_next_step_that_needs_a_command_names_the_closed_section_it_is_in():
+    """The commands sit in "Manual setup in Terminal (advanced)", which is closed until it is opened."""
+    import regaudit_portal.setup as readiness_text
+
+    html = (STATIC / "setup.html").read_text()
+    assert "<summary>Manual setup in Terminal (advanced)</summary>" in html
+    for key in ("configuration_invalid", "trust_missing", "trust_invalid"):
+        step = readiness_text._STATE_NEXT[key]
+        assert "Manual setup in Terminal (advanced) below" in step, key
+        assert "command below" not in step, key

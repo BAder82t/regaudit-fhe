@@ -27,8 +27,23 @@ FONT_NAMES = (
     "jetbrains-mono-latin-wght-normal.woff2",
 )
 LICENCES = ("inter-OFL.txt", "space-grotesk-OFL.txt", "jetbrains-mono-OFL.txt")
-PAGES = {"index.html": "/", "setup.html": "/setup", "security.html": "/security"}
-LOCAL_LINKS = {"/", "/setup", "/security", "/static/app.css", "/static/app.js", "/static/setup.js"}
+# The plan page is part of setup, so the navigation marks Setup as the current page there.
+PAGES = {
+    "index.html": "/",
+    "setup.html": "/setup",
+    "security.html": "/security",
+    "plan.html": "/setup",
+}
+LOCAL_LINKS = {
+    "/",
+    "/setup",
+    "/setup/plan",
+    "/security",
+    "/static/app.css",
+    "/static/app.js",
+    "/static/setup.js",
+    "/static/plan.js",
+}
 MARK = "/static/vaultbytes-mark.svg"
 
 
@@ -42,7 +57,7 @@ def pages() -> dict[str, str]:
 
 def assets() -> dict[str, str]:
     """Every text file the pages are made of."""
-    return written(*PAGES, "app.css", "app.js", "setup.js", "vaultbytes-mark.svg")
+    return written(*PAGES, "app.css", "app.js", "setup.js", "plan.js", "vaultbytes-mark.svg")
 
 
 # ----------------------------------------------------------------------------- nothing is fetched from outside
@@ -197,6 +212,7 @@ def test_the_list_of_fonts_in_the_code_is_the_fonts_in_the_folder():
         "app.js",
         "app.css",
         "setup.js",
+        "plan.js",
         "vaultbytes-mark.svg",
     }
     for place in (
@@ -300,7 +316,9 @@ def test_the_verdict_is_told_by_its_words_and_a_shape_and_not_by_colour_alone():
     )
     for state in ("ok", "problem", "missing", "not_checked"):
         assert f'dd strong[data-state="{state}"]' in css, state
-    assert css.count("DEMONSTRATION") == 1 and "border: 2px dashed var(--color-demo-text)" in css
+    # The demonstration label comes from the portal, in one wording; the style adds no label text of its own.
+    assert "DEMONSTRATION" not in css and "border: 2px dashed var(--color-demo-text)" in css
+    assert ".demo-label {" in css
     assert '$("result").classList.toggle("demonstration", demonstration);' in script
 
 

@@ -92,9 +92,9 @@ _HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
-# Paths that would verify or export, a bundled sample included. Any method on them gets the same refusal, and no body
-# is read.
-_REFUSED_PATHS = frozenset({"/api/verify", "/api/export"})
+# Paths that would verify or export, a bundled sample included, or prepare a setup plan. Any method on them gets the same
+# refusal, and no body is read.
+_REFUSED_PATHS = frozenset({"/api/verify", "/api/export", "/api/setup/plan"})
 _REFUSED_PREFIX = "/api/samples/"
 
 

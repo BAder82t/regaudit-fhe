@@ -79,6 +79,8 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+/* Hidden means hidden, also for elements whose own style sets display (buttons do). */
+[hidden] { display: none !important; }
 img, svg { max-width: 100%; height: auto; }
 
 body {
@@ -340,13 +342,29 @@ dd strong[data-state="problem"] { color: var(--color-bad-text); }
 dd strong[data-state="problem"]::before { border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 dd strong[data-state="missing"] { color: var(--color-warn-text); }
 dd strong[data-state="missing"]::before { background: none; border: 2px solid currentColor; }
+dd strong[data-state="warning"] { color: var(--color-warn-text); }
+dd strong[data-state="warning"]::before { border-radius: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 dd strong[data-state="not_checked"] { color: var(--color-text-dim); }
 dd strong[data-state="not_checked"]::before { border-radius: 0; height: 0.2rem; }
+dd strong[data-state="demonstration"] { color: var(--color-demo-text); }
+dd strong[data-state="demonstration"]::before { background: none; border: 2px dashed currentColor; border-radius: 0; }
+
+/* The setup plan page: plain fields and choices, readable and keyboard friendly */
+fieldset { margin: 0 0 var(--spacing-sm); padding: 0; border: 0; }
+legend { margin-bottom: var(--spacing-xs); font-weight: 700; }
+fieldset.issuer { margin-bottom: var(--spacing-md); padding: var(--spacing-sm); border: 1px solid var(--color-line); border-radius: var(--radius); }
+.option { display: flex; gap: var(--spacing-xs); align-items: flex-start; margin-bottom: var(--spacing-xs); line-height: 1.5; }
+.option input { flex: none; margin-top: 0.35rem; }
+.field { display: grid; gap: 0.25rem; }
+.field label { font-weight: 600; }
+input[type="text"], input[type="number"], textarea { width: 100%; padding: 0.5rem 0.6rem; background: var(--color-bg-primary); color: var(--color-text-primary); border: 2px solid var(--color-border); border-radius: var(--radius); font-family: var(--font-mono); font-size: 0.9rem; }
+textarea { resize: vertical; }
+input:focus-visible, textarea:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
 
 #limitation-full { background: var(--color-warn-bg); color: var(--color-warn-text); border-color: var(--color-warn-text); border-left-width: 6px; }
 #limitation-full h2, #limitation-full p { color: inherit; }
 
-/* A sample is a demonstration. It looks different from a real result: dashed edges and a label. */
+/* A demonstration result looks different from a customer result: dashed edges, and the label the portal sends. */
 .demo-banner {
   margin: 0 0 var(--spacing-sm);
   padding: var(--spacing-sm);
@@ -356,13 +374,17 @@ dd strong[data-state="not_checked"]::before { border-radius: 0; height: 0.2rem; 
   border-radius: var(--radius);
   font-weight: 600;
 }
-.demo-banner::before {
-  content: "DEMONSTRATION";
-  display: block;
-  margin-bottom: 0.25rem;
+.demo-label {
+  display: inline-block;
+  margin: 0 0 var(--spacing-xs);
+  padding: 0.25rem 0.6rem;
+  background: var(--color-demo-bg);
+  color: var(--color-demo-text);
+  border: 2px dashed var(--color-demo-text);
+  border-radius: var(--radius);
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  letter-spacing: 2px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 .panel.demonstration { border: 2px dashed var(--color-demo-text); }
 
@@ -381,6 +403,10 @@ td code { font-size: 0.8rem; }
 details { margin-top: var(--spacing-md); }
 summary { display: flex; align-items: center; min-height: 44px; font-family: var(--font-mono); font-weight: 600; letter-spacing: 1px; cursor: pointer; }
 details pre { margin-top: var(--spacing-xs); }
+/* The setup page's manual section: a visible marker that it opens, and no gap above it inside its panel. */
+#manual { margin-top: 0; }
+#manual > summary::before { content: ""; flex: none; width: 0; height: 0; margin-right: 0.6em; border-style: solid; border-width: 0.4em 0 0.4em 0.6em; border-color: transparent transparent transparent currentColor; transition: transform 0.15s; }
+#manual[open] > summary::before { transform: rotate(90deg); }
 
 /* Footer: the pale surface with the site's cyan-to-blue rule on top */
 .site-footer {
