@@ -69,6 +69,81 @@ function readableTime(value) {
     pad(moment.getUTCHours()) + ":" + pad(moment.getUTCMinutes()) + " UTC";
 }
 
+// The five separate statements about a result, in a fixed order with fixed labels. Each state the portal can return has
+// fixed plain words that say what was found and nothing more: "In your administrator's list" is not "trusted", "Matches"
+// is not "authentic". A state the page does not know is shown as the portal sent it and marked as not interpreted, so
+// the page never invents a conclusion. The verdict above stays the verifier's own word.
+const STATEMENTS = [
+  ["signature", "Signature", {
+    passed: "Matches the contents", failed: "Does not match the contents", not_checked: "Not checked",
+  }],
+  ["issuer_trust", "Issuer", {
+    established: "In your administrator's list",
+    established_with_limit: "In your administrator's list, with a limit (read the text)",
+    not_established: "Not in your administrator's list",
+  }],
+  ["freshness", "Age", {
+    within_limit: "Within the maximum age", too_old: "Older than the maximum age",
+    from_future: "Dated in the future", not_checked: "Not checked",
+  }],
+  ["replay", "Repeat check", {
+    repeat_detected: "Seen before", state_unavailable: "The repeat check was unavailable",
+    recorded: "Recorded as seen", checked_not_seen: "Not seen before (not recorded)", not_checked: "Not checked",
+  }],
+  ["encryption_claims", "Encryption claims", {
+    plaintext_stated: "Plaintext, as the signer states", declared_by_signer: "Declared by the signer, not verified",
+    not_stated: "Not stated",
+  }],
+];
+
+// Pure: from the portal's statuses member to the rows to show. No DOM, so it is tested exactly as it ships.
+function statementRows(statuses) {
+  if (!statuses || typeof statuses !== "object") return [];
+  const rows = [];
+  for (const [key, label, words] of STATEMENTS) {
+    const entry = statuses[key];
+    if (!entry || typeof entry !== "object") continue;
+    const known = Object.prototype.hasOwnProperty.call(words, entry.state);
+    rows.push({
+      key: key,
+      label: label,
+      state: String(entry.state),
+      stateText: known ? words[entry.state] : String(entry.state) + " (not interpreted by this page)",
+      known: known,
+      text: typeof entry.text === "string" ? entry.text : "",
+      limit: typeof entry.limit === "string" ? entry.limit : "",
+    });
+  }
+  return rows;
+}
+
+function renderStatements(statuses) {
+  const list = $("statements");
+  list.replaceChildren();
+  const rows = statementRows(statuses);
+  for (const row of rows) {
+    const item = document.createElement("li");
+    item.dataset.statement = row.key;
+    item.dataset.state = row.state;
+    const head = document.createElement("strong");
+    head.textContent = row.label + ": ";
+    const state = document.createElement("span");
+    state.className = "statement-state";
+    state.textContent = row.stateText;
+    const text = document.createElement("p");
+    text.textContent = row.text;
+    item.append(head, state, text);
+    if (row.limit) {
+      const limit = document.createElement("p");
+      limit.className = "fine";
+      limit.textContent = row.limit;
+      item.append(limit);
+    }
+    list.append(item);
+  }
+  show("statements-box", rows.length > 0);
+}
+
 function render(body, fileName) {
   const v = body.verification;
   const e = body.explanation;
@@ -138,6 +213,7 @@ function render(body, fileName) {
     reasons.append(row);
   }
   show("reasons-box", e.reasons.length > 0);
+  renderStatements(body.statuses);
 
   $("raw").textContent = d.technical_details;
   show("failure", false);

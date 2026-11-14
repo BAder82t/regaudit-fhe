@@ -444,3 +444,8 @@ details pre { margin-top: var(--spacing-xs); }
   button:hover:not(:disabled) { transform: none; }
   html { scroll-behavior: auto; }
 }
+
+.statements { padding-left: 1.25rem; }
+.statements li { margin: 0.75rem 0; }
+.statements p { margin: 0.2rem 0; }
+.statement-state { font-weight: 600; }
