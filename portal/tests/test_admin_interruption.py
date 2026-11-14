@@ -25,6 +25,9 @@ from regaudit_portal.config import read_settings, read_trust_store
 from regaudit_portal.paths import default_config_folder
 from test_admin import _env, _expect, _first_setup, _plan_file, _private_folder
 
+# Every test here sends a stop to a child process; see the fixture for why the children must start with default signals.
+pytestmark = pytest.mark.usefixtures("children_start_with_default_stop_signals")
+
 PORTAL = Path(__file__).resolve().parents[1]
 UNCHANGED = "Nothing was changed."
 

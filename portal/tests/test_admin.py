@@ -37,6 +37,9 @@ from test_setup import _forbid_writes
 
 import regaudit_fhe as rf
 
+# Every test here sends a stop to a child process; see the fixture for why the children must start with default signals.
+pytestmark = pytest.mark.usefixtures("children_start_with_default_stop_signals")
+
 PORTAL = Path(__file__).resolve().parents[1]
 SAMPLES = PORTAL / "regaudit_portal" / "samples"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -300,3 +301,32 @@ def make_synthetic_portal(directory: Path, *, trust_mode: str | None = "customer
     for path in (root / "trust-store.json", root / "portal-config.json"):
         os.chmod(path, 0o600)
     return root
+
+
+@pytest.fixture
+def children_start_with_default_stop_signals():
+    """Make every child this test starts begin with SIGINT, SIGHUP and SIGTERM at their defaults.
+
+    A suite run from a background job (``nohup``, a trailing ``&``) or under some CI wrappers has SIGINT and SIGHUP *ignored*,
+    and an ignored signal is inherited across exec, so a Portal child would never receive the stop the test sends and the test would
+    check nothing. A caught handler is reset to default by exec, so an inherited "ignore" in this process is replaced by a caught one
+    for the length of the test: Python's own handler for SIGINT (Ctrl-C on pytest itself still raises KeyboardInterrupt), and a no-op
+    for SIGHUP and SIGTERM, which child processes see as the default. The test process's own dispositions are restored afterwards.
+    """
+    names = ("SIGINT", "SIGHUP", "SIGTERM")
+    saved = {}
+    for name in names:
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        current = signal.getsignal(sig)
+        saved[sig] = current
+        if current == signal.SIG_IGN:
+            signal.signal(
+                sig, signal.default_int_handler if name == "SIGINT" else (lambda *_a: None)
+            )
+    try:
+        yield
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)

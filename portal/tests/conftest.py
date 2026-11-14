@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import client_for, fake_home, issuer_signer, make_synthetic_portal
+from helpers import (  # noqa: F401 - children_start_with_default_stop_signals is a fixture, found by pytest here
+    children_start_with_default_stop_signals,
+    client_for,
+    fake_home,
+    issuer_signer,
+    make_synthetic_portal,
+)
 from regaudit_portal.__main__ import main
 from regaudit_portal.paths import default_config_folder
 
