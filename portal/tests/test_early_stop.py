@@ -662,3 +662,93 @@ def test_the_earliest_stop_says_so_even_while_print_holds_the_output(tmp_path):
             out, err = proc.communicate()
     _assert_quiet_stop(proc, out + err, tmp)
     assert out.endswith(STOPPED + "\n"), out[-200:]
+
+
+# --- F-019: the exit status of a stopped command must not depend on where the stop landed --------------------------------
+
+# A child that sets itself up the way ``python -m regaudit_portal COMMAND`` is set up when the package is imported (so the
+# package installs its own stop handlers), then delivers a real stop to itself from inside exec() of a source string.
+# dataclasses and collections.namedtuple build methods that way, so during the engine's imports a stop often lands there.
+# CPython remembers a KeyboardInterrupt raised inside such an exec() and ends the process by SIGINT on exit even when the
+# program caught it: a stopped command then reported -2 instead of 1 (measured: 2 in 60 stops of demo-setup on macOS). It
+# happens when the program runs as a module (``python -m``, how the portal is started here and in its documents), and not
+# under ``python -c``, so the child below is run as a module too.
+_STOP_INSIDE_EXEC = """
+import os, signal, sys
+command, config, sig = sys.argv[1], sys.argv[2], getattr(signal, sys.argv[3])
+sys.argv = ["-m", command, "--config", config]
+import regaudit_portal
+from regaudit_portal import __main__ as entry
+
+def interrupted_engine_check():
+    exec("os.kill(os.getpid(), sig)\\nfor _ in range(50_000_000):\\n    pass\\n")
+    raise AssertionError("the stop was not taken")
+
+entry.check_engine = interrupted_engine_check
+raise SystemExit(entry.main(sys.argv[1:]))
+"""
+
+
+@pytest.mark.parametrize("sig", ["SIGINT", "SIGTERM"])
+def test_a_command_stopped_while_python_runs_exec_ends_with_status_1_not_by_signal(sig, tmp_path):
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    for folder in (home, tmp):
+        folder.mkdir(mode=0o700)
+    (tmp_path / "stop_inside_exec.py").write_text(_STOP_INSIDE_EXEC)
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [
+            sys.executable,
+            "-m",
+            "stop_inside_exec",
+            "check-config",
+            str(tmp_path / "none.json"),
+            sig,
+        ],
+        env=_env(tmp, home),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        preexec_fn=_default_signals,
+    )
+    out = done.stdout + done.stderr
+    assert done.returncode == 1, f"exit {done.returncode}: {out[-400:]}"
+    assert "stopped" in out and STOPPED not in out and "Traceback" not in out, out[-400:]
+    assert list(tmp.glob(FOLDER)) == []
+
+
+_STOP_AFTER_SUCCESS = """
+import os, signal, sys
+target = sys.argv[1]
+sys.argv = ["-m", "demo-setup", target]
+import regaudit_portal
+from regaudit_portal import __main__ as entry
+code = entry.main(sys.argv[1:])
+os.kill(os.getpid(), signal.SIGINT)  # a stop that arrives while the finished command is on its way out
+for _ in range(2_000_000):
+    pass
+raise SystemExit(code)
+"""
+
+
+def test_a_stop_after_the_command_has_finished_does_not_turn_its_success_into_a_failure(tmp_path):
+    home, tmp = tmp_path / "home", tmp_path / "tmp"
+    for folder in (home, tmp):
+        folder.mkdir(mode=0o700)
+    (tmp_path / "stop_after_success.py").write_text(_STOP_AFTER_SUCCESS)
+    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-m", "stop_after_success", str(tmp_path / "demo")],
+        env=_env(tmp, home),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        preexec_fn=_default_signals,
+    )
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, f"exit {done.returncode}: {out[-400:]}"
+    assert "created" in out and "Traceback" not in out and "stopped" not in out, out[-400:]
+    assert (tmp_path / "demo" / "portal-config.json").exists()
+    assert list(tmp.glob(FOLDER)) == []

@@ -415,6 +415,7 @@ class Running:
         path_first: Path | None = None,
         env: dict[str, str] | None = None,
         port: int | None = None,
+        preexec=None,
     ):
         self.port = _free_port() if port is None else port  # 0 asks the portal for any free port
         number = len(list(tmp_path.glob("temp-*")))
@@ -444,6 +445,7 @@ class Running:
             text=True,
             env=env,
             cwd=tmp_path,
+            preexec_fn=preexec,
         )
         watchdog = threading.Timer(90, self.process.kill)
         watchdog.start()
@@ -821,3 +823,25 @@ def test_when_the_page_learns_the_engine_has_stopped_passing_it_clears_every_ide
     html = (PORTAL_FOLDER / "regaudit_portal" / "static" / "index.html").read_text()
     for name in ids:
         assert f'id="{name}"' in html, name
+
+
+def _started_with_ctrl_c_ignored() -> None:
+    """What a parent does when it runs the portal as a background job: it ignores Ctrl-C, and the child inherits that."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+
+@pytest.mark.parametrize("page", ["ready", "unavailable"])
+def test_a_serving_portal_stops_on_ctrl_c_even_when_its_parent_ignored_it(tmp_path, demo, page):
+    """F-019. While it serves, the portal takes Ctrl-C and SIGTERM in both modes, whatever its parent left in place. The ready
+    page always did (uvicorn takes both signals itself); the unavailable page kept an inherited "ignore" for Ctrl-C, so a
+    portal started as a background job could not be stopped with Ctrl-C there, and a test run that way waited 30 s."""
+    if page == "unavailable":
+        _damaged_copy(tmp_path, "modified")
+    with Running(
+        tmp_path,
+        ["serve", "--config", str(demo / "portal-config.json")],
+        path_first=tmp_path if page == "unavailable" else None,
+        preexec=_started_with_ctrl_c_ignored,
+    ) as running:
+        _stopped_cleanly(running, running.stop(signal.SIGINT), 3 if page == "unavailable" else 0)
