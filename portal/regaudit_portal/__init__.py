@@ -37,6 +37,15 @@ STOP_DEADLINE_SECONDS = 5.0
 
 _folder: str | None = None
 
+# What a command other than the portal says when a stop ends it. Until the command starts to change anything it is true
+# that nothing was changed; a command that goes on to write files says something else from then on.
+_stop_words: str | None = None
+
+
+def _say_when_stopped(words: str) -> None:
+    global _stop_words
+    _stop_words = words
+
 
 _rmtree = None  # shutil.rmtree, once shutil has been imported; the handler must not import anything itself
 
@@ -62,7 +71,7 @@ def _leave_now() -> None:
         except Exception:  # noqa: S110 - nothing may get in the way of leaving
             pass
     serving = sys.argv[1:2] == ["serve"]
-    words = (STOPPED if serving else "stopped: Nothing was changed.") + "\n"
+    words = (STOPPED if serving else (_stop_words or "stopped: Nothing was changed.")) + "\n"
     stream = sys.stdout
     if stream is not None:
         try:  # noqa: SIM105 - contextlib is not imported here: nothing may be imported by this handler

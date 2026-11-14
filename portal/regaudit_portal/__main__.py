@@ -29,7 +29,7 @@ import threading
 from collections.abc import Callable
 
 # Standard library only, so it is safe to import when the engine is missing or damaged.
-from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _stop_while_starting
+from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _say_when_stopped, _stop_while_starting
 from .engine import REINSTALL, check_engine
 from .paths import default_config_path, display_path
 
@@ -131,9 +131,10 @@ def _stop_like_ctrl_c(_signum: int, _frame: object) -> None:
 
 
 def _leaving() -> None:
-    """A stop has begun. From here until the process is gone, further stop requests change nothing: a second one (a
-    signal, and then the launcher's input closing) must not interrupt the clean-up, which includes removing the
-    private bytecode folder when the interpreter exits."""
+    """A stop has begun, or a command has finished its work. From here until the process is gone, further stop requests
+    change nothing: a second one (a signal, and then the launcher's input closing) must not interrupt the clean-up, which
+    includes removing the private bytecode folder when the interpreter exits, and a late one must not turn a finished
+    command's outcome into a stop or a death by signal."""
     global _stop_requested
     _stop_requested = True
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -160,19 +161,30 @@ class _DropCancelledRequests(logging.Filter):
 
 
 def _hand_over_from_the_early_stop(serving: bool) -> None:
-    """The package's early handler covers the program from its first line to here, and it never raises: it removes the
-    private folder and ends the process. From here on a stop is a KeyboardInterrupt, taken by ``main`` (or by uvicorn
-    when it is serving). The portal hands over just before it starts to serve; any other command hands over as soon
-    as its arguments are read. Handlers that are not the early one (an inherited "ignore", or one a command sets for
-    itself) are left alone."""
+    """The package's early handler covers the program from its first line, and it never raises: it removes the private
+    folder, says that it stopped and ends the process. The portal hands over from it just before it starts to serve, after
+    which a stop is recorded and handled at a safe point (see _stop_like_ctrl_c). Any other command keeps the early
+    handler to the end (F-019): it used to hand over to a KeyboardInterrupt, and CPython ends a program run with
+    ``python -m`` by SIGINT, even one that caught the KeyboardInterrupt, when it was raised while Python ran a source
+    string through exec(), which dataclasses and namedtuple do while the engine is imported. A stopped command then
+    reported death by signal (-2) instead of status 1, depending only on where the stop landed. Handlers that are not
+    the early one (an inherited "ignore", or one a program that imports this one set) are left alone."""
     global _serving
     _serving = serving or _serving
+    if not _serving:
+        return
     if signal.getsignal(signal.SIGINT) == _stop_while_starting:
-        # The portal takes Ctrl-C the way it takes SIGTERM: recorded and handled at a safe point (see
-        # _stop_like_ctrl_c). Any other command stops with a KeyboardInterrupt, as before.
-        signal.signal(signal.SIGINT, _stop_like_ctrl_c if _serving else signal.default_int_handler)
+        signal.signal(signal.SIGINT, _stop_like_ctrl_c)
     if signal.getsignal(signal.SIGTERM) == _stop_while_starting:
         signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+
+
+def _done_with_the_work() -> None:
+    """A command other than serve has done what it was asked, or knows its answer. A stop from now on, while it prints the
+    outcome or while the interpreter exits, is ignored, so the outcome stands. Only the program's own early handler is
+    replaced; a program that imports this one and calls ``main`` keeps its own handlers."""
+    if _stop_while_starting in (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)):
+        _leaving()
 
 
 def _stop_when_input_closes() -> None:
@@ -279,6 +291,10 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     # (a test, a launcher) may stop the portal the moment it appears. SIGTERM ends the page the way Ctrl-C does, so the
     # private bytecode folder is removed on the way out.
     _hand_over_from_the_early_stop(True)
+    # While it serves, the page takes Ctrl-C and SIGTERM whatever its parent left in place, as the ready portal does (uvicorn
+    # takes both signals itself while it serves). It used to keep an inherited "ignore" for Ctrl-C, so a portal started as
+    # a background job could not be stopped with Ctrl-C on this page (F-019).
+    signal.signal(signal.SIGINT, _stop_like_ctrl_c)
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
     # serve_forever ends at its next poll once shutdown() is called. shutdown() waits for that, so it is called from a
     # thread of its own and never from the handler, which runs in the serving thread.
@@ -364,11 +380,17 @@ def _main(argv: list[str] | None = None) -> int:
             )
             return 3
 
+        # From here files are written, so a stop no longer leaves everything as it was.
+        _say_when_stopped(
+            f"stopped: {args.directory} may be incomplete. Remove it before running demo-setup again."
+        )
         try:
             root = create(args.directory)
         except FileExistsError:
+            _done_with_the_work()
             sys.stderr.write(f"{args.directory} already exists; choose a new directory\n")
             return 2
+        _done_with_the_work()
         print(f"created {root}")
         command = portal_command(sys.argv[0], sys.executable)
         print(f"next: {command} serve --config {shlex.quote(str(root / 'portal-config.json'))}")
@@ -394,8 +416,10 @@ def _main(argv: list[str] | None = None) -> int:
         try:
             portal = load_portal(configured)
         except ConfigProblem as exc:
+            _done_with_the_work()
             sys.stderr.write(f"not usable: {exc}\n")
             return 3
+        _done_with_the_work()
         print(
             f"usable: profile {portal.profile}, {approved_entries(portal.approved_count)}, "
             f"replay mode {portal.replay_mode}"
