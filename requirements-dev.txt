@@ -123,7 +123,7 @@ uvicorn[standard]==0.54.0
     # via regaudit-fhe (pyproject.toml)
 uvloop==0.23.0
     # via uvicorn
-watchfiles==1.1.1
+watchfiles==1.3.0
     # via uvicorn
 websockets==16.0
     # via uvicorn
