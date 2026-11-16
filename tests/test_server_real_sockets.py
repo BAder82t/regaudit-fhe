@@ -626,7 +626,10 @@ def test_idle_timeout_boundary_gap_under_succeeds_gap_over_gets_408(make_server:
 
 
 def test_with_the_idle_timeout_off_a_long_pause_is_allowed_as_before(make_server: Any) -> None:
-    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="0", REGAUDIT_FHE_REQUEST_TIMEOUT_S="12")
+    # The request timeout is a wall-clock deadline that the pause itself (~6 s) counts against. A tight value
+    # (it was 12 s) turns a few seconds of scheduler or swap starvation of the server into a 504, which says
+    # nothing about the idle deadline under test. Keep it far above the pauses so only "no idle 408" is judged.
+    srv = make_server(REGAUDIT_FHE_BODY_IDLE_TIMEOUT_S="0", REGAUDIT_FHE_REQUEST_TIMEOUT_S="120")
     wire = _request_bytes(PATH, _padded(4000))
     status, _, took = _trickle(srv.port, wire, pieces=2, gap=3.0)
     _evidence("idle_off_gap_3s", status=status, seconds=round(took, 1))
