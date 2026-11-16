@@ -6,7 +6,7 @@
 #
 annotated-doc==0.0.5
     # via fastapi
-annotated-types==0.7.0
+annotated-types==0.8.0
     # via pydantic
 anyio==4.16.0
     # via
@@ -29,7 +29,7 @@ coverage[toml]==7.16.2
     # via pytest-cov
 cryptography==50.0.2
     # via regaudit-fhe (pyproject.toml)
-fastapi==0.162.0
+fastapi==0.162.4
     # via regaudit-fhe (pyproject.toml)
 h11==0.16.0
     # via
@@ -47,7 +47,7 @@ idna==3.20
     # via
     #   anyio
     #   httpx
-iniconfig==2.3.0
+iniconfig==2.3.1
     # via pytest
 jsonschema==4.26.0
     # via regaudit-fhe (pyproject.toml)
@@ -65,7 +65,7 @@ packaging==26.2
     # via pytest
 pathspec==1.1.1
     # via mypy
-pluggy==1.6.0
+pluggy==1.7.0
     # via
     #   pytest
     #   pytest-cov
@@ -73,11 +73,11 @@ psutil==7.2.2
     # via regaudit-fhe (pyproject.toml)
 pycparser==3.0
     # via cffi
-pydantic==2.14.2
+pydantic==2.14.3
     # via
     #   fastapi
     #   regaudit-fhe (pyproject.toml)
-pydantic-core==2.50.2
+pydantic-core==2.50.4
     # via pydantic
 pygments==2.21.0
     # via pytest
@@ -99,7 +99,7 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-ruff==0.17.4
+ruff==0.17.5
     # via regaudit-fhe (pyproject.toml)
 sortedcontainers==2.4.0
     # via hypothesis
@@ -115,7 +115,7 @@ typing-extensions==4.16.0
     #   referencing
     #   starlette
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.5
     # via
     #   fastapi
     #   pydantic
@@ -123,7 +123,7 @@ uvicorn[standard]==0.54.0
     # via regaudit-fhe (pyproject.toml)
 uvloop==0.23.0
     # via uvicorn
-watchfiles==1.1.1
+watchfiles==1.3.0
     # via uvicorn
 websockets==16.0
     # via uvicorn
