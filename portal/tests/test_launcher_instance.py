@@ -5,6 +5,7 @@ directly (not through Launch Services), with a throw-away account folder each.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import signal
@@ -54,6 +55,18 @@ def _launcher_bundle(root: Path) -> Path:
     # The launcher starts `python3 -I -B -m regaudit_portal ...`; -I would ignore PYTHONPATH, so it is dropped here.
     wrapper.write_text(f'#!/bin/sh\nshift\nPYTHONPATH={PORTAL} exec {sys.executable} -B "$@"\n')
     wrapper.chmod(stat.S_IRWXU)
+    # What Launch Services needs to start the bundle as an application.
+    (app / "Info.plist").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>'
+        "<key>CFBundleExecutable</key><string>launcher</string>"
+        f"<key>CFBundleIdentifier</key><string>test.regaudit.portal.launcher.{os.getpid()}</string>"
+        "<key>CFBundleName</key><string>Evidence Verification Portal (test)</string>"
+        "<key>CFBundlePackageType</key><string>APPL</string>"
+        "<key>LSMinimumSystemVersion</key><string>14.0</string>"
+        "</dict></plist>\n"
+    )
     done = subprocess.run(  # noqa: S603 - the Swift compiler
         [shutil.which("swiftc") or "swiftc", "-swift-version", "5", "-target", "arm64-apple-macos14", str(SWIFT), "-o", str(app / "MacOS" / "launcher")],
         capture_output=True, text=True, timeout=600, check=False,
@@ -196,3 +209,83 @@ def test_separate_accounts_run_their_own_launchers_in_parallel(launcher):
         _quit(*[p for p in (a, b) if p is not None])
         shutil.rmtree(first_work, ignore_errors=True)
         shutil.rmtree(second_work, ignore_errors=True)
+
+
+@NATIVE
+def test_two_configuration_folders_of_one_account_run_side_by_side_and_each_excludes_its_own_second_start(
+    launcher,
+):
+    work, home, tmp = _account()
+    a = b = again = None
+    try:
+        other = (
+            work / "other-config"
+        )  # no file there: the portal serves its "needs attention" page, which is enough
+        a = _start(launcher, home, tmp)
+        b = _start(launcher, home, tmp, "--", "--config", str(other / "portal-config.json"))
+        assert _answers(_url(a)) and _answers(_url(b))
+        again = _start(launcher, home, tmp, "--", "--config", str(other / "portal-config.json"))
+        out, err = again.communicate(timeout=90)
+        assert again.returncode == 75 and "ALREADY_RUNNING" in err, (out, err)
+        assert a.poll() is None and b.poll() is None
+    finally:
+        _quit(*[p for p in (a, b, again) if p is not None])
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _pids(bundle_launcher: Path) -> list[int]:
+    done = subprocess.run(  # noqa: S603 - fixed argv
+        ["/usr/bin/pgrep", "-f", str(bundle_launcher)], capture_output=True, text=True, check=False
+    )
+    return [int(n) for n in done.stdout.split() if n.isdigit() and int(n) != os.getpid()]
+
+
+def _open(app: Path, home: Path, tmp: Path, out: Path, err: Path, *flags: str) -> None:
+    subprocess.run(  # noqa: S603 - Launch Services, fixed argv
+        [
+            "/usr/bin/open", *flags, "--env", f"HOME={home}", "--env", f"TMPDIR={tmp}",
+            "--stdout", str(out), "--stderr", str(err), "-a", str(app), "--args", "--no-browser", "--print-url",
+        ],
+        check=True, timeout=60,
+    )  # fmt: skip
+
+
+@NATIVE
+def test_through_launch_services_a_second_start_does_not_make_a_second_portal(launcher):
+    """``open`` of a running application brings it forward; ``open -n`` forces another process, which must say so and quit."""
+    app = launcher.parent.parent.parent  # .../X.app
+    work, home, tmp = _account()
+    out1, err1, out2, err2 = (work / n for n in ("out1", "err1", "out2", "err2"))
+    first_pids: list[int] = []
+    try:
+        _open(app, home, tmp, out1, err1)
+        end = time.time() + 90
+        while time.time() < end and "PORTAL_URL=" not in (
+            out1.read_text() if out1.exists() else ""
+        ):
+            time.sleep(0.3)
+        url = out1.read_text().strip().split("PORTAL_URL=", 1)[1].split()[0]
+        first_pids = _pids(launcher)
+        assert len(first_pids) == 1 and _answers(url)
+        _open(
+            app, home, tmp, out2, err2
+        )  # a plain second open: the running application is brought forward
+        time.sleep(4)
+        assert _pids(launcher) == first_pids and _answers(url)
+        _open(app, home, tmp, out2, err2, "-n")  # a forced new process
+        end = time.time() + 60
+        while time.time() < end and "ALREADY_RUNNING" not in (
+            err2.read_text() if err2.exists() else ""
+        ):
+            time.sleep(0.3)
+        assert f"ALREADY_RUNNING {url}" in err2.read_text(), err2.read_text()
+        time.sleep(3)
+        assert _pids(launcher) == first_pids and _answers(url), (
+            "one launcher, the first, still running"
+        )
+    finally:
+        for pid in _pids(launcher):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGTERM)
+        time.sleep(3)
+        shutil.rmtree(work, ignore_errors=True)

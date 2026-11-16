@@ -200,6 +200,18 @@ def test_many_starts_at_the_same_moment_give_exactly_one_winner(folder, tmp_path
     assert sorted(answers) == ["NO"] * 9 + ["YES"], answers
 
 
+def test_creating_the_lock_file_at_the_same_moment_never_fails(folder, tmp_path):
+    """The first starts of many processes create the same file together. Each must get YES or NO, never an error (macOS can answer
+    one of them "no such file" at that instant, which is why the open is retried). Several rounds, each with a new file."""
+    for round_number in range(6):
+        start_at = time.time() + 1.5
+        children = [
+            _holder(tmp_path / f"config-{round_number}", folder, start_at, 1.0) for _ in range(12)
+        ]
+        answers = [c.communicate(timeout=120)[0].strip() for c in children]
+        assert sorted(answers) == ["NO"] * 11 + ["YES"], (round_number, answers)
+
+
 def test_a_holder_killed_with_sigkill_does_not_block_the_next_start(folder, tmp_path):
     child = _holder(tmp_path / "config", folder, 0.0, 60.0)
     assert child.stdout.readline().strip() == "YES"

@@ -158,3 +158,36 @@ jobs:
         run: |
           printf '1\n' > "$RUNNER_TEMP/minimum.txt"
           python portal/ci/check_skips.py "$RUNNER_TEMP/launcher-junit.xml" /dev/null "$RUNNER_TEMP/minimum.txt"
+
+  # F-022 (one portal per account and configuration folder). These tests compile the real launcher and start it, so they
+  # need macOS: ten simultaneous starts, a duplicate direct launch, a start through Launch Services (`open`, `open -n`),
+  # recovery after SIGKILL, separate configuration folders and accounts side by side, the refusals of a linked or
+  # too-open lock file, and the creation of the lock file by many processes at once. They are headless: no window is
+  # looked at. The launcher's dialogs, visual checks and downloads stay with the maintainer's own walkthrough. Like the
+  # type check above, no skip is allowed here, and a minimum number of tests must pass. Not a required check.
+  launcher-native-macos:
+    name: launcher (native single-instance tests on macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+      - name: swiftc is present
+        run: swiftc --version
+      - name: Install the Portal's test environment, by hash only (macOS wheels)
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps --no-cache-dir -r portal/ci/requirements-ci-macos.lock
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+      - name: The single-instance tests
+        working-directory: ${{ runner.temp }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}/portal
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pytest "$GITHUB_WORKSPACE/portal/tests/test_instance.py" "$GITHUB_WORKSPACE/portal/tests/test_launcher_instance.py" -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/native-junit.xml"
+      - name: Nothing was skipped, and none was dropped
+        run: |
+          printf '35\n' > "$RUNNER_TEMP/minimum.txt"
+          python portal/ci/check_skips.py "$RUNNER_TEMP/native-junit.xml" /dev/null "$RUNNER_TEMP/minimum.txt"

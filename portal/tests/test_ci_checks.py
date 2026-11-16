@@ -99,6 +99,9 @@ def test_the_one_allowed_skip_is_the_swift_type_check():
 def test_the_macos_job_runs_the_type_check_alone_with_no_skip_allowed():
     text = WORKFLOW.read_text()
     linux, macos = text.split("\n  launcher-macos:\n")
+    macos = macos.split("\n  launcher-native-macos:\n")[
+        0
+    ]  # the type-check job alone; the native job has its own test below
     assert "runs-on: macos-" in macos and "runs-on: ubuntu-" in linux
     # The same pinned actions as the ubuntu job, and nothing installed but the hash-pinned lock.
     for action in (
@@ -132,3 +135,46 @@ def test_with_no_allowed_reason_the_type_check_may_not_be_skipped(tmp_path):
     problems = check_skips.check(xml, check_skips.lines(Path("/dev/null")), 1)
     assert any("unexpected skip" in p for p in problems)
     assert any("at least 1" in p for p in problems)
+
+
+def _pins(path):
+    import re
+
+    return {
+        m.group(1).lower().replace("_", "-"): m.group(2)
+        for ln in path.read_text().splitlines()
+        if (m := re.match(r"^([A-Za-z0-9_.-]+)==(\S+)", ln))
+    }
+
+
+def test_the_macos_lock_has_the_same_packages_and_versions_as_the_linux_lock_and_hashes_for_each():
+    linux, macos = _pins(CI / "requirements-ci.lock"), _pins(CI / "requirements-ci-macos.lock")
+    assert macos == linux
+    text = (CI / "requirements-ci-macos.lock").read_text()
+    # every package has at least one hash; nothing is installed without one
+    blocks = [b for b in text.split("\n") if b.strip() and not b.startswith("#")]
+    assert text.count("--hash=sha256:") >= len(macos)
+    assert all("==" in b or b.lstrip().startswith("--hash=sha256:") for b in blocks), (
+        "only pins and their hashes"
+    )
+    assert "regaudit-fhe==0.2.1 \\" in text
+
+
+def test_the_native_launcher_job_installs_only_by_hash_runs_both_files_and_allows_no_skip():
+    text = WORKFLOW.read_text()
+    job = text.split("\n  launcher-native-macos:\n")[1]
+    assert "runs-on: macos-" in job
+    for action in (
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+    ):
+        assert action in job
+    installs = [ln.strip() for ln in job.splitlines() if "pip install" in ln]
+    assert installs == [
+        '"$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --only-binary=:all: --no-deps '
+        "--no-cache-dir -r portal/ci/requirements-ci-macos.lock"
+    ]
+    assert "test_instance.py" in job and "test_launcher_instance.py" in job
+    assert '/dev/null "$RUNNER_TEMP/minimum.txt"' in job  # an empty list of allowed skip reasons
+    floor = int(job.split("printf '")[1].split("\\n")[0])
+    assert floor >= 35
