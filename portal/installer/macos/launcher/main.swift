@@ -25,6 +25,9 @@ import UniformTypeIdentifiers
 
 let appName = "Evidence Verification Portal"
 
+/// The status `serve` ends with when another portal already holds the instance lock (sysexits EX_TEMPFAIL).
+let alreadyRunningStatus: Int32 = 75
+
 struct Options {
     var openBrowser = true
     var printURL = false
@@ -140,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return childEnv
     }
 
-    func startPortal() {
+    /// ``replacing`` is true when a portal of this application has just been stopped on purpose: the new one then waits a few
+    /// seconds for the old one to release the instance lock instead of reporting that one is running.
+    func startPortal(replacing: Bool = false) {
         guard !quitting, let python = python else { return }
         guard let port = freeLoopbackPort() else { return fail("Could not find a free local port.") }
         let target = URL(string: "http://127.0.0.1:\(port)/")!
@@ -153,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // anything written inside the bundle would break its signature.
         p.arguments =
             ["-I", "-B", "-m", "regaudit_portal", "serve", "--port", String(port), "--exit-when-input-closes"]
+            + (replacing ? ["--wait-for-instance", "8"] : [])
             + options.extra
         p.environment = childEnvironment()
         let input = Pipe()
@@ -210,7 +216,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func portalExited(_ proc: Process, status: Int32) {
         if quitting || proc === retiring || proc !== process { return }  // stopped on purpose for a restart
         let detail = tail.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if status == alreadyRunningStatus { return alreadyRunning(detail) }
         fail("The portal stopped (exit code \(status)).\n\n\(detail.suffix(1200))")
+    }
+
+    /// Another portal holds the instance lock for this account and configuration folder. Nothing is stopped: the running
+    /// one is left alone, and this application says so, offers to open it, and quits.
+    func alreadyRunning(_ detail: String) {
+        var existing: URL?
+        if let found = detail.range(of: "http://127\\.0\\.0\\.1:[0-9]+/", options: .regularExpression) {
+            existing = URL(string: String(detail[found]))
+        }
+        let message = "The \(appName) is already running for this account. A second copy would use the same configuration folder at the same time, so this one did not start. The running one was not changed."
+        if !options.openBrowser {  // test mode: no dialog
+            FileHandle.standardError.write(Data("LAUNCHER_ERROR=ALREADY_RUNNING \(existing?.absoluteString ?? "")\n".utf8))
+            quitting = true
+            exit(alreadyRunningStatus)
+        }
+        let alert = NSAlert()
+        alert.messageText = "\(appName) is already running"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        if existing != nil { alert.addButton(withTitle: "Open it") }
+        alert.addButton(withTitle: "Quit")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn, let target = existing { NSWorkspace.shared.open(target) }
+        quitting = true
+        NSApp.terminate(nil)
     }
 
     func fail(_ message: String) {
@@ -427,7 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self = self, !self.quitting else { return }
                 self.process = nil
-                self.startPortal()
+                self.startPortal(replacing: true)
             }
         }
     }

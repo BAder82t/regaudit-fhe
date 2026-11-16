@@ -86,10 +86,14 @@ def test_the_launcher_lock_is_pytest_alone_copied_from_the_ci_lock():
 
 def test_the_one_allowed_skip_is_the_swift_type_check():
     assert check_skips.lines(CI / "allowed_skips.txt") == ["^needs swiftc on macOS$"]
-    # Only one test skips for that reason: the reason is written once, in test_launcher_admin.py.
+    # The reason is written in two places: the type check (test_launcher_admin.py) and the native launcher runs
+    # (test_launcher_instance.py, one marker shared by its tests). Both need the Swift compiler.
     reason = "reason=" + '"needs swiftc on macOS"'
     users = {p.name: p.read_text().count(reason) for p in TESTS.glob("test_*.py")}
-    assert {name: n for name, n in users.items() if n} == {"test_launcher_admin.py": 1}
+    assert {name: n for name, n in users.items() if n} == {
+        "test_launcher_admin.py": 1,
+        "test_launcher_instance.py": 1,
+    }
 
 
 def test_the_macos_job_runs_the_type_check_alone_with_no_skip_allowed():

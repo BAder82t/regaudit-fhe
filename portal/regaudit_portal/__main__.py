@@ -34,6 +34,9 @@ from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _say_when_stopped, _st
 from .engine import REINSTALL, check_engine
 from .paths import default_config_path, display_path
 
+# Held for as long as this process serves, so that a second portal for the same account and folder cannot start (F-022).
+_instance: object | None = None
+
 HOST = "127.0.0.1"  # local only: this first version has no sign-in, so it must not be reachable from a network
 
 
@@ -283,6 +286,42 @@ def portal_command(argv0: str, python: str) -> str:
     return shlex.quote(os.path.abspath(argv0))
 
 
+def _config_root(given: str | None) -> str:
+    """The folder whose trust list and replay file this portal would use: the folder of ``--config``, else the standard one."""
+    if given is not None:
+        return os.path.dirname(os.path.abspath(given))
+    try:
+        return str(default_config_path().parent)
+    except RuntimeError:  # no home folder
+        return "(no home folder)"
+
+
+def _take_instance(args: argparse.Namespace) -> int | None:
+    """Take this account's lock for the configuration folder. ``None`` means taken; a number is the status to end with."""
+    global _instance
+    from . import instance
+
+    try:
+        _instance = instance.acquire(
+            _config_root(args.config), wait=max(0.0, args.wait_for_instance)
+        )
+    except instance.AlreadyRunning as exc:
+        sys.stderr.write(f"{exc}\n")
+        return instance.ALREADY_RUNNING_STATUS
+    except instance.InstanceProblem as exc:
+        sys.stderr.write(
+            f"cannot start: {exc}. The portal does not run without its instance lock.\n"
+        )
+        return 1
+    return None
+
+
+def _publish_instance(port: int) -> None:
+    held = _instance
+    if held is not None:
+        held.publish(f"http://{HOST}:{port}/")  # type: ignore[attr-defined]
+
+
 def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     """No engine, or an engine that failed its check: serve only the page that says so. Nothing is verified."""
     from .fallback import make_server
@@ -294,6 +333,7 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
         sys.stderr.write(f"cannot listen on {HOST}:{port}: {exc.strerror or exc}\n")
         return 1
     port = server.server_address[1]  # the real port, also when 0 asked for any free one
+    _publish_instance(port)
     # Hand over from the package's early stop handler BEFORE the listening line is printed: whoever waits for that line
     # (a test, a launcher) may stop the portal the moment it appears. SIGTERM ends the page the way Ctrl-C does, so the
     # private bytecode folder is removed on the way out.
@@ -348,6 +388,12 @@ def _main(argv: list[str] | None = None) -> int:
     )
     serve.add_argument(
         "--port", type=int, default=8765, help="The port on this computer. 0 takes any free port."
+    )
+    serve.add_argument(
+        "--wait-for-instance",
+        type=float,
+        default=0.0,
+        help=argparse.SUPPRESS,  # for a launcher restarting the portal: wait for the old one to release its lock
     )
     serve.add_argument(
         "--exit-when-input-closes",
@@ -424,6 +470,11 @@ _STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
+
+    if args.command == "serve":
+        refused = _take_instance(args)
+        if refused is not None:
+            return refused
 
     # Before anything imports the engine: only the recognised release may be loaded and used.
     identity = check_engine()
@@ -522,6 +573,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         return 1
     configured = _configuration(args.config)
     app = build_app(configured, port=sock.getsockname()[1])
+    _publish_instance(sock.getsockname()[1])
     print(f"engine: {identity.engine['summary'] if identity.engine else ''}", flush=True)
     _run(app, sock, app.state.mode)
     return 0

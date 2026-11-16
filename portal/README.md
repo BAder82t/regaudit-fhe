@@ -69,6 +69,10 @@ echo $! > portal.pid
 
 Stop it later with `kill $(cat portal.pid)`, which stops it as cleanly as Ctrl-C does. `portal.log` holds the portal's start-up lines and any error messages. A failing engine check is logged once when it starts failing and once when it recovers, not on every request.
 
+### One portal at a time
+
+Only one portal runs for each account and configuration folder. A second `serve` for the same folder (also one started by the macOS application) does not start: it says that the portal is already running, gives its address, and ends with status 75. It does not stop the running portal. The check is an operating-system lock on a small file in a private folder of this account, so two starts at the same moment cannot both win, and a portal that crashed or was killed with `kill -9` never blocks the next start. A different configuration folder, or a different account, runs alongside. Commands that do not serve (`check-config`, `demo-setup`, `admin-describe`, `admin-apply`) are not affected. If the private folder cannot be made safe, `serve` does not start, and says why.
+
 ## The welcome screen
 
 The first screen offers three choices. All of them sit behind the same engine check as everything else: if the engine is not the recognised release, none of them is offered and the "Verification unavailable" page is shown instead.

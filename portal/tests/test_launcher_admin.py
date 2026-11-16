@@ -91,7 +91,7 @@ def test_quit_sigterm_and_sigkill_handling_of_the_launcher_are_unchanged():
         in source
     )
     start = source[
-        source.index("func startPortal()") : source.index("/// Ask the portal for its status")
+        source.index("func startPortal(") : source.index("/// Ask the portal for its status")
     ]
     assert '"--exit-when-input-closes"' in start and "let input = Pipe()" in start
     assert "inputPipe = input" in start and "p.standardInput = input" in start
