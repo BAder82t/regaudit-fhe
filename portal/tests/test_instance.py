@@ -79,6 +79,22 @@ def test_a_start_waits_for_a_portal_that_is_being_replaced(folder, tmp_path):
     again.close()
 
 
+def test_an_interrupt_while_waiting_closes_the_lock_file(folder, tmp_path, monkeypatch):
+    held = instance.acquire(tmp_path / "config", folder=folder)
+    before = set(os.listdir("/dev/fd"))
+
+    def interrupted(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(instance.time, "sleep", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        instance.acquire(tmp_path / "config", folder=folder, wait=30)
+    assert set(os.listdir("/dev/fd")) <= before | {str(n) for n in range(0)}, (
+        "no descriptor may be left open"
+    )
+    held.close()
+
+
 def test_a_start_that_does_not_wait_does_not_wait(folder, tmp_path):
     held = instance.acquire(tmp_path / "config", folder=folder)
     started = time.monotonic()

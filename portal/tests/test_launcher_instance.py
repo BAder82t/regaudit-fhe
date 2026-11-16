@@ -181,16 +181,17 @@ def test_a_launcher_killed_with_sigkill_does_not_block_the_next_one(launcher):
         first.send_signal(signal.SIGKILL)
         first.communicate(timeout=30)
         # the portal notices that its launcher is gone and stops; the next launcher may need a moment for that
+        new: str | None = None
         end = time.time() + 60
-        while time.time() < end:
+        while time.time() < end and new is None:
             third = _start(launcher, home, tmp)
             try:
                 new = _url(third, seconds=30)
-                break
             except AssertionError:
+                _quit(third)  # this attempt ended (refused as already running): wait and try again
                 third = None
                 time.sleep(0.5)
-        assert third is not None and _answers(new) and new != url
+        assert new is not None and _answers(new) and new != url
     finally:
         _quit(*[p for p in (first, third) if p is not None])
         shutil.rmtree(work, ignore_errors=True)

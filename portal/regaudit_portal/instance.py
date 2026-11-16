@@ -89,7 +89,7 @@ def _base_folder() -> Path:
         ):
             return runtime
     except OSError:
-        pass
+        pass  # no runtime folder for this account (not Linux, or none made): the shared place below is used instead
     return Path("/tmp")  # noqa: S108 - a fixed shared place; the folder made inside it is checked to be ours and private
 
 
@@ -108,7 +108,7 @@ def _private_folder(path: Path) -> int:
     try:
         os.mkdir(path, 0o700)
     except FileExistsError:
-        pass
+        pass  # made by an earlier start: its owner and mode are checked right below, so nothing is trusted unchecked
     except OSError as exc:
         raise InstanceProblem(f"cannot make {path}: {exc.strerror or exc}") from exc
     try:
@@ -219,21 +219,25 @@ def acquire(
     finally:
         os.close(folder_fd)
     end = time.monotonic() + max(0.0, wait)
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
-                os.close(fd)
-                raise InstanceProblem(
-                    f"cannot lock the instance file: {exc.strerror or exc}"
-                ) from exc
-            if time.monotonic() < end:
-                time.sleep(0.05)
-                continue
-            pid, url = _holder(fd)
-            os.close(fd)
-            raise AlreadyRunning(pid, url) from None
-        lock = InstanceLock(fd)
-        lock.publish(None)
-        return lock
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
+                    raise InstanceProblem(
+                        f"cannot lock the instance file: {exc.strerror or exc}"
+                    ) from exc
+                if time.monotonic() < end:
+                    time.sleep(0.05)
+                    continue
+                pid, url = _holder(fd)
+                raise AlreadyRunning(pid, url) from None
+            lock = InstanceLock(fd)
+            lock.publish(None)
+            return lock
+    except BaseException:
+        os.close(
+            fd
+        )  # a refusal, a problem or an interrupt: the descriptor is not kept, and no lock is held
+        raise
