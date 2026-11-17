@@ -146,8 +146,8 @@ def test_the_summary_is_shown_whole_when_the_screen_allows_and_is_never_clipped_
         and "layout.usedRect(for: container).height" in source
     )
     assert (
-        "NSScreen.main?.visibleFrame.height" in source
-        and "let limit = max(150, floor(screenHeight - 340 - fieldsHeight))" in source
+        "var usableScreenHeight: CGFloat { NSScreen.main?.visibleFrame.height ?? 700 }" in source
+        and "let limit = max(120, floor(screenHeight - 340 - fieldsHeight))" in source
     )
     assert "let height = needed > 0 ? min(needed, limit) : 220" in source
     # a scroll bar that is always drawn, never one that hides itself
@@ -164,10 +164,14 @@ def test_the_summary_is_shown_whole_when_the_screen_allows_and_is_never_clipped_
     assert (
         "needed == 0 || needed > limit + 1" in source
     )  # an unknown height counts as clipped, never as fitting
-    assert "fieldsBox = fixedBox(scroll, width: size.width + 20, height: 200)" in source
+    assert "fieldsBox = fixedBox(scroll, width: size.width + 20, height: fieldsLimit)" in source
+    assert (
+        "var fieldsLimit: CGFloat { min(200, max(96, floor(usableScreenHeight * 0.22))) }" in source
+    )  # smaller on a small screen
+    assert "fieldsHeight: min(size.height, fieldsLimit)" in source
     # the box of fingerprint fields opens at its top (the first issuer first) and also keeps an always-drawn scroll bar
     assert (
-        "scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - 200)))"
+        "scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - fieldsLimit)))"
         in source
     )
     assert (

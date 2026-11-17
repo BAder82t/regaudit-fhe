@@ -344,6 +344,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return scroll
     }
 
+    /// The height of the screen the alert will be on, without the menu bar and the Dock. A property so that it is read in one place.
+    var usableScreenHeight: CGFloat { NSScreen.main?.visibleFrame.height ?? 700 }
+
+    /// How tall the box of fingerprint fields may be: up to 200 points, less on a small screen (a fifth of it, but never under 96).
+    var fieldsLimit: CGFloat { min(200, max(96, floor(usableScreenHeight * 0.22))) }
+
     /// The plan's summary in a box as tall as the whole text needs, up to what is left of the screen once the rest of the alert
     /// (its heading, the fingerprint fields and the buttons) has its room, so that Apply and Cancel are always on the screen. When
     /// the text is longer than that, the box scrolls with a scroll bar that is always drawn, and ``clipped`` is true: the caller
@@ -355,9 +361,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             layout.ensureLayout(for: container)
             needed = ceil(layout.usedRect(for: container).height) + 12
         }
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 700
+        let screenHeight = usableScreenHeight
         // 340 points are the alert's own heading, notice line, spacing and buttons; the fingerprint fields take theirs.
-        let limit = max(150, floor(screenHeight - 340 - fieldsHeight))
+        let limit = max(120, floor(screenHeight - 340 - fieldsHeight))
         let height = needed > 0 ? min(needed, limit) : 220
         let scroll = scrollingText(string, width: width, height: height)
         return (fixedBox(scroll, width: width, height: height), scroll, needed == 0 || needed > limit + 1)
@@ -435,22 +441,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.frame = NSRect(origin: .zero, size: size)
         // Python's summary, notices first, in a box of fixed height; the fields below it, scrolled if there are many.
         // However long either is, the alert keeps its Apply and Cancel buttons on the screen.
-        let summaryParts = summaryBox(summary, width: 480, fieldsHeight: min(size.height, 200))
+        let summaryParts = summaryBox(summary, width: 480, fieldsHeight: min(size.height, fieldsLimit))
         let hint = NSTextField(wrappingLabelWithString: "This plan is longer than the box. Scroll the box to the end to read all of it: Apply stays off until you have.")
         hint.preferredMaxLayoutWidth = 480
         hint.textColor = .systemOrange
         hint.isHidden = !summaryParts.clipped
         let fieldsBox: NSView
-        if size.height > 200 {
-            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: size.width + 20, height: 200))
+        if size.height > fieldsLimit {
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: size.width + 20, height: fieldsLimit))
             scroll.documentView = stack
             scroll.hasVerticalScroller = true
             scroll.scrollerStyle = .legacy  // always drawn, like the summary box's
             scroll.autohidesScrollers = false
             // The stack is not flipped, so the box would open at its bottom, showing the last issuer's field first. Open it at the top.
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - 200)))
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - fieldsLimit)))
             scroll.reflectScrolledClipView(scroll.contentView)
-            fieldsBox = fixedBox(scroll, width: size.width + 20, height: 200)
+            fieldsBox = fixedBox(scroll, width: size.width + 20, height: fieldsLimit)
         } else {
             fieldsBox = stack
         }
