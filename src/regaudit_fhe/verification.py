@@ -46,6 +46,7 @@ from .replay import (
 )
 from .report_v2 import AuditEnvelopeV2, EnvelopeFormatError, _assert_plain_json
 from .reports import AuditEnvelope, canonical_json, sha256_hex, verify_signature
+from .schemas import STATEMENT_PRIMITIVES
 from .trust import KeyEntry, TrustStore
 
 # A versioned profile with its own rules, so that no existing parameter or profile changes meaning. Everything else in it is
@@ -720,8 +721,15 @@ def verify(env: AuditEnvelope | AuditEnvelopeV2, policy: VerificationPolicy) -> 
         ):
             block("DEPLOYMENT_NOT_ALLOWED")
             identity_ok = False
-        if entry.primitives is not None and (
-            not isinstance(env.primitive, str) or env.primitive not in entry.primitives
+        # An unscoped entry means "every audit primitive". Issuer statements (ai_run) are a different kind
+        # of claim and need the entry to name them.
+        if (
+            isinstance(env.primitive, str)
+            and env.primitive in STATEMENT_PRIMITIVES
+            and (entry.primitives is None or env.primitive not in entry.primitives)
+        ) or (
+            entry.primitives is not None
+            and (not isinstance(env.primitive, str) or env.primitive not in entry.primitives)
         ):
             # A report.v1 is not type-checked on parse: an unhashable primitive must be refused,
             # not raise TypeError out of the engine.
