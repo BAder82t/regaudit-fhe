@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,11 +30,22 @@ from regaudit_fhe.report_v2 import EnvelopeFormatError, parse_envelope_strict
 from regaudit_fhe.verification import VerificationPolicy, verify
 
 from . import __version__ as PORTAL_VERSION
+from . import batch as batch_module
 from .config import ConfigProblem, EngineProblem, Portal, approved_entries, load_portal
 from .engine import UNAVAILABLE_MESSAGE, Identity, check_engine
-from .explain import DEMONSTRATION_NOTICE, FHE_NOTICE, NOT_A_CLAIM, declarations, describe
+from .explain import (
+    DEMONSTRATION_LABEL,
+    DEMONSTRATION_NOTICE,
+    DEMONSTRATION_TRUST_NOTICE,
+    FHE_NOTICE,
+    NOT_A_CLAIM,
+    declarations,
+    describe,
+)
+from .plan import MAX_PLAN_BYTES, prepared
 from .samples import DEMONSTRATION_ISSUER, Sample, Samples, SamplesProblem, load_samples
 from .setup import readiness
+from .statuses import build as build_statuses
 
 MAX_REPORT_BYTES = 1 << 20
 MAX_REQUESTS_PER_MINUTE = 120
@@ -44,6 +57,7 @@ _STATIC_FILES = {
     "app.js": (_STATIC / "app.js", "text/javascript"),
     "app.css": (_STATIC / "app.css", "text/css"),
     "setup.js": (_STATIC / "setup.js", "text/javascript"),
+    "plan.js": (_STATIC / "plan.js", "text/javascript"),
     "vaultbytes-mark.svg": (_STATIC / "vaultbytes-mark.svg", "image/svg+xml"),
 }
 # The three typefaces the pages use, as files of this package. Nothing else in the folder can be asked for.
@@ -65,10 +79,21 @@ _HEADERS = {
     "Cache-Control": "no-store",
 }
 _NOT_READY = (
-    "This portal cannot check reports right now, because its setup needs attention. Contact your administrator. "
-    "No report can be checked until then."
+    "Your own reports cannot be checked right now: a configuration was found, but it needs attention. Contact your "
+    "administrator. Until then, only the bundled samples can be checked."
 )
 _NOT_SET_UP = "Verification of your own reports is not set up yet. An administrator has to set up trust first."
+# A configuration refused because its trust list holds the bundled demonstration key without saying it is a
+# demonstration. A plain reason, with no file names: those go to the administrator's terminal.
+_DEMONSTRATION_KEY_REFUSED = (
+    "This portal cannot check your own reports. Its trust list holds the portal's bundled demonstration key, which "
+    "can never be customer trust, and its configuration does not say it is a demonstration, so the configuration is "
+    "refused. Contact your administrator. Until then, only the bundled samples can be checked."
+)
+_DEMONSTRATION_ONLY = (
+    "This portal is set up with a demonstration trust list, not trust set up by an administrator, so your own "
+    "reports are not set up. Files you choose are checked only as a demonstration, and every result says so."
+)
 _SAMPLES_UNAVAILABLE = "The demonstration samples cannot be used right now. Nothing was verified."
 _NOT_A_REPORT = (
     "This file is not a signed report this portal can read. Nothing was verified, so treat it as not accepted. "
@@ -90,16 +115,44 @@ class _TooLarge(Exception):
 
 
 class _RateLimit:
+    """A fixed one-minute window. Every request counts, refusals included."""
+
     def __init__(self, limit: int) -> None:
         self._limit, self._lock, self._window, self._count = limit, threading.Lock(), 0, 0
 
+    def _roll(self) -> None:
+        now = int(time.monotonic() // 60)
+        if now != self._window:
+            self._window, self._count = now, 0
+
     def allow(self) -> bool:
         with self._lock:
-            now = int(time.monotonic() // 60)
-            if now != self._window:
-                self._window, self._count = now, 0
+            self._roll()
             self._count += 1
             return self._count <= self._limit
+
+    def take(self, count: int) -> bool:
+        """All or nothing: count checks are taken together, or none are and nothing is used up."""
+        with self._lock:
+            self._roll()
+            if self._count + count > self._limit:
+                return False
+            self._count += count
+            return True
+
+    def remaining(self) -> int:
+        with self._lock:
+            self._roll()
+            return max(0, self._limit - self._count)
+
+    @staticmethod
+    def resets_in() -> int:
+        """Whole seconds until the window ends and the count starts again from nothing."""
+        return max(1, math.ceil(60 - time.monotonic() % 60))
+
+    @property
+    def limit(self) -> int:
+        return self._limit
 
 
 def _refusal(status: int, code: str, message: str) -> JSONResponse:
@@ -162,14 +215,27 @@ def _unavailable() -> JSONResponse:
     )
 
 
-async def _read_limited(request: Request) -> bytes:
+async def _watch_for_disconnect(request: Request, gone: asyncio.Event) -> None:
+    """Set ``gone`` when the client closes the connection. ``Request.is_disconnected`` cannot do this here: behind the
+    middleware that adds the headers it always answers no, so the connection is listened to directly."""
+    try:
+        message = await request.receive()
+    except (
+        Exception
+    ):  # nothing to learn from a failing listener: the batch then simply runs to its end
+        return
+    if message.get("type") == "http.disconnect":
+        gone.set()
+
+
+async def _read_limited(request: Request, limit: int = MAX_REPORT_BYTES) -> bytes:
     length = request.headers.get("content-length")
-    if length is not None and (not length.isdigit() or int(length) > MAX_REPORT_BYTES):
+    if length is not None and (not length.isdigit() or int(length) > limit):
         raise _TooLarge
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_REPORT_BYTES:
+        if len(body) > limit:
             raise _TooLarge
     return bytes(body)
 
@@ -188,7 +254,46 @@ def _unavailable_status() -> dict[str, Any]:
 
 
 def _own_message(state: str) -> str:
+    if state == "demonstration":
+        return _DEMONSTRATION_ONLY
     return _NOT_SET_UP if state == "not_set_up" else _NOT_READY
+
+
+_NO_TRUST_MODE = (
+    "Trust mode: none. No trust is set up, so only the bundled demonstration samples can be checked, and each of "
+    f"their results is labelled {DEMONSTRATION_LABEL}."
+)
+# A configuration was found but refused or not valid: not the same as having none, so it is said differently.
+_REFUSED_TRUST_MODE = (
+    "Trust mode: none. A configuration was found, but it was refused or is not valid, so none of its trust is used. "
+    "The setup page says what needs attention. Only the bundled demonstration samples can be checked, and each of "
+    f"their results is labelled {DEMONSTRATION_LABEL}."
+)
+_CUSTOMER_MODE = "Trust mode: customer. Reports are checked against the trust set up in this portal's configuration."
+
+
+def trust_mode_fields(portal: Portal | None, own_state: str) -> dict[str, Any]:
+    """Which mode the portal is in, for the status and the setup page. It comes from the configuration the portal
+    was started with, and only a different configuration at the next start can change it."""
+    if portal is not None and own_state == "demonstration":
+        return {
+            "trust_mode": "demonstration",
+            "demonstration_label": DEMONSTRATION_LABEL,
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": (
+                f"Trust mode: demonstration. {DEMONSTRATION_LABEL}. The portal was started with a demonstration "
+                f"configuration ({portal.trust_mode_reason}), so files are checked only as a demonstration."
+            ),
+        }
+    if portal is not None and own_state == "ready":
+        return {
+            "trust_mode": "customer",
+            "trust_mode_reason": portal.trust_mode_reason,
+            "trust_mode_text": _CUSTOMER_MODE,
+        }
+    if own_state == "needs_attention":
+        return {"trust_mode": "none", "trust_mode_text": _REFUSED_TRUST_MODE}
+    return {"trust_mode": "none", "trust_mode_text": _NO_TRUST_MODE}
 
 
 def _status_body(
@@ -196,14 +301,32 @@ def _status_body(
     engine: dict[str, Any],
     samples: Samples | None,
     own_state: str,
+    own_message: str | None = None,
 ) -> dict[str, Any]:
     """Whether your own reports can be checked, which samples there are, and which engine would check them."""
     listing = samples.listing() if samples is not None else []
+    mode = trust_mode_fields(portal, own_state)
+    if portal is not None and own_state == "demonstration":
+        # Never "ready": a demonstration trust list is not trust set up by an administrator.
+        return {
+            "ready": False,
+            "state": "demonstration",
+            **mode,
+            "message": _DEMONSTRATION_ONLY,
+            "demonstration_checks": True,
+            "samples": listing,
+            "policy_text": "Demonstration trust list only, not trust set up by an administrator.",
+            "replay_mode": portal.replay_mode,
+            "batch": batch_module.limits(),
+            "engine": engine,
+            "not_a_claim": NOT_A_CLAIM,
+        }
     if portal is None:
         return {
             "ready": False,
             "state": own_state,
-            "message": _own_message(own_state),
+            **mode,
+            "message": own_message or _own_message(own_state),
             "samples": listing,
             "engine": engine,
             "not_a_claim": NOT_A_CLAIM,
@@ -212,12 +335,14 @@ def _status_body(
     return {
         "ready": True,
         "state": "ready",
+        **mode,
         "samples": listing,
         "policy_id": policy.policy_id,
         "policy_text": f"Policy {policy.policy_id}, {approved_entries(portal.approved_count)}.",
         "profile": portal.profile,
         "approved_count": portal.approved_count,
         "replay_mode": portal.replay_mode,
+        "batch": batch_module.limits(),
         "engine": engine,
         "not_a_claim": NOT_A_CLAIM,
     }
@@ -230,8 +355,11 @@ def _result_body(
     raw: bytes,
     identity: Identity,
     sample: Sample | None,
+    demonstration_trust: bool = False,
+    policy: VerificationPolicy | None = None,
 ) -> dict[str, Any]:
-    """What the page shows and what it saves. For a sample it also says, in the data, that it is a demonstration."""
+    """What the page shows and what it saves. For a sample, or a file checked against a demonstration trust list, it
+    also says, in the data, that it is a demonstration."""
     body = {
         "verification": verification,
         "explanation": explanation,
@@ -242,14 +370,36 @@ def _result_body(
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "portal_version": PORTAL_VERSION,
         "not_a_claim": NOT_A_CLAIM,
-        "synthetic_demonstration": sample is not None,
+        "synthetic_demonstration": sample is not None or demonstration_trust,
+        "trust_mode": "demonstration" if sample is not None or demonstration_trust else "customer",
     }
+    if policy is not None:
+        # Additive: the members above keep their meaning. These explain them one by one, from the same engine result.
+        body["statuses"] = build_statuses(
+            verification,
+            body["encryption_declarations"],
+            policy,
+            trust_mode=body["trust_mode"],
+            demonstration=body["synthetic_demonstration"],
+        )
+    if sample is not None or demonstration_trust:
+        # Inside the result, so it is inside every saved file too. The verdict and the reason codes stay as they are.
+        body["demonstration_label"] = DEMONSTRATION_LABEL
     if sample is not None:
         body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
             "notice": DEMONSTRATION_NOTICE,
             "sample": {"id": sample.id, "title": sample.title},
             "issuer": DEMONSTRATION_ISSUER,
             "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator",
+        }
+    elif demonstration_trust:
+        body["demonstration"] = {
+            "label": DEMONSTRATION_LABEL,
+            "notice": DEMONSTRATION_TRUST_NOTICE,
+            "sample": None,
+            "issuer": None,
+            "trust_list": "a demonstration trust list in this portal's configuration, not trust set up by an administrator",
         }
     return body
 
@@ -264,6 +414,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     """
     portal: Portal | None = None
     own_state = "not_set_up"
+    own_text: str | None = None  # a plain reason for the page, when there is one that names no file
     start = check_engine()
     engine_refused = not start.ok
     if engine_refused:
@@ -271,11 +422,15 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     elif config_path is not None:
         try:
             portal = load_portal(config_path)
-            own_state = "ready"
+            # A demonstration trust list is kept apart: never "ready", and every result it gives is labelled.
+            own_state = "demonstration" if portal.demonstration else "ready"
         except ConfigProblem as exc:
             logger.error("portal not ready: %s", exc)
             own_state = "needs_attention"
             engine_refused = isinstance(exc, EngineProblem)
+            if exc.kind == "demonstration_key":
+                own_text = _DEMONSTRATION_KEY_REFUSED
+    own_message = own_text or _own_message(own_state)
     samples: Samples | None = None
     if not engine_refused:
         try:
@@ -285,11 +440,13 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
     configured = Path(config_path).absolute() if config_path is not None else None
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.ready = portal is not None
+    app.state.ready = portal is not None and own_state == "ready"
     app.state.mode = (
         "unavailable"
         if engine_refused
-        else {"ready": "ready", "not_set_up": "welcome"}.get(own_state, "needs-attention")
+        else {"ready": "ready", "not_set_up": "welcome", "demonstration": "demonstration"}.get(
+            own_state, "needs-attention"
+        )
     )
     hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     origins = {f"http://{host}" for host in hosts}
@@ -348,11 +505,56 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _unavailable_status()
         return readiness(
             configured,
+            mode=trust_mode_fields(portal, own_state),
             port=port,
             identity=identity,
             own_state=own_state,
-            own_message=_own_message(own_state),
+            own_message=own_message,
         )
+
+    @app.api_route("/setup/plan", methods=["GET", "HEAD"])
+    def plan_page() -> FileResponse:
+        return FileResponse(_STATIC / "plan.html", media_type="text/html")
+
+    @app.post("/api/setup/plan")
+    async def prepare_plan(request: Request) -> Response:
+        """Stateless: check a setup plan and say exactly what applying it would write.
+
+        It writes nothing, keeps nothing and enrols nothing. It reads no file and does not look at the configuration.
+        Applying a plan is a separate command that this process never imports, so no request can reach it.
+        """
+        if engine_refused:
+            return _unavailable()
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            return _refusal(
+                415, "bad_type", "A setup plan is sent as JSON from the portal's own page."
+            )
+        if not limit.allow():
+            return _refusal(
+                429, "too_many", "Too many requests in the last minute. Try again shortly."
+            )
+        identity = await run_in_threadpool(check_engine)
+        watch.seen(identity)
+        if not identity.ok:
+            return _unavailable()
+        try:
+            raw = await asyncio.wait_for(_read_limited(request, MAX_PLAN_BYTES), BODY_TIMEOUT_S)
+        except _TooLarge:
+            return _refusal(
+                413, "too_large", "This is far larger than a setup plan. Nothing was kept."
+            )
+        except asyncio.TimeoutError:
+            return _refusal(408, "too_slow", "The request took too long. Nothing was kept.")
+        try:
+            status_code, body = await run_in_threadpool(prepared, raw)
+        except Exception as exc:  # never log the exception's text: it could carry what was entered
+            logger.error("preparing a setup plan failed: %s", type(exc).__name__)
+            return _refusal(500, "no_plan", "The plan could not be checked. Nothing was kept.")
+        after = await run_in_threadpool(check_engine)
+        watch.seen(after)
+        if not after.ok:
+            return _unavailable()
+        return JSONResponse(body, status_code=status_code)
 
     @app.api_route("/api/status", methods=["GET", "HEAD"])
     def status() -> dict[str, Any]:
@@ -362,7 +564,59 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
         watch.seen(identity)
         if not identity.ok or identity.engine is None:
             return _unavailable_status()
-        return _status_body(portal, identity.engine, samples, own_state)
+        return _status_body(portal, identity.engine, samples, own_state, own_message)
+
+    busy = {"batches": 0, "uploads": 0}
+
+    async def judge(raw: bytes) -> tuple[int, dict[str, Any]]:
+        """One uploaded report: parse it, check the engine, verify, check the engine again. The status and the body.
+
+        A single upload and every file of a batch go through this, so they are checked identically.
+        """
+        assert portal is not None
+        try:
+            env = _parse(raw)
+        except (
+            CanonicalError,
+            EnvelopeFormatError,
+            InputLimitError,
+            RecursionError,
+            ValueError,
+            TypeError,
+        ):
+            return 422, {"error": "not_a_report", "message": _NOT_A_REPORT}
+        try:
+            async with gate:
+                result, identity = await run_in_threadpool(
+                    _verify_between_checks, env, portal.policy, watch
+                )
+        except _EngineRefused:
+            return 503, {
+                "error": "unavailable",
+                "state": "unavailable",
+                "message": UNAVAILABLE_MESSAGE,
+            }
+        except Exception:
+            logger.exception("verification failed")
+            return 503, {"error": "no_verdict", "message": _NO_VERDICT}
+        verification = result.to_dict()
+        demonstration = own_state == "demonstration"
+        explanation = describe(
+            verification,
+            portal.profile,
+            demonstration=demonstration,
+            notice=DEMONSTRATION_TRUST_NOTICE,
+        )
+        return 200, _result_body(
+            verification,
+            explanation,
+            env,
+            raw,
+            identity,
+            None,
+            demonstration,
+            policy=portal.policy,
+        )
 
     @app.post("/api/samples/{sample_id}/verify")
     async def check_sample(sample_id: str) -> Response:
@@ -396,7 +650,11 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(503, "no_verdict", _NO_VERDICT)
         verification = result.to_dict()
         explanation = describe(verification, "demonstration", demonstration=True)
-        return JSONResponse(_result_body(verification, explanation, env, raw, identity, sample))
+        return JSONResponse(
+            _result_body(
+                verification, explanation, env, raw, identity, sample, policy=samples.policy
+            )
+        )
 
     @app.post("/api/verify")
     async def check(request: Request) -> Response:
@@ -406,7 +664,7 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(
                 503,
                 "not_set_up" if own_state == "not_set_up" else "not_ready",
-                _own_message(own_state),
+                own_message,
             )
         if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
             return _refusal(415, "bad_type", _NOT_A_REPORT)
@@ -425,29 +683,176 @@ def build_app(config_path: str | Path | None, *, port: int) -> FastAPI:
             return _refusal(413, "too_large", _TOO_LARGE)
         except asyncio.TimeoutError:
             return _refusal(408, "too_slow", "The upload took too long. Nothing was verified.")
-        try:
-            env = _parse(raw)
-        except (
-            CanonicalError,
-            EnvelopeFormatError,
-            InputLimitError,
-            RecursionError,
-            ValueError,
-            TypeError,
-        ):
-            return _refusal(422, "not_a_report", _NOT_A_REPORT)
-        try:
-            async with gate:
-                result, identity = await run_in_threadpool(
-                    _verify_between_checks, env, portal.policy, watch
-                )
-        except _EngineRefused:
+        status_code, payload = await judge(raw)
+        return JSONResponse(payload, status_code=status_code)
+
+    def _rate_information(*, refused: int | None = None) -> dict[str, int]:
+        return {
+            "limit": limit.limit,
+            "remaining": limit.remaining(),
+            "resets_in_seconds": limit.resets_in(),
+            **({"batch_size": refused} if refused is not None else {}),
+        }
+
+    def _too_many(message: str, *, size: int | None = None) -> JSONResponse:
+        info = _rate_information(refused=size)
+        return JSONResponse(
+            {
+                "error": "too_many",
+                "message": message,
+                "retry_after_seconds": info["resets_in_seconds"],
+                "rate": info,
+            },
+            status_code=429,
+            headers={"Retry-After": str(info["resets_in_seconds"])},
+        )
+
+    @app.post("/api/verify-batch")
+    async def check_batch(request: Request) -> Response:
+        """Several report files in one request. Each is checked as a single upload is, one after another.
+
+        The batch is charged to the same 120-a-minute budget, one check per file, up front: a batch that does not fit
+        in what is left is refused whole, with Retry-After, and nothing is verified. Nothing is kept.
+        """
+        if engine_refused:
             return _unavailable()
-        except Exception:
-            logger.exception("verification failed")
-            return _refusal(503, "no_verdict", _NO_VERDICT)
-        verification = result.to_dict()
-        explanation = describe(verification, portal.profile)
-        return JSONResponse(_result_body(verification, explanation, env, raw, identity, None))
+        if portal is None:
+            return _refusal(
+                503,
+                "not_set_up" if own_state == "not_set_up" else "not_ready",
+                own_message,
+            )
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            return _refusal(415, "bad_type", batch_module.BAD_TYPE)
+        if not limit.allow():
+            return _too_many(
+                "Too many checks in the last minute. Nothing was verified. Try again shortly."
+            )
+        # Only the bodies being received are counted here, so that memory held by slow clients is bounded. The one
+        # batch slot is taken later, after the body has been read and parsed, so a client that is slow or idle can
+        # never keep a well-behaved batch out.
+        if busy["uploads"] >= batch_module.MAX_UPLOADS:
+            return _busy()
+        busy["uploads"] += 1
+        receiving = [True]
+
+        def stop_receiving() -> None:
+            if receiving[0]:
+                receiving[0] = False
+                busy["uploads"] -= 1
+
+        try:
+            return await _run_batch(request, stop_receiving)
+        finally:
+            stop_receiving()
+
+    def _busy() -> JSONResponse:
+        return JSONResponse(
+            {"error": "busy", "message": batch_module.BUSY, "retry_after_seconds": 2},
+            status_code=429,
+            headers={"Retry-After": "2"},
+        )
+
+    async def _run_batch(request: Request, stop_receiving: Any) -> Response:
+        assert portal is not None
+        identity = await run_in_threadpool(check_engine)
+        watch.seen(identity)
+        if not identity.ok or identity.engine is None:
+            return _unavailable()
+        try:
+            raw = await asyncio.wait_for(
+                _read_limited(request, batch_module.MAX_BODY_BYTES), BODY_TIMEOUT_S
+            )
+        except _TooLarge:
+            return _refusal(413, "too_large", batch_module.BATCH_TOO_LARGE)
+        except asyncio.TimeoutError:
+            return _refusal(408, "too_slow", "The upload took too long. Nothing was verified.")
+        try:
+            items = batch_module.read_items(raw)
+        except batch_module.BatchFormatError as exc:
+            return _refusal(exc.status, exc.code, exc.message)
+        del raw
+        stop_receiving()
+        # The batch slot is for the checking only. A batch that finds it taken is refused whole, before it is charged.
+        if busy["batches"] >= batch_module.MAX_CONCURRENT_BATCHES:
+            return _busy()
+        busy["batches"] += 1
+        try:
+            return await _check_files(request, items)
+        finally:
+            busy["batches"] -= 1
+
+    async def _check_files(request: Request, items: list[batch_module.Item]) -> Response:
+        assert portal is not None
+        # One check was charged for the request itself. The rest of the files are taken together, or none are.
+        if not limit.take(len(items) - 1):
+            return _too_many(
+                "This batch does not fit in the checks left this minute. Nothing was verified.",
+                size=len(items),
+            )
+        demonstration = own_state == "demonstration"
+        files: list[dict[str, Any]] = []
+        complete = True
+        engine_stopped = False
+        gone = asyncio.Event()
+        listener = asyncio.ensure_future(_watch_for_disconnect(request, gone))
+        try:
+            for item in items:
+                if complete and item.index and gone.is_set():
+                    complete = False
+                    logger.info(
+                        "a batch was stopped: the connection closed after %d files", item.index
+                    )
+                if not complete:
+                    entry = batch_module.file_entry(item, None)
+                    files.append(
+                        {
+                            **entry,
+                            "ok": False,
+                            "error": {
+                                "error": "not_run",
+                                "message": batch_module.NOT_RUN_ENGINE
+                                if engine_stopped
+                                else batch_module.NOT_RUN_CLOSED,
+                            },
+                        }
+                    )
+                    continue
+                try:
+                    data = batch_module.decode(item)
+                except batch_module.FileUnreadable as exc:
+                    message = _TOO_LARGE if exc.code == "too_large" else _NOT_A_REPORT
+                    files.append(
+                        {
+                            **batch_module.file_entry(item, None),
+                            "ok": False,
+                            "error": {"error": exc.code, "message": message},
+                        }
+                    )
+                    continue
+                status_code, payload = await judge(data)
+                entry = batch_module.file_entry(item, data)
+                if status_code == 200:
+                    files.append({**entry, "ok": True, "result": payload})
+                    continue
+                files.append({**entry, "ok": False, "error": payload})
+                if payload.get("error") == "unavailable":
+                    # The engine failed its check: nothing more is run, and nothing from it was used.
+                    complete = False
+                    engine_stopped = True
+        finally:
+            listener.cancel()
+        trust = trust_mode_fields(portal, own_state)["trust_mode"]
+        return JSONResponse(
+            batch_module.answer(
+                files,
+                batch_id=uuid.uuid4().hex,
+                trust_mode=trust,
+                demonstration=demonstration,
+                replay_mode=portal.replay_mode,
+                rate=_rate_information(),
+                complete=complete,
+            )
+        )
 
     return app

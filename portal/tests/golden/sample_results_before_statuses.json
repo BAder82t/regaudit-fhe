@@ -1,0 +1,557 @@
+{
+  "declares-encrypted-backend": {
+    "demonstration": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+      "notice": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer.",
+      "sample": {
+        "id": "declares-encrypted-backend",
+        "title": "A report that names an encrypted backend"
+      },
+      "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator"
+    },
+    "demonstration_label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+    "encryption_declarations": {
+      "backend": "tenseal-ckks",
+      "backend_shortened": false,
+      "encryption_verified": false,
+      "kind": "ENCRYPTED_BACKEND_DECLARED",
+      "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
+      "security_bits": 192,
+      "security_bits_note": "declared by the signer, not verified",
+      "security_bits_state": "SHOWN",
+      "security_bits_text": "192 (declared by the signer, not verified)",
+      "statement": "The signer declares an encrypted backend. This portal cannot verify that encryption was used."
+    },
+    "engine": {
+      "api": "regaudit_fhe.verify_report",
+      "check_scope": "This comparison covers the installed source files only. It does not show which code is actually running, and it is not a defence against a tampered environment.",
+      "installed_distribution_version": "0.2.1",
+      "name": "regaudit-fhe",
+      "release_files": "IDENTICAL",
+      "required_version": "0.2.1",
+      "security_limitation": "Security limitation \u2014 published v0.2.1\n\nPublished regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.\n\nUsers with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.\n\nThese protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.",
+      "security_limitation_short": "Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator.",
+      "summary": "Verdicts are produced by regaudit-fhe 0.2.1, using its published verification API (regaudit_fhe.verify_report). Its installed source files are identical to the published 0.2.1 release, checked when the portal started and again before each verification.",
+      "version": "0.2.1"
+    },
+    "explanation": {
+      "display": {
+        "issued_at": "2026-10-01T09:00:00+00:00",
+        "issuer": "DEMO-ONLY synthetic issuer",
+        "issuer_note": "",
+        "technical_details": "{\n  \"trust_status\": \"TRUSTED\",\n  \"accepted\": true,\n  \"valid\": true,\n  \"integrity_valid\": true,\n  \"issuer_trusted\": true,\n  \"key_status\": \"active\",\n  \"chronology\": \"SIGNER_ASSERTED\",\n  \"signed_not_after\": null,\n  \"timestamp_status\": \"ABSENT\",\n  \"reasons\": [],\n  \"blocking_reasons\": [],\n  \"policy_id\": \"regaudit-fhe/development/v1\",\n  \"format\": \"v2\",\n  \"replay_scope\": \"NONE\",\n  \"replay_durable\": null,\n  \"consumption\": \"NOT_CHECKED\",\n  \"trust_history\": \"UNPROVEN\",\n  \"trust_store_as_of\": null,\n  \"issuer\": \"DEMO-ONLY synthetic issuer\",\n  \"key_id\": \"demo-only-synthetic-key\",\n  \"primitive\": \"drift\",\n  \"issued_at\": \"2026-10-01T09:00:00+00:00\",\n  \"regulations\": [\n    \"EU_AI_ACT_ART15\",\n    \"FDA_SAMD_PCCP\",\n    \"BASEL_III\"\n  ],\n  \"parameter_set_hash\": \"8e056d36f897f7949ce2fe7a3748fe5d6df6e62740715b115e642d8fee47e738\",\n  \"deployment_id\": \"demonstration-only\",\n  \"audit_run_id\": \"6d84bc73-3d77-5c8c-9540-c22f21efe5ee\"\n}"
+      },
+      "issuer": "Passed: this key is listed for this issuer in the demonstration trust list.",
+      "means": "This means it came from an issuer listed in the demonstration trust list and has not changed since it was signed. It does not mean the report's findings are correct.",
+      "reasons": [],
+      "signature": "Passed: the contents match the signature, checked with the key in the demonstration trust list.",
+      "verdict": "Signature and the demonstration trust list verified. This is not a regulatory certification and not proof of encrypted computation.",
+      "warnings": [
+        {
+          "code": "DEMONSTRATION_ONLY",
+          "message": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer."
+        },
+        {
+          "code": "REPLAY_NOT_RECORDED",
+          "message": "This check did not record the report as used, so the same report would pass here again. Do not rely on this result to stop a report being used twice."
+        },
+        {
+          "code": "REPLAY_NOT_DURABLE",
+          "message": "No durable local record of seen reports was available for this check."
+        },
+        {
+          "code": "TIME_NOT_INDEPENDENT",
+          "message": "The signing time is only what the signer stated."
+        },
+        {
+          "code": "TRUST_LIST_FRESHNESS_UNPROVEN",
+          "message": "Nothing proves the demonstration trust list is up to date. A key withdrawn elsewhere may not be marked in it."
+        }
+      ]
+    },
+    "fhe_notice": "Signature verification does not verify that any FHE (encrypted) computation was executed.",
+    "not_a_claim": "This checks a signature and the trust rules set by your administrator. It is not a regulatory certification and not proof of encrypted computation.",
+    "portal_version": "0.0.1",
+    "report_sha256": "47ca50c86842c833ee399aff2bff60f5088f5b18866e63ab90dbe26ec356b6f2",
+    "synthetic_demonstration": true,
+    "trust_mode": "demonstration",
+    "verification": {
+      "accepted": true,
+      "audit_run_id": "6d84bc73-3d77-5c8c-9540-c22f21efe5ee",
+      "blocking_reasons": [],
+      "chronology": "SIGNER_ASSERTED",
+      "consumption": "NOT_CHECKED",
+      "deployment_id": "demonstration-only",
+      "format": "v2",
+      "integrity_valid": true,
+      "issued_at": "2026-10-01T09:00:00+00:00",
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "issuer_trusted": true,
+      "key_id": "demo-only-synthetic-key",
+      "key_status": "active",
+      "parameter_set_hash": "8e056d36f897f7949ce2fe7a3748fe5d6df6e62740715b115e642d8fee47e738",
+      "policy_id": "regaudit-fhe/development/v1",
+      "primitive": "drift",
+      "reasons": [],
+      "regulations": [
+        "EU_AI_ACT_ART15",
+        "FDA_SAMD_PCCP",
+        "BASEL_III"
+      ],
+      "replay_durable": null,
+      "replay_scope": "NONE",
+      "signed_not_after": null,
+      "timestamp_status": "ABSENT",
+      "trust_history": "UNPROVEN",
+      "trust_status": "TRUSTED",
+      "trust_store_as_of": null,
+      "valid": true
+    }
+  },
+  "modified": {
+    "demonstration": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+      "notice": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer.",
+      "sample": {
+        "id": "modified",
+        "title": "A report changed after it was signed"
+      },
+      "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator"
+    },
+    "demonstration_label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+    "encryption_declarations": {
+      "backend": "plaintext",
+      "backend_shortened": false,
+      "encryption_verified": false,
+      "kind": "PLAINTEXT",
+      "note": "The report was not accepted, so these statements are only what the file says. Nothing has established them. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
+      "security_bits": 128,
+      "security_bits_note": "legacy field, not a security level",
+      "security_bits_state": "SHOWN",
+      "security_bits_text": "128 (legacy field, not a security level)",
+      "statement": "No encryption: this report states it was computed on plaintext."
+    },
+    "engine": {
+      "api": "regaudit_fhe.verify_report",
+      "check_scope": "This comparison covers the installed source files only. It does not show which code is actually running, and it is not a defence against a tampered environment.",
+      "installed_distribution_version": "0.2.1",
+      "name": "regaudit-fhe",
+      "release_files": "IDENTICAL",
+      "required_version": "0.2.1",
+      "security_limitation": "Security limitation \u2014 published v0.2.1\n\nPublished regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.\n\nUsers with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.\n\nThese protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.",
+      "security_limitation_short": "Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator.",
+      "summary": "Verdicts are produced by regaudit-fhe 0.2.1, using its published verification API (regaudit_fhe.verify_report). Its installed source files are identical to the published 0.2.1 release, checked when the portal started and again before each verification.",
+      "version": "0.2.1"
+    },
+    "explanation": {
+      "display": {
+        "issued_at": "2026-10-01T09:00:00+00:00",
+        "issuer": "DEMO-ONLY synthetic issuer",
+        "issuer_note": "as stated in the report, not confirmed",
+        "technical_details": "{\n  \"trust_status\": \"INVALID\",\n  \"accepted\": false,\n  \"valid\": false,\n  \"integrity_valid\": false,\n  \"issuer_trusted\": false,\n  \"key_status\": \"active\",\n  \"chronology\": \"NONE\",\n  \"signed_not_after\": null,\n  \"timestamp_status\": \"ABSENT\",\n  \"reasons\": [\n    \"HASH_MISMATCH\",\n    \"SIGNATURE_INVALID\"\n  ],\n  \"blocking_reasons\": [\n    \"HASH_MISMATCH\",\n    \"SIGNATURE_INVALID\"\n  ],\n  \"policy_id\": \"regaudit-fhe/development/v1\",\n  \"format\": \"v2\",\n  \"replay_scope\": \"NONE\",\n  \"replay_durable\": null,\n  \"consumption\": \"NOT_CHECKED\",\n  \"trust_history\": \"UNPROVEN\",\n  \"trust_store_as_of\": null,\n  \"issuer\": \"DEMO-ONLY synthetic issuer\",\n  \"key_id\": \"demo-only-synthetic-key\",\n  \"primitive\": \"drift\",\n  \"issued_at\": \"2026-10-01T09:00:00+00:00\",\n  \"regulations\": [\n    \"EU_AI_ACT_ART15\",\n    \"FDA_SAMD_PCCP\",\n    \"BASEL_III\"\n  ],\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"deployment_id\": \"changed-after-signing\",\n  \"audit_run_id\": \"ac830432-a71a-5d2d-b2bd-5ca170f4abab\"\n}"
+      },
+      "issuer": "Not confirmed, because the signature check failed.",
+      "means": null,
+      "reasons": [
+        {
+          "blocking": true,
+          "code": "HASH_MISMATCH",
+          "meaning": "The report's contents do not match what was signed. It may have been changed after signing."
+        },
+        {
+          "blocking": true,
+          "code": "SIGNATURE_INVALID",
+          "meaning": "The signature does not check out against the key. The report may have been changed."
+        }
+      ],
+      "signature": "Failed: the contents and signature do not match. The report may have been changed.",
+      "verdict": "Not accepted. The report's contents do not match what was signed. It may have been changed after signing. This is a demonstration, so there is nothing to act on.",
+      "warnings": [
+        {
+          "code": "DEMONSTRATION_ONLY",
+          "message": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer."
+        },
+        {
+          "code": "ISSUER_NOT_ASSURED",
+          "message": "This report could not be tied to an issuer listed in the demonstration trust list."
+        }
+      ]
+    },
+    "fhe_notice": "Signature verification does not verify that any FHE (encrypted) computation was executed.",
+    "not_a_claim": "This checks a signature and the trust rules set by your administrator. It is not a regulatory certification and not proof of encrypted computation.",
+    "portal_version": "0.0.1",
+    "report_sha256": "61708d217ced50ad57d114dc30ab01dec8930c9a358fbab0a8a1f9e8e4ba0920",
+    "synthetic_demonstration": true,
+    "trust_mode": "demonstration",
+    "verification": {
+      "accepted": false,
+      "audit_run_id": "ac830432-a71a-5d2d-b2bd-5ca170f4abab",
+      "blocking_reasons": [
+        "HASH_MISMATCH",
+        "SIGNATURE_INVALID"
+      ],
+      "chronology": "NONE",
+      "consumption": "NOT_CHECKED",
+      "deployment_id": "changed-after-signing",
+      "format": "v2",
+      "integrity_valid": false,
+      "issued_at": "2026-10-01T09:00:00+00:00",
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "issuer_trusted": false,
+      "key_id": "demo-only-synthetic-key",
+      "key_status": "active",
+      "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+      "policy_id": "regaudit-fhe/development/v1",
+      "primitive": "drift",
+      "reasons": [
+        "HASH_MISMATCH",
+        "SIGNATURE_INVALID"
+      ],
+      "regulations": [
+        "EU_AI_ACT_ART15",
+        "FDA_SAMD_PCCP",
+        "BASEL_III"
+      ],
+      "replay_durable": null,
+      "replay_scope": "NONE",
+      "signed_not_after": null,
+      "timestamp_status": "ABSENT",
+      "trust_history": "UNPROVEN",
+      "trust_status": "INVALID",
+      "trust_store_as_of": null,
+      "valid": false
+    }
+  },
+  "plaintext-backend": {
+    "demonstration": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+      "notice": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer.",
+      "sample": {
+        "id": "plaintext-backend",
+        "title": "A report that says it was computed on plaintext"
+      },
+      "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator"
+    },
+    "demonstration_label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+    "encryption_declarations": {
+      "backend": "plaintext",
+      "backend_shortened": false,
+      "encryption_verified": false,
+      "kind": "PLAINTEXT",
+      "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
+      "security_bits": 128,
+      "security_bits_note": "legacy field, not a security level",
+      "security_bits_state": "SHOWN",
+      "security_bits_text": "128 (legacy field, not a security level)",
+      "statement": "No encryption: this report states it was computed on plaintext."
+    },
+    "engine": {
+      "api": "regaudit_fhe.verify_report",
+      "check_scope": "This comparison covers the installed source files only. It does not show which code is actually running, and it is not a defence against a tampered environment.",
+      "installed_distribution_version": "0.2.1",
+      "name": "regaudit-fhe",
+      "release_files": "IDENTICAL",
+      "required_version": "0.2.1",
+      "security_limitation": "Security limitation \u2014 published v0.2.1\n\nPublished regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.\n\nUsers with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.\n\nThese protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.",
+      "security_limitation_short": "Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator.",
+      "summary": "Verdicts are produced by regaudit-fhe 0.2.1, using its published verification API (regaudit_fhe.verify_report). Its installed source files are identical to the published 0.2.1 release, checked when the portal started and again before each verification.",
+      "version": "0.2.1"
+    },
+    "explanation": {
+      "display": {
+        "issued_at": "2026-10-01T09:00:00+00:00",
+        "issuer": "DEMO-ONLY synthetic issuer",
+        "issuer_note": "",
+        "technical_details": "{\n  \"trust_status\": \"TRUSTED\",\n  \"accepted\": true,\n  \"valid\": true,\n  \"integrity_valid\": true,\n  \"issuer_trusted\": true,\n  \"key_status\": \"active\",\n  \"chronology\": \"SIGNER_ASSERTED\",\n  \"signed_not_after\": null,\n  \"timestamp_status\": \"ABSENT\",\n  \"reasons\": [],\n  \"blocking_reasons\": [],\n  \"policy_id\": \"regaudit-fhe/development/v1\",\n  \"format\": \"v2\",\n  \"replay_scope\": \"NONE\",\n  \"replay_durable\": null,\n  \"consumption\": \"NOT_CHECKED\",\n  \"trust_history\": \"UNPROVEN\",\n  \"trust_store_as_of\": null,\n  \"issuer\": \"DEMO-ONLY synthetic issuer\",\n  \"key_id\": \"demo-only-synthetic-key\",\n  \"primitive\": \"fairness\",\n  \"issued_at\": \"2026-10-01T09:00:00+00:00\",\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"deployment_id\": \"demonstration-only\",\n  \"audit_run_id\": \"271effd5-e019-5870-9284-67900b984da4\"\n}"
+      },
+      "issuer": "Passed: this key is listed for this issuer in the demonstration trust list.",
+      "means": "This means it came from an issuer listed in the demonstration trust list and has not changed since it was signed. It does not mean the report's findings are correct.",
+      "reasons": [],
+      "signature": "Passed: the contents match the signature, checked with the key in the demonstration trust list.",
+      "verdict": "Signature and the demonstration trust list verified. This is not a regulatory certification and not proof of encrypted computation.",
+      "warnings": [
+        {
+          "code": "DEMONSTRATION_ONLY",
+          "message": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer."
+        },
+        {
+          "code": "REPLAY_NOT_RECORDED",
+          "message": "This check did not record the report as used, so the same report would pass here again. Do not rely on this result to stop a report being used twice."
+        },
+        {
+          "code": "REPLAY_NOT_DURABLE",
+          "message": "No durable local record of seen reports was available for this check."
+        },
+        {
+          "code": "TIME_NOT_INDEPENDENT",
+          "message": "The signing time is only what the signer stated."
+        },
+        {
+          "code": "TRUST_LIST_FRESHNESS_UNPROVEN",
+          "message": "Nothing proves the demonstration trust list is up to date. A key withdrawn elsewhere may not be marked in it."
+        }
+      ]
+    },
+    "fhe_notice": "Signature verification does not verify that any FHE (encrypted) computation was executed.",
+    "not_a_claim": "This checks a signature and the trust rules set by your administrator. It is not a regulatory certification and not proof of encrypted computation.",
+    "portal_version": "0.0.1",
+    "report_sha256": "509bec2337c898a452e0ba4baf5be7357940967651ebb98041277817350b9e92",
+    "synthetic_demonstration": true,
+    "trust_mode": "demonstration",
+    "verification": {
+      "accepted": true,
+      "audit_run_id": "271effd5-e019-5870-9284-67900b984da4",
+      "blocking_reasons": [],
+      "chronology": "SIGNER_ASSERTED",
+      "consumption": "NOT_CHECKED",
+      "deployment_id": "demonstration-only",
+      "format": "v2",
+      "integrity_valid": true,
+      "issued_at": "2026-10-01T09:00:00+00:00",
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "issuer_trusted": true,
+      "key_id": "demo-only-synthetic-key",
+      "key_status": "active",
+      "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+      "policy_id": "regaudit-fhe/development/v1",
+      "primitive": "fairness",
+      "reasons": [],
+      "regulations": [
+        "NYC_LL144",
+        "EU_AI_ACT_ART10",
+        "EU_AI_ACT_ART15",
+        "COLORADO_AI_ACT",
+        "CFPB_ALG_DISCRIM"
+      ],
+      "replay_durable": null,
+      "replay_scope": "NONE",
+      "signed_not_after": null,
+      "timestamp_status": "ABSENT",
+      "trust_history": "UNPROVEN",
+      "trust_status": "TRUSTED",
+      "trust_store_as_of": null,
+      "valid": true
+    }
+  },
+  "trusted": {
+    "demonstration": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+      "notice": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer.",
+      "sample": {
+        "id": "trusted",
+        "title": "A report from the demonstration issuer"
+      },
+      "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator"
+    },
+    "demonstration_label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+    "encryption_declarations": {
+      "backend": "plaintext",
+      "backend_shortened": false,
+      "encryption_verified": false,
+      "kind": "PLAINTEXT",
+      "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
+      "security_bits": 128,
+      "security_bits_note": "legacy field, not a security level",
+      "security_bits_state": "SHOWN",
+      "security_bits_text": "128 (legacy field, not a security level)",
+      "statement": "No encryption: this report states it was computed on plaintext."
+    },
+    "engine": {
+      "api": "regaudit_fhe.verify_report",
+      "check_scope": "This comparison covers the installed source files only. It does not show which code is actually running, and it is not a defence against a tampered environment.",
+      "installed_distribution_version": "0.2.1",
+      "name": "regaudit-fhe",
+      "release_files": "IDENTICAL",
+      "required_version": "0.2.1",
+      "security_limitation": "Security limitation \u2014 published v0.2.1\n\nPublished regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.\n\nUsers with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.\n\nThese protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.",
+      "security_limitation_short": "Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator.",
+      "summary": "Verdicts are produced by regaudit-fhe 0.2.1, using its published verification API (regaudit_fhe.verify_report). Its installed source files are identical to the published 0.2.1 release, checked when the portal started and again before each verification.",
+      "version": "0.2.1"
+    },
+    "explanation": {
+      "display": {
+        "issued_at": "2026-10-01T09:00:00+00:00",
+        "issuer": "DEMO-ONLY synthetic issuer",
+        "issuer_note": "",
+        "technical_details": "{\n  \"trust_status\": \"TRUSTED\",\n  \"accepted\": true,\n  \"valid\": true,\n  \"integrity_valid\": true,\n  \"issuer_trusted\": true,\n  \"key_status\": \"active\",\n  \"chronology\": \"SIGNER_ASSERTED\",\n  \"signed_not_after\": null,\n  \"timestamp_status\": \"ABSENT\",\n  \"reasons\": [],\n  \"blocking_reasons\": [],\n  \"policy_id\": \"regaudit-fhe/development/v1\",\n  \"format\": \"v2\",\n  \"replay_scope\": \"NONE\",\n  \"replay_durable\": null,\n  \"consumption\": \"NOT_CHECKED\",\n  \"trust_history\": \"UNPROVEN\",\n  \"trust_store_as_of\": null,\n  \"issuer\": \"DEMO-ONLY synthetic issuer\",\n  \"key_id\": \"demo-only-synthetic-key\",\n  \"primitive\": \"drift\",\n  \"issued_at\": \"2026-10-01T09:00:00+00:00\",\n  \"regulations\": [\n    \"EU_AI_ACT_ART15\",\n    \"FDA_SAMD_PCCP\",\n    \"BASEL_III\"\n  ],\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"deployment_id\": \"demonstration-only\",\n  \"audit_run_id\": \"ac830432-a71a-5d2d-b2bd-5ca170f4abab\"\n}"
+      },
+      "issuer": "Passed: this key is listed for this issuer in the demonstration trust list.",
+      "means": "This means it came from an issuer listed in the demonstration trust list and has not changed since it was signed. It does not mean the report's findings are correct.",
+      "reasons": [],
+      "signature": "Passed: the contents match the signature, checked with the key in the demonstration trust list.",
+      "verdict": "Signature and the demonstration trust list verified. This is not a regulatory certification and not proof of encrypted computation.",
+      "warnings": [
+        {
+          "code": "DEMONSTRATION_ONLY",
+          "message": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer."
+        },
+        {
+          "code": "REPLAY_NOT_RECORDED",
+          "message": "This check did not record the report as used, so the same report would pass here again. Do not rely on this result to stop a report being used twice."
+        },
+        {
+          "code": "REPLAY_NOT_DURABLE",
+          "message": "No durable local record of seen reports was available for this check."
+        },
+        {
+          "code": "TIME_NOT_INDEPENDENT",
+          "message": "The signing time is only what the signer stated."
+        },
+        {
+          "code": "TRUST_LIST_FRESHNESS_UNPROVEN",
+          "message": "Nothing proves the demonstration trust list is up to date. A key withdrawn elsewhere may not be marked in it."
+        }
+      ]
+    },
+    "fhe_notice": "Signature verification does not verify that any FHE (encrypted) computation was executed.",
+    "not_a_claim": "This checks a signature and the trust rules set by your administrator. It is not a regulatory certification and not proof of encrypted computation.",
+    "portal_version": "0.0.1",
+    "report_sha256": "888cf11fb94c8702a65955a711a5ce65d09c14c069bcc5cbd1d622acec89ea65",
+    "synthetic_demonstration": true,
+    "trust_mode": "demonstration",
+    "verification": {
+      "accepted": true,
+      "audit_run_id": "ac830432-a71a-5d2d-b2bd-5ca170f4abab",
+      "blocking_reasons": [],
+      "chronology": "SIGNER_ASSERTED",
+      "consumption": "NOT_CHECKED",
+      "deployment_id": "demonstration-only",
+      "format": "v2",
+      "integrity_valid": true,
+      "issued_at": "2026-10-01T09:00:00+00:00",
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "issuer_trusted": true,
+      "key_id": "demo-only-synthetic-key",
+      "key_status": "active",
+      "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+      "policy_id": "regaudit-fhe/development/v1",
+      "primitive": "drift",
+      "reasons": [],
+      "regulations": [
+        "EU_AI_ACT_ART15",
+        "FDA_SAMD_PCCP",
+        "BASEL_III"
+      ],
+      "replay_durable": null,
+      "replay_scope": "NONE",
+      "signed_not_after": null,
+      "timestamp_status": "ABSENT",
+      "trust_history": "UNPROVEN",
+      "trust_status": "TRUSTED",
+      "trust_store_as_of": null,
+      "valid": true
+    }
+  },
+  "untrusted-signer": {
+    "demonstration": {
+      "issuer": "DEMO-ONLY synthetic issuer",
+      "label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+      "notice": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer.",
+      "sample": {
+        "id": "untrusted-signer",
+        "title": "A report signed by a key nobody enrolled"
+      },
+      "trust_list": "a demonstration trust list bundled with the portal, not set up by any administrator"
+    },
+    "demonstration_label": "DEMONSTRATION \u2014 NOT CUSTOMER-TRUSTED",
+    "encryption_declarations": {
+      "backend": "plaintext",
+      "backend_shortened": false,
+      "encryption_verified": false,
+      "kind": "PLAINTEXT",
+      "note": "The report was not accepted, so these statements are only what the file says. Nothing has established them. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
+      "security_bits": 128,
+      "security_bits_note": "legacy field, not a security level",
+      "security_bits_state": "SHOWN",
+      "security_bits_text": "128 (legacy field, not a security level)",
+      "statement": "No encryption: this report states it was computed on plaintext."
+    },
+    "engine": {
+      "api": "regaudit_fhe.verify_report",
+      "check_scope": "This comparison covers the installed source files only. It does not show which code is actually running, and it is not a defence against a tampered environment.",
+      "installed_distribution_version": "0.2.1",
+      "name": "regaudit-fhe",
+      "release_files": "IDENTICAL",
+      "required_version": "0.2.1",
+      "security_limitation": "Security limitation \u2014 published v0.2.1\n\nPublished regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.\n\nUsers with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.\n\nThese protections are not included in the published v0.2.1 package. Do not rely on that version for security guarantees requiring them.",
+      "security_limitation_short": "Published v0.2.1 does not enforce strict ownership and permission protections for the local trust-store and replay-state files. A valid signature does not prove the key was enrolled by an authenticated administrator.",
+      "summary": "Verdicts are produced by regaudit-fhe 0.2.1, using its published verification API (regaudit_fhe.verify_report). Its installed source files are identical to the published 0.2.1 release, checked when the portal started and again before each verification.",
+      "version": "0.2.1"
+    },
+    "explanation": {
+      "display": {
+        "issued_at": "2026-10-01T09:00:00+00:00",
+        "issuer": "DEMO-ONLY unenrolled signer",
+        "issuer_note": "as stated in the report, not confirmed",
+        "technical_details": "{\n  \"trust_status\": \"INVALID\",\n  \"accepted\": false,\n  \"valid\": false,\n  \"integrity_valid\": false,\n  \"issuer_trusted\": false,\n  \"key_status\": \"unknown\",\n  \"chronology\": \"NONE\",\n  \"signed_not_after\": null,\n  \"timestamp_status\": \"ABSENT\",\n  \"reasons\": [\n    \"ISSUER_UNKNOWN\"\n  ],\n  \"blocking_reasons\": [\n    \"ISSUER_UNKNOWN\"\n  ],\n  \"policy_id\": \"regaudit-fhe/development/v1\",\n  \"format\": \"v2\",\n  \"replay_scope\": \"NONE\",\n  \"replay_durable\": null,\n  \"consumption\": \"NOT_CHECKED\",\n  \"trust_history\": \"UNPROVEN\",\n  \"trust_store_as_of\": null,\n  \"issuer\": \"DEMO-ONLY unenrolled signer\",\n  \"key_id\": \"demo-only-unenrolled-key\",\n  \"primitive\": \"drift\",\n  \"issued_at\": \"2026-10-01T09:00:00+00:00\",\n  \"regulations\": [\n    \"EU_AI_ACT_ART15\",\n    \"FDA_SAMD_PCCP\",\n    \"BASEL_III\"\n  ],\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"deployment_id\": \"demonstration-only\",\n  \"audit_run_id\": \"e75aedb8-4d3d-5fc9-9788-f53dd6de3010\"\n}"
+      },
+      "issuer": "Failed: not trusted. A valid signature alone does not make an issuer trusted.",
+      "means": null,
+      "reasons": [
+        {
+          "blocking": true,
+          "code": "ISSUER_UNKNOWN",
+          "meaning": "The signing key is not in the demonstration trust list."
+        }
+      ],
+      "signature": "Not checked: this key is not on the demonstration trust list, so there is no enrolled key to check it with.",
+      "verdict": "Not accepted. The signing key is not in the demonstration trust list. This is a demonstration, so there is nothing to act on.",
+      "warnings": [
+        {
+          "code": "DEMONSTRATION_ONLY",
+          "message": "This is a synthetic demonstration. The report was made with made-up data and checked against a demonstration trust list. It says nothing about any real report or issuer."
+        },
+        {
+          "code": "ISSUER_NOT_ASSURED",
+          "message": "This report could not be tied to an issuer listed in the demonstration trust list."
+        }
+      ]
+    },
+    "fhe_notice": "Signature verification does not verify that any FHE (encrypted) computation was executed.",
+    "not_a_claim": "This checks a signature and the trust rules set by your administrator. It is not a regulatory certification and not proof of encrypted computation.",
+    "portal_version": "0.0.1",
+    "report_sha256": "dc57e0c77014eece705c4c3b27c3e40a4e1ddf645382a512047553fd2f121d0d",
+    "synthetic_demonstration": true,
+    "trust_mode": "demonstration",
+    "verification": {
+      "accepted": false,
+      "audit_run_id": "e75aedb8-4d3d-5fc9-9788-f53dd6de3010",
+      "blocking_reasons": [
+        "ISSUER_UNKNOWN"
+      ],
+      "chronology": "NONE",
+      "consumption": "NOT_CHECKED",
+      "deployment_id": "demonstration-only",
+      "format": "v2",
+      "integrity_valid": false,
+      "issued_at": "2026-10-01T09:00:00+00:00",
+      "issuer": "DEMO-ONLY unenrolled signer",
+      "issuer_trusted": false,
+      "key_id": "demo-only-unenrolled-key",
+      "key_status": "unknown",
+      "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+      "policy_id": "regaudit-fhe/development/v1",
+      "primitive": "drift",
+      "reasons": [
+        "ISSUER_UNKNOWN"
+      ],
+      "regulations": [
+        "EU_AI_ACT_ART15",
+        "FDA_SAMD_PCCP",
+        "BASEL_III"
+      ],
+      "replay_durable": null,
+      "replay_scope": "NONE",
+      "signed_not_after": null,
+      "timestamp_status": "ABSENT",
+      "trust_history": "UNPROVEN",
+      "trust_status": "INVALID",
+      "trust_store_as_of": null,
+      "valid": false
+    }
+  }
+}

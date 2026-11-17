@@ -31,6 +31,7 @@
     <section class="panel">
       <h2>This page only reads</h2>
       <p>It shows what is set up and what is not, and it explains what an administrator has to prepare. It does not create or change anything: no trust list, no key, no setting, no approval. It never asks for a signing key and never shows one.</p>
+      <p id="trust-mode" class="statement" role="status"></p>
       <p id="own-reports" class="statement"></p>
     </section>
 
@@ -40,12 +41,48 @@
       <dl id="rows" class="checks"></dl>
     </section>
 
+    <section id="enrolled" class="panel" hidden>
+      <h2>Enrolled issuers</h2>
+      <p>The issuers named in the trust list, with the status the list gives each. Only active keys are accepted. This page only reads the list. To add issuers, see How to set up below.</p>
+      <table class="issuers">
+        <thead><tr><th scope="col">Issuer</th><th scope="col">Key id</th><th scope="col">Status</th></tr></thead>
+        <tbody id="enrolled-rows"></tbody>
+      </table>
+      <p class="fine">No fingerprint is shown here, on purpose. Check each fingerprint with its issuer by a call or another route, never from this computer.</p>
+    </section>
+
+    <section class="panel">
+      <h2>How to set up</h2>
+      <p>First prepare a setup plan in the browser, on the <a href="/setup/plan">Prepare a setup plan</a> page. It checks the plan, shows exactly what applying it would write and gives it to you as a file. It writes nothing, keeps nothing and enrols nothing.</p>
+      <p>Then you apply the plan yourself, outside the browser, and type each issuer's fingerprint again, as the issuer gave it to you. The plan is applied only if every one matches the key in it. No page and no request of this portal can apply a plan. The browser cannot create or change the trust list. The Prepare a setup plan page only makes a plan file, and this page does not do that either.</p>
+      <div id="steps-app">
+        <h3>If you started the portal from the application: no Terminal needed</h3>
+        <ol>
+          <li>On the <a href="/setup/plan">Prepare a setup plan</a> page, fill in the form and save the plan file it gives you.</li>
+          <li>Bring the application to the front: click its icon in the Dock, or hold Command and press Tab until it is chosen. The application has no window of its own, so nothing new opens. Its menu is in the menu bar at the top of the screen while the application is in front. Clicking the Dock icon also opens the portal in a new browser tab. That is expected.</li>
+          <li>In the menu bar at the top of the screen, click <strong>Evidence Verification Portal</strong>, next to the Apple menu, then click <strong>Administrator setup&hellip;</strong> in that menu.</li>
+          <li>Choose the setup plan you saved.</li>
+          <li>Read what the plan would do. In each box, type the fingerprint that issuer gave you by a call or another route. Do not copy it from this computer. Then click <strong>Apply</strong>.</li>
+          <li>When the plan has been applied, the portal restarts and opens again in a new browser tab, and this tab stops working. Look at the Setup page in the new tab to see the result.</li>
+        </ol>
+      </div>
+      <div id="steps-plain">
+        <h3>If you installed the portal with pip: Terminal</h3>
+        <p>An install with pip has no application and no menu. There, a plan is applied in Terminal, and that is the only way, by design: the browser can prepare a plan but cannot apply it.</p>
+        <ol>
+          <li>On the <a href="/setup/plan">Prepare a setup plan</a> page, fill in the form and save the plan file it gives you.</li>
+          <li>Open <strong>Manual setup in Terminal (advanced)</strong> below. In Terminal, look at the plan with the admin-describe command, then apply it with the admin-apply command and the fingerprint each issuer gave you.</li>
+          <li>Restart the portal and look at this page again.</li>
+        </ol>
+      </div>
+    </section>
+
     <section class="panel">
       <h2>What an administrator has to prepare</h2>
       <ol>
         <li><strong>The issuers' fingerprints.</strong> Ask each issuer whose reports you will accept for the fingerprint of their public key, and for the public key file. They must reach you by another route than the report itself, such as a call or a signed message. A report cannot vouch for its own key.</li>
-        <li><strong>A trust list.</strong> A file that lists the keys you accept, each with the name of its issuer. It is made with the command below, once for each key.</li>
-        <li><strong>A configuration file</strong> that names the trust list and your rules: the profile, your verifier name, the oldest report you accept and how repeats are handled.</li>
+        <li><strong>A trust list.</strong> A file that lists the keys you accept, each with the name of its issuer. Applying a setup plan makes it. It can also be made by hand in Terminal, once for each key.</li>
+        <li><strong>A configuration file</strong> that names the trust list and your rules: the profile, your verifier name, the oldest report you accept and how repeats are handled. Applying a setup plan writes it too.</li>
       </ol>
     </section>
 
@@ -54,24 +91,31 @@
       <p>Put both files in one folder that only your account can change. On this computer the standard folder is:</p>
       <p><code id="folder"></code></p>
       <p>The configuration file is called <code id="file-name"></code>. The trust list goes next to it, and the configuration names it. The folder must belong to your account and must not be writable by group or others. The portal checks this when it starts and gives no verdicts for your own reports if it is not so. Restart the portal after any change.</p>
-      <p>An example of the configuration file:</p>
-      <pre>{
+    </section>
+
+    <section class="panel">
+      <details id="manual">
+        <summary>Manual setup in Terminal (advanced)</summary>
+        <h3>The commands that make the trust list</h3>
+        <p id="cmd-intro">Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. It refuses a key whose fingerprint does not match the one you received.</p>
+        <pre id="cmd-trust-add">regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
+  --public-key issuer.pub --fingerprint FINGERPRINT</pre>
+        <p>To look at the result, run <code id="cmd-check-config">regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
+        <p>To apply a setup plan in Terminal, look at it first, then apply it with the fingerprint each issuer gave you. Applying refuses to replace an existing configuration or trust list, and it never removes, revokes or replaces a key.</p>
+        <pre id="cmd-admin-describe">regaudit-portal admin-describe setup-plan.json</pre>
+        <pre id="cmd-admin-apply">regaudit-portal admin-apply setup-plan.json \
+  --expect-fingerprint KEY_ID=FINGERPRINT_FROM_THE_ISSUER</pre>
+        <h3>An example of the configuration file</h3>
+        <pre>{
   "trust_store": "trust-store.json",
   "profile": "confidential",
   "verifier_id": "your-organization",
   "max_age_days": 30,
   "replay_mode": "check",
-  "replay_db": "replay.db"
+  "replay_db": "replay.db",
+  "trust_mode": "customer"
 }</pre>
-    </section>
-
-    <section class="panel">
-      <h2>The commands that make the trust list</h2>
-      <p id="cmd-intro">Run this once for each issuer key, in the folder above, with the same Python environment the portal is installed in. It refuses a key whose fingerprint does not match the one you received.</p>
-      <pre id="cmd-trust-add">regaudit-fhe trust add --store trust-store.json --key-id KEY_ID --issuer "ISSUER NAME" \
-  --public-key issuer.pub --fingerprint FINGERPRINT</pre>
-      <p>To look at the result, run <code id="cmd-check-config">regaudit-portal check-config</code>. It tells you whether the configuration can be used and says why not if it cannot.</p>
-      <p><strong>For now, making the trust list needs these commands.</strong> Creating it in the browser would be a separate change that has to be designed and reviewed on its own. This page does not do it.</p>
+      </details>
     </section>
 
     <section class="panel">

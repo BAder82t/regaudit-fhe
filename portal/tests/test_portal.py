@@ -415,9 +415,12 @@ def test_the_browser_has_no_way_to_change_the_configuration(client, demo):
         "/static/fonts/{name}",
         "/security",
         "/setup",
+        "/setup/plan",
         "/api/setup",
+        "/api/setup/plan",
         "/api/status",
         "/api/verify",
+        "/api/verify-batch",
         "/api/samples/{sample_id}/verify",
     }
     for method, path in (
@@ -767,4 +770,8 @@ def test_the_next_command_that_demo_setup_prints_works_exactly_as_typed(tmp_path
     checked = subprocess.run(  # noqa: S603 - the argv is the printed command
         typed, capture_output=True, text=True, timeout=60, check=False, env=env, cwd=elsewhere
     )
-    assert checked.returncode == 0 and checked.stdout.startswith("usable: "), checked.stderr
+    # The command found and read the configuration. It is a demonstration, so it is not usable for your own reports.
+    assert checked.returncode == 3, checked.stderr
+    assert checked.stderr.startswith(
+        "not usable for your own reports: the trust list is a demonstration"
+    )

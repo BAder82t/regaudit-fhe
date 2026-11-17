@@ -145,7 +145,7 @@ def test_the_demonstration_policy_checks_a_sample_and_the_administrators_policy_
     seen = _policy_keys(monkeypatch)
     check_sample(client, "trusted")
     post(client, demo, "1-trusted.json")
-    assert seen == [{DEMO_KEY_ID}, {"synthetic-issuer-key"}]
+    assert seen == [{DEMO_KEY_ID}, {"northwind-test-key"}]
 
 
 @pytest.mark.parametrize("sample_id", SAMPLE_IDS)
@@ -155,9 +155,7 @@ def test_a_sample_report_uploaded_as_your_own_is_checked_against_the_administrat
     seen = _policy_keys(monkeypatch)
     raw = (SAMPLES / "reports" / f"{sample_id}.json").read_bytes()
     body = post_bytes(client, raw).json()
-    assert seen == [{"synthetic-issuer-key"}], (
-        "the administrator's policy, never the demonstration's"
-    )
+    assert seen == [{"northwind-test-key"}], "the configured policy, never the samples' own"
     assert (
         body["verification"]["trust_status"] == "INVALID"
         and body["verification"]["accepted"] is False
@@ -206,7 +204,7 @@ def test_only_the_sample_route_ever_touches_the_demonstration_policy():
 
     Visitor().visit(ast.parse((PACKAGE / "app.py").read_text()))
     assert users["samples"] == {"check_sample"}, users
-    assert users["portal"] <= {"check", "_status_body"}, users
+    assert users["portal"] <= {"judge", "_status_body"}, users
     source = (PACKAGE / "app.py").read_text()
     assert "demonstration_policy" not in source and "load_samples()" in source
 

@@ -357,16 +357,40 @@ def test_no_option_flag_or_environment_variable_can_change_which_engine_is_accep
     for path in package.glob("*.py"):
         text = path.read_text()
         assert "os.environ" not in text and "getenv" not in text, path.name
-    flags = set(re.findall(r'add_argument\(\s*"(-[-a-z]+)"', (package / "__main__.py").read_text()))
+    flags = set(
+        re.findall(r'add_argument\(\s*"(-[-a-z0-9]+)"', (package / "__main__.py").read_text())
+    )
     # --exit-when-input-closes is about shutdown only (a launcher that dies takes the portal with it). The assertion
     # below keeps it that way: its code must not mention the engine, its check or its identity.
-    assert flags == {"--config", "--port", "--exit-when-input-closes"}
+    # --wait-for-instance is about the instance lock only (how long a restarted portal waits for the old one to let go of it).
+    # The administrator commands' options choose a folder, an output format, the typed fingerprints and the plan's
+    # checksum. The same engine check runs before either command does anything (test_admin.py checks that).
+    assert flags == {
+        "--config",
+        "--port",
+        "--exit-when-input-closes",
+        "--wait-for-instance",
+        "--config-folder",
+        "--json",
+        "--expect-fingerprint",
+        "--expect-plan-sha256",
+    }
     import inspect
 
     from regaudit_portal import __main__ as entry
 
     watcher = inspect.getsource(entry._stop_when_input_closes).lower()
     assert "engine" not in watcher and "digest" not in watcher and "identity" not in watcher
+    # The instance lock decides only whether a second portal may start for the same folder. It has nothing to do with the engine.
+    lock_code = (
+        inspect.getsource(entry._take_instance).lower()
+        + (package / "instance.py").read_text().lower()
+    )
+    assert (
+        "check_engine" not in lock_code
+        and "files_digest" not in lock_code
+        and "identity" not in lock_code
+    )
     monkeypatch.setattr(engine_module, "files_digest", _crashes)
     for name in (
         "REGAUDIT_PORTAL_ALLOW_ANY_ENGINE",

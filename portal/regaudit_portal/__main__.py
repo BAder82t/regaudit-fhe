@@ -1,4 +1,5 @@
-"""``regaudit-portal serve``, ``check-config`` and ``demo-setup``. Only the administrator, or a launcher, uses these.
+"""``regaudit-portal serve``, ``check-config``, ``demo-setup``, ``admin-describe`` and ``admin-apply``. Only the
+administrator, or a launcher, uses these.
 
 ``serve`` without ``--config`` looks for the configuration in the standard per-user folder. If there is none it starts in
 welcome mode, where the bundled samples work and your own reports are not set up. It never creates that folder or
@@ -33,6 +34,9 @@ from . import STOP_DEADLINE_SECONDS, STOPPED, _leave_now, _say_when_stopped, _st
 from .engine import REINSTALL, check_engine
 from .paths import default_config_path, display_path
 
+# Held for as long as this process serves, so that a second portal for the same account and folder cannot start (F-022).
+_instance: object | None = None
+
 HOST = "127.0.0.1"  # local only: this first version has no sign-in, so it must not be reachable from a network
 
 
@@ -40,6 +44,7 @@ def listening_line(port: int, mode: str) -> str:
     """One line a launcher can read: where the portal is and which mode it is in.
 
     ``mode`` is ``ready`` (your own reports can be checked), ``welcome`` (no configuration: the samples work),
+    ``demonstration`` (the trust list is a demonstration: files are checked only as a demonstration),
     ``needs-attention`` (a configuration that cannot be used: the samples work) or ``unavailable`` (the engine check
     failed: only a page saying so is served).
     """
@@ -58,6 +63,11 @@ def started_message(mode: str, port: int) -> str:
         return (
             f"{opening} The samples work, but your own reports cannot be checked until the configuration is fixed. "
             "Run check-config with the same --config to see why. Press Ctrl-C to stop."
+        )
+    if mode == "demonstration":
+        return (
+            f"{opening} The trust list is a demonstration, not trust set up by an administrator: files are checked "
+            "against it only as a demonstration, and every result says so. Press Ctrl-C to stop."
         )
     return f"{opening} Press Ctrl-C to stop."
 
@@ -276,6 +286,42 @@ def portal_command(argv0: str, python: str) -> str:
     return shlex.quote(os.path.abspath(argv0))
 
 
+def _config_root(given: str | None) -> str:
+    """The folder whose trust list and replay file this portal would use: the folder of ``--config``, else the standard one."""
+    if given is not None:
+        return os.path.dirname(os.path.abspath(given))
+    try:
+        return str(default_config_path().parent)
+    except RuntimeError:  # no home folder
+        return "(no home folder)"
+
+
+def _take_instance(args: argparse.Namespace) -> int | None:
+    """Take this account's lock for the configuration folder. ``None`` means taken; a number is the status to end with."""
+    global _instance
+    from . import instance
+
+    try:
+        _instance = instance.acquire(
+            _config_root(args.config), wait=max(0.0, args.wait_for_instance)
+        )
+    except instance.AlreadyRunning as exc:
+        sys.stderr.write(f"{exc}\n")
+        return instance.ALREADY_RUNNING_STATUS
+    except instance.InstanceProblem as exc:
+        sys.stderr.write(
+            f"cannot start: {exc}. The portal does not run without its instance lock.\n"
+        )
+        return 1
+    return None
+
+
+def _publish_instance(port: int) -> None:
+    held = _instance
+    if held is not None:
+        held.publish(f"http://{HOST}:{port}/")  # type: ignore[attr-defined]
+
+
 def _serve_unavailable(port: int, reason: str, detail: str) -> int:
     """No engine, or an engine that failed its check: serve only the page that says so. Nothing is verified."""
     from .fallback import make_server
@@ -287,6 +333,7 @@ def _serve_unavailable(port: int, reason: str, detail: str) -> int:
         sys.stderr.write(f"cannot listen on {HOST}:{port}: {exc.strerror or exc}\n")
         return 1
     port = server.server_address[1]  # the real port, also when 0 asked for any free one
+    _publish_instance(port)
     # Hand over from the package's early stop handler BEFORE the listening line is printed: whoever waits for that line
     # (a test, a launcher) may stop the portal the moment it appears. SIGTERM ends the page the way Ctrl-C does, so the
     # private bytecode folder is removed on the way out.
@@ -343,6 +390,12 @@ def _main(argv: list[str] | None = None) -> int:
         "--port", type=int, default=8765, help="The port on this computer. 0 takes any free port."
     )
     serve.add_argument(
+        "--wait-for-instance",
+        type=float,
+        default=0.0,
+        help=argparse.SUPPRESS,  # for a launcher restarting the portal: wait for the old one to release its lock
+    )
+    serve.add_argument(
         "--exit-when-input-closes",
         action="store_true",
         help="For a launcher: stop when standard input is closed, for example because the launcher was killed.",
@@ -357,11 +410,71 @@ def _main(argv: list[str] | None = None) -> int:
         "demo-setup", help="Create a synthetic trust store, configuration and sample reports."
     )
     demo.add_argument("directory")
+    describe = commands.add_parser(
+        "admin-describe",
+        help="Say what a setup plan would do, worked out from its content. It changes nothing.",
+    )
+    describe.add_argument(
+        "plan", help="The setup plan file saved from the Prepare a setup plan page."
+    )
+    describe.add_argument(
+        "--config-folder",
+        help="The configuration folder. Without it, the standard per-user folder. A plan never chooses it.",
+    )
+    describe.add_argument(
+        "--json", action="store_true", help="For the application: one line of JSON."
+    )
+    apply = commands.add_parser(
+        "admin-apply",
+        help="Apply a setup plan. Each issuer's fingerprint, as the issuer gave it, must match its key.",
+    )
+    apply.add_argument("plan", help="The setup plan file saved from the Prepare a setup plan page.")
+    apply.add_argument(
+        "--config-folder",
+        help="The configuration folder. Without it, the standard per-user folder. A plan never chooses it.",
+    )
+    apply.add_argument(
+        "--expect-fingerprint",
+        action="append",
+        default=[],
+        metavar="KEY_ID=FINGERPRINT",
+        help="The fingerprint the issuer gave you by another route, once for each issuer. "
+        "Without it, each one is asked on the terminal.",
+    )
+    apply.add_argument(
+        "--expect-plan-sha256",
+        help="Refuse unless the plan's content checksum is this one (the one admin-describe printed).",
+    )
     args = parser.parse_args(argv)
-    if args.command != "serve":
+    if args.command not in _ADMIN_COMMANDS:
+        if (
+            args.command != "serve"
+        ):  # the portal hands over just before it serves, any other command now
+            _hand_over_from_the_early_stop(False)
+        return _dispatch(args)
+    # Hold Ctrl-C, SIGTERM and SIGHUP while the engine and its libraries load, so that no thread they start can take a
+    # stop meant for this command. The admin module lets them through again in the main thread only. They are held
+    # before the early stop handler is handed over, so a stop that arrives in between is not lost.
+    held = signal.pthread_sigmask(signal.SIG_BLOCK, _STOPS)
+    try:
         _hand_over_from_the_early_stop(False)
+        return _dispatch(args)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, held)
+
+
+_ADMIN_COMMANDS = ("admin-describe", "admin-apply")
+_STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "serve" and args.exit_when_input_closes:
         _stop_when_input_closes()
+
+    if args.command == "serve":
+        refused = _take_instance(args)
+        if refused is not None:
+            return refused
 
     # Before anything imports the engine: only the recognised release may be loaded and used.
     identity = check_engine()
@@ -370,6 +483,17 @@ def _main(argv: list[str] | None = None) -> int:
             return _serve_unavailable(args.port, identity.reason, identity.detail)
         sys.stderr.write(unavailable_message(identity.reason, identity.detail))
         return 3
+
+    if args.command in _ADMIN_COMMANDS:
+        # Only these two commands load the module that writes the administrator's files. The portal never does.
+        try:
+            from . import admin
+        except Exception as exc:  # a library the engine needs is missing: the same plain message
+            sys.stderr.write(
+                unavailable_message("ENGINE_UNLOADABLE", f"{type(exc).__name__}: {exc}")
+            )
+            return 3
+        return admin.run(args)
 
     if args.command == "demo-setup":
         try:
@@ -419,7 +543,14 @@ def _main(argv: list[str] | None = None) -> int:
             _done_with_the_work()
             sys.stderr.write(f"not usable: {exc}\n")
             return 3
-        _done_with_the_work()
+        _done_with_the_work()  # the answer is known once the configuration has loaded (F-019)
+        if portal.demonstration:
+            sys.stderr.write(
+                "not usable for your own reports: the trust list is a demonstration (made by demo-setup, or holding "
+                "a demonstration key), not trust set up by an administrator. Files are checked against it only as "
+                "a demonstration.\n"
+            )
+            return 3
         print(
             f"usable: profile {portal.profile}, {approved_entries(portal.approved_count)}, "
             f"replay mode {portal.replay_mode}"
@@ -442,6 +573,7 @@ def _main(argv: list[str] | None = None) -> int:
         return 1
     configured = _configuration(args.config)
     app = build_app(configured, port=sock.getsockname()[1])
+    _publish_instance(sock.getsockname()[1])
     print(f"engine: {identity.engine['summary'] if identity.engine else ''}", flush=True)
     _run(app, sock, app.state.mode)
     return 0
