@@ -361,29 +361,39 @@ def test_the_slot_is_free_again_after_a_dropped_connection(tmp_path, monkeypatch
 def test_a_batch_that_finds_the_checking_slot_taken_is_refused_whole_and_not_charged_for_its_files(
     tmp_path, monkeypatch
 ):
+    """The first batch holds the checking slot for exactly as long as the test says: its verification blocks on an event until the
+    second batch has been answered. So the second one always finds the slot taken, however slow this computer is. (It used to hold it
+    for 1.8 s of sleeping and build the second request meanwhile, which a loaded computer could not do in time.)"""
     config, signer = make_portal(tmp_path / "p")
     real = app_module._verify_between_checks
-    started = []
+    holding = (
+        threading.Event()
+    )  # set when the first batch is inside its verification, so it has the slot
+    release = threading.Event()  # set by the test when the second batch has been answered
 
-    def slow(*args):
-        started.append(1)
-        time.sleep(0.6)
+    def held(*args):
+        holding.set()
+        assert release.wait(60), "the test never let the first batch go"
         return real(*args)
 
-    monkeypatch.setattr(app_module, "_verify_between_checks", slow)
+    monkeypatch.setattr(app_module, "_verify_between_checks", held)
     with serving(config) as port:
+        # Both requests are built before anything is sent, so nothing slow happens while the first batch holds the slot.
         head, body = batch_request(port, [signed_report(signer) for _ in range(3)])
-        first = socket.create_connection(("127.0.0.1", port))
-        first.sendall(head + body)
-        while not started:
-            time.sleep(0.01)
         head2, body2 = batch_request(port, [signed_report(signer) for _ in range(5)])
-        with socket.create_connection(("127.0.0.1", port)) as second:
-            second.sendall(head2 + body2)
-            second.settimeout(10)
-            status, answer = read_response(second)
-        first.settimeout(20)
+        first = socket.create_connection(("127.0.0.1", port))
+        try:
+            first.sendall(head + body)
+            assert holding.wait(30), "the first batch never reached its verification"
+            with socket.create_connection(("127.0.0.1", port)) as second:
+                second.sendall(head2 + body2)
+                second.settimeout(10)
+                status, answer = read_response(second)
+        finally:
+            release.set()  # whatever happened, the first batch is let go
+        first.settimeout(30)
         done_status, done = read_response(first)
+        first.close()
     assert status == 429 and answer["error"] == "busy"
     assert (
         done_status == 200 and done["rate"]["remaining"] == 120 - 3 - 1
