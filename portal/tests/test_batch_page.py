@@ -40,7 +40,7 @@ const source = input.source;
 const cut = (a, b) => { const i = source.indexOf(a), j = source.indexOf(b); if (i < 0 || j < i) throw new Error("missing " + a); return source.slice(i, j); };
 const parts = cut("const STATEMENTS = [", "function render(body, fileName)") + "\n" +
   cut("const BATCH_SCHEMA", "function renderBatch(answer)");
-const api = new Function(parts + "\nreturn { planBatch, batchRequestBody, batchRows, validateBatch, batchLimits, BATCH_FALLBACK };")();
+const api = new Function(parts + "\nreturn { planBatch, shownName, batchRequestBody, batchRows, validateBatch, batchLimits, BATCH_FALLBACK };")();
 const out = {};
 for (const [name, args] of Object.entries(input.calls)) {
   try {
@@ -367,3 +367,59 @@ def test_the_page_never_names_a_file_in_a_url_or_a_path():
         '"/api/verify-batch"',
         '"/api/status"',
     ]
+
+
+@needs_node
+def test_the_refusal_for_a_file_over_the_limit_names_that_file_safely():
+    mb = 1 << 20
+    files = lambda *names: [{"name": n, "size": mb + 1} for n in names]  # noqa: E731
+    out = page(
+        one=["planBatch", [{"name": "report.json", "size": 1}, *files("big-report.json")], LIMITS],
+        three=["planBatch", files("one.json", "two.json", "three.json"), LIMITS],
+        path=["planBatch", files("C:\\Users\\me\\secret folder\\private.json"), LIMITS],
+        unix=["planBatch", files("/home/me/secret/private.json"), LIMITS],
+        bidi=["planBatch", files("a\u202egnp.json"), LIMITS],
+        newline=["planBatch", files("line1\nline2\u0000.json"), LIMITS],
+        markup=["planBatch", files("<img src=x onerror=alert(1)>.json"), LIMITS],
+        long=["planBatch", files("x" * 200 + ".json"), LIMITS],
+        empty=["planBatch", files("   "), LIMITS],
+        fine=["planBatch", [{"name": "ok.json", "size": mb}], LIMITS],
+        names=["shownName", "a/b\\c.json"],
+    )
+    assert out["one"]["ok"] is False
+    assert out["one"]["message"].startswith('The file "big-report.json" is over the 1 MB limit.')
+    assert "Nothing was verified" in out["one"]["message"]
+    assert 'The file "one.json" and 2 more are over the 1 MB limit.' in out["three"]["message"]
+    assert "on their own" in out["three"]["message"]
+    # only the last part of a path is ever shown: never a folder, on either kind of path
+    assert (
+        '"private.json"' in out["path"]["message"]
+        and "secret" not in out["path"]["message"]
+        and "Users" not in out["path"]["message"]
+    )
+    assert '"private.json"' in out["unix"]["message"] and "home" not in out["unix"]["message"]
+    # no direction change, control character or new line gets into the text
+    for name in ("bidi", "newline"):
+        message = out[name]["message"]
+        assert not any(
+            ord(c) < 32 or 0x202A <= ord(c) <= 0x202E or ord(c) in (0x2066, 0x2067, 0x2068, 0x2069)
+            for c in message
+        ), name
+    assert (
+        '"agnp.json"' in out["bidi"]["message"] and '"line1line2.json"' in out["newline"]["message"]
+    )
+    # markup stays text (the page uses textContent); it is shown as typed, not interpreted
+    assert '"<img src=x onerror=alert(1)>.json"' in out["markup"]["message"]
+    assert len(out["long"]["message"]) < 260 and "..." in out["long"]["message"]
+    assert '"(unnamed)"' in out["empty"]["message"]
+    assert out["fine"]["ok"] is True, "a file exactly at the limit is still accepted"
+    assert out["names"] == "c.json"
+
+
+def test_the_refusal_is_put_in_the_page_as_text_and_not_markup():
+    source = SCRIPT.read_text()
+    assert '$("failure-message").textContent = message;' in source
+    assert (
+        "innerHTML"
+        not in source[source.index("function planBatch") : source.index("function toBase64")]
+    )

@@ -173,7 +173,11 @@ Restart the portal after you have fixed it. `check-config` and `demo-setup` stop
 - `fhe_notice`: "Signature verification does not verify that any FHE (encrypted) computation was executed.", present in every saved result;
 - `report_file_name`, `report_sha256`, `checked_at`, `portal_version` and `not_a_claim`.
 
-The report itself is not stored in the file.
+### What a saved result shows about the report, and what it leaves out
+
+A saved result is not free of identifying information. Values the verifier read from the report are in it: in `verification` and again in the plain-language `explanation`, the **deployment id**, the **run id** (the report's `audit_run_id` member), the **issuer name**, the **key id**, the time of issue, the report type (`primitive`), the regulations the report names and a hash of its parameter set. The result also carries the **file name you chose**, the report's SHA-256 and the time of the check. A batch result holds the same for every file, with each file's name and size. Treat a saved result with the care you give the identifiers in the report: it shows that a report from that deployment and issuer was checked, and when.
+
+It does not hold the report's findings or any other part of its body, the uploaded bytes, the trust list or any public or private key, the configuration or any folder path of this computer. The Portal keeps no copy of the result: the file is written by your browser, to the folder your browser uses for downloads.
 
 ## For the administrator
 

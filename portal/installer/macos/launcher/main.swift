@@ -239,8 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         if existing != nil { alert.addButton(withTitle: "Open it") }
         alert.addButton(withTitle: "Quit")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn, let target = existing { NSWorkspace.shared.open(target) }
+        if present(alert) == .alertFirstButtonReturn, let target = existing { NSWorkspace.shared.open(target) }
         quitting = true
         NSApp.terminate(nil)
     }
@@ -257,8 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Quit")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        _ = present(alert)
         quitting = true
         process?.terminate()
         NSApp.terminate(nil)
@@ -305,11 +303,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Show an alert so that it cannot be missed. macOS lets only the frontmost application take the screen, so after a launch from
+    /// another application (a browser, a terminal) ``activate`` can fail and a plain ``runModal`` leaves the alert behind that
+    /// application's windows with nothing to say it is there. So the alert is put at a floating level, brought to the front even if
+    /// this application is not active, and the Dock icon asks for attention until the reader comes to it.
+    func present(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        alert.layout()  // makes the alert's window
+        alert.window.level = .floating
+        alert.window.hidesOnDeactivate = false
+        alert.window.collectionBehavior.insert(.moveToActiveSpace)
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.orderFrontRegardless()
+        let request = NSApp.requestUserAttention(.criticalRequest)
+        defer { NSApp.cancelUserAttentionRequest(request) }
+        return alert.runModal()
+    }
+
     /// Text that can be read, scrolled and copied in a box of fixed size, so a long text never pushes an alert's
     /// buttons off the screen. It shows the text exactly as given.
     func scrollingText(_ string: String, width: CGFloat, height: CGFloat) -> NSScrollView {
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .legacy  // a scroll bar that is always drawn, so a clipped box is never mistaken for a complete one
+        scroll.autohidesScrollers = false
         scroll.borderType = .bezelBorder
         let inside = scroll.contentSize
         let text = NSTextView(frame: NSRect(x: 0, y: 0, width: inside.width, height: inside.height))
@@ -328,6 +344,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return scroll
     }
 
+    /// The plan's summary in a box as tall as the whole text needs, up to what is left of the screen once the rest of the alert
+    /// (its heading, the fingerprint fields and the buttons) has its room, so that Apply and Cancel are always on the screen. When
+    /// the text is longer than that, the box scrolls with a scroll bar that is always drawn, and ``clipped`` is true: the caller
+    /// must then make the reader reach the end of the text before Apply works. Nothing about the plan is cut off without saying so.
+    func summaryBox(_ string: String, width: CGFloat, fieldsHeight: CGFloat) -> (view: NSView, scroll: NSScrollView, clipped: Bool) {
+        let probe = scrollingText(string, width: width, height: 100)
+        var needed: CGFloat = 0
+        if let text = probe.documentView as? NSTextView, let layout = text.layoutManager, let container = text.textContainer {
+            layout.ensureLayout(for: container)
+            needed = ceil(layout.usedRect(for: container).height) + 12
+        }
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 700
+        // 340 points are the alert's own heading, notice line, spacing and buttons; the fingerprint fields take theirs.
+        let limit = max(150, floor(screenHeight - 340 - fieldsHeight))
+        let height = needed > 0 ? min(needed, limit) : 220
+        let scroll = scrollingText(string, width: width, height: height)
+        return (fixedBox(scroll, width: width, height: height), scroll, needed == 0 || needed > limit + 1)
+    }
+
     /// The same box, sized by constraints, for use inside a stack of views.
     func fixedBox(_ view: NSView, width: CGFloat, height: CGFloat) -> NSView {
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -342,8 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = title
         alert.accessoryView = scrollingText(detail, width: 520, height: 260)
         alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        _ = present(alert)
     }
 
     @objc func administratorSetup() {
@@ -401,17 +435,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.frame = NSRect(origin: .zero, size: size)
         // Python's summary, notices first, in a box of fixed height; the fields below it, scrolled if there are many.
         // However long either is, the alert keeps its Apply and Cancel buttons on the screen.
-        let summaryBox = fixedBox(scrollingText(summary, width: 480, height: 200), width: 480, height: 200)
+        let summaryParts = summaryBox(summary, width: 480, fieldsHeight: min(size.height, 200))
+        let hint = NSTextField(wrappingLabelWithString: "This plan is longer than the box. Scroll the box to the end to read all of it: Apply stays off until you have.")
+        hint.preferredMaxLayoutWidth = 480
+        hint.textColor = .systemOrange
+        hint.isHidden = !summaryParts.clipped
         let fieldsBox: NSView
         if size.height > 200 {
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: size.width + 20, height: 200))
             scroll.documentView = stack
             scroll.hasVerticalScroller = true
+            scroll.scrollerStyle = .legacy  // always drawn, like the summary box's
+            scroll.autohidesScrollers = false
+            // The stack is not flipped, so the box would open at its bottom, showing the last issuer's field first. Open it at the top.
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - 200)))
+            scroll.reflectScrolledClipView(scroll.contentView)
             fieldsBox = fixedBox(scroll, width: size.width + 20, height: 200)
         } else {
             fieldsBox = stack
         }
-        let whole = NSStackView(views: [summaryBox, fieldsBox])
+        let whole = NSStackView(views: [summaryParts.view, hint, fieldsBox])
         whole.orientation = .vertical
         whole.alignment = .leading
         whole.spacing = 10
@@ -424,8 +467,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = fields.first?.1
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { adminBusy = false; return }
+        // A plan too long for the box cannot be applied until the reader has scrolled to its end.
+        let applyButton = alert.buttons[0]
+        var watching: NSObjectProtocol?
+        if summaryParts.clipped {
+            applyButton.isEnabled = false
+            let clip = summaryParts.scroll.contentView
+            clip.postsBoundsChangedNotifications = true
+            watching = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { _ in
+                if let document = summaryParts.scroll.documentView, clip.bounds.maxY >= document.frame.height - 2 {
+                    applyButton.isEnabled = true
+                    hint.stringValue = "You have reached the end of the plan."
+                    hint.textColor = .secondaryLabelColor
+                }
+            }
+        }
+        let answer = present(alert)
+        if let watching = watching { NotificationCenter.default.removeObserver(watching) }
+        guard answer == .alertFirstButtonReturn else { adminBusy = false; return }
         var arguments = ["admin-apply", "--expect-plan-sha256=\(digest)"]
         for (keyId, field) in fields { arguments.append("--expect-fingerprint=\(keyId)=\(field.stringValue)") }
         arguments += ["--", plan.path]

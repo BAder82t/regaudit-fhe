@@ -204,16 +204,16 @@ def test_the_launcher_applies_only_after_describe_and_an_explicit_apply_and_neve
     assert admin.count('"admin-apply"') == 1 and admin.count('"admin-describe"') == 1
     assert (
         admin.index('"admin-describe"')
-        < admin.index("alert.runModal()")
+        < admin.index("present(alert)")
         < admin.index('"admin-apply"')
     )
     assert admin.index('alert.addButton(withTitle: "Apply")') < admin.index(
         'alert.addButton(withTitle: "Cancel")'
     )
     assert (
-        "guard alert.runModal() == .alertFirstButtonReturn else { adminBusy = false; return }"
-        in admin
-    )
+        "let answer = present(alert)" in admin
+    )  # the alert is shown through the helper that brings it to the front
+    assert "guard answer == .alertFirstButtonReturn else { adminBusy = false; return }" in admin
     # A plan Python will not describe as applicable returns before the alert is built.
     refused = admin.index("This setup plan cannot be applied here.")
     assert refused < admin.index("NSAlert()") and "return inform(" in admin[refused - 60 : refused]

@@ -359,18 +359,29 @@ function batchLimits(status) {
 
 // Pure. Whether these files may be sent at all. All or nothing, as the portal itself does: a batch that is over a limit
 // is refused whole, and the message says which limit and by how much, so the person can send smaller groups.
+// Pure. A file name as it can safely be shown in a message: only the last part of any path (never a folder), no control or
+// direction-changing characters, and at most 60 characters. The page puts it in with textContent, so it is never read as markup either.
+function shownName(name) {
+  let text = String(name === null || name === undefined ? "" : name);
+  text = text.slice(Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\")) + 1);
+  text = text.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufff9-\ufffb]/g, "");
+  text = text.trim();
+  if (text === "") return "(unnamed)";
+  return text.length > 60 ? text.slice(0, 57) + "..." : text;
+}
+
 function planBatch(files, limits) {
   if (!files || files.length === 0) return { ok: false, message: "Choose at least one report file." };
   if (files.length > limits.max_files) {
     return { ok: false, message: "A batch can hold at most " + limits.max_files + " files and " + files.length + " were chosen. Nothing was verified. Send the files in smaller groups." };
   }
-  let total = 0;
-  for (const file of files) {
-    if (file.size > limits.max_file_bytes) {
-      return { ok: false, message: "A file is over the " + Math.floor(limits.max_file_bytes / 1048576) + " MB limit. Nothing was verified. Check the files you chose." };
-    }
-    total += file.size;
+  const tooBig = files.filter((file) => file.size > limits.max_file_bytes);
+  if (tooBig.length > 0) {
+    const more = tooBig.length > 1 ? " and " + (tooBig.length - 1) + " more" : "";
+    return { ok: false, message: 'The file "' + shownName(tooBig[0].name) + '"' + more + (tooBig.length > 1 ? " are" : " is") + " over the " + Math.floor(limits.max_file_bytes / 1048576) + " MB limit. Nothing was verified. Take " + (tooBig.length > 1 ? "them" : "it") + " out of the batch or send " + (tooBig.length > 1 ? "them on their own." : "it on its own.") };
   }
+  let total = 0;
+  for (const file of files) total += file.size;
   if (total > limits.max_total_bytes) {
     return { ok: false, message: "The files together are over the " + Math.floor(limits.max_total_bytes / 1048576) + " MB limit for a batch. Nothing was verified. Send the files in smaller groups." };
   }
