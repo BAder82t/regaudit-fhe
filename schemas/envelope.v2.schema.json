@@ -47,7 +47,8 @@
         "concordance",
         "calibration",
         "drift",
-        "disagreement"
+        "disagreement",
+        "ai_run"
       ]
     },
     "backend": {

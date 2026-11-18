@@ -3,13 +3,21 @@
 ## 0.3.0 — unreleased
 
 AI-assisted engineering work; not an audit and no production assurance. Report formats, signed fields,
-canonicalisation and schemas are unchanged. Default verification verdicts are unchanged, with the authorized exceptions under
+canonicalisation and schemas are unchanged, apart from the additive `ai_run` primitive under Added. Default verification verdicts are unchanged, with the authorized exceptions under
 Changed, below. Release scope is undecided.
 
 **Published v0.2.1 has none of these changes, including the storage refusals below, so do not assume it is protected.** See the advisories in [docs/advisories/](docs/advisories/). This section describes the experimental code from pull request #65, which is not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
 
 **Before upgrading, read [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md). Under `confidential` and `high-assurance`, a trust store without issuers is refused and `trust migrate` does not satisfy them: build a new
 store with `trust add`. Any replay file written by a published version is refused until you migrate it.**
+
+### Added
+
+- **`ai_run` evidence and buyer-side policy checks.** An `ai_run` report is a `report.v2` envelope in which the issuer signs a statement about one AI evaluation run: a model digest, the digests of the inputs used, and named metric claims. It uses the existing signature, trust-store, key-lifecycle and replay checks. The verifier does not fetch the model or the dataset, does not re-run the evaluation and cannot tell whether a value is true, so this is attribution of a claim, not certification, audit or regulatory approval. The report carries no regulation mapping.
+  - `regaudit_fhe.ai_run` builds and strictly validates the statement (closed fields, claim kinds and input roles; bounded sizes; finite numbers).
+  - `regaudit_fhe.evidence_policy` applies a buyer's rules after verification (issuer and key allow-lists, maximum age, subject digest, metric thresholds) and returns accept or reject with one reason code per failed check. A policy can only narrow what verification accepted. A policy that does not parse is refused.
+  - **A trust entry must name `ai_run` in its `primitives` list to be trusted for it.** An entry with no `primitives` list still means every audit primitive, and does not extend to `ai_run`.
+  - The `report.v2` schema gains `ai_run` in its `primitive` enum. The six audit primitives, their schemas and the `audit` command are unchanged. Not yet available in the Portal, which is pinned to the published engine.
 
 ### Changed
 

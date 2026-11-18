@@ -99,7 +99,15 @@ ISSUER_PROVENANCE_SUFFIX = ".issuer-provenance.json"
 # An entry's issuer was stated by a local operator with ``trust migrate``. Not an authenticated enrollment.
 OPERATOR_DECLARED = "operator-declared"
 _STATUSES = ("active", "retired", "compromised")
-_PRIMITIVE_NAMES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
+_PRIMITIVE_NAMES = (
+    "fairness",
+    "provenance",
+    "concordance",
+    "calibration",
+    "drift",
+    "disagreement",
+    "ai_run",
+)
 _ENTRY_KEYS = frozenset(
     {
         "issuer",

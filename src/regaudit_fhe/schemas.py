@@ -25,6 +25,9 @@ from typing import Any, cast
 from jsonschema import Draft202012Validator
 
 PRIMITIVES = ("fairness", "provenance", "concordance", "calibration", "drift", "disagreement")
+# Primitives whose result is an issuer's statement rather than a computed audit: they have no input/output
+# schema pair and no ``audit`` command; their result is validated in code (see ``regaudit_fhe.ai_run``).
+STATEMENT_PRIMITIVES = ("ai_run",)
 DIRECTIONS = ("input", "output")
 
 

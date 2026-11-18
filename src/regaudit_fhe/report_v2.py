@@ -54,7 +54,7 @@ from .reports import (
     report_to_dict,
     sha256_hex,
 )
-from .schemas import PRIMITIVES
+from .schemas import PRIMITIVES, STATEMENT_PRIMITIVES
 
 SCHEMA_V2 = "regaudit-fhe.report.v2"
 SCHEMA_V1 = "regaudit-fhe.report.v1"
@@ -317,8 +317,10 @@ class AuditEnvelopeV2:
         if not isinstance(algorithm_version, str) or not _SEMVER.match(algorithm_version):
             raise EnvelopeFormatError("BAD_VALUE", "algorithm_version must be a semantic version")
         primitive = data["primitive"]
-        if not isinstance(primitive, str) or primitive not in PRIMITIVES:
-            raise EnvelopeFormatError("BAD_VALUE", f"primitive must be one of {list(PRIMITIVES)}")
+        if not isinstance(primitive, str) or primitive not in (*PRIMITIVES, *STATEMENT_PRIMITIVES):
+            raise EnvelopeFormatError(
+                "BAD_VALUE", f"primitive must be one of {[*PRIMITIVES, *STATEMENT_PRIMITIVES]}"
+            )
         backend = _ident(data["backend"], "backend")
 
         parameter_set = data["parameter_set"]
@@ -399,6 +401,14 @@ class AuditEnvelopeV2:
                 }
             )
 
+        model_commitment = (
+            _commitment(data["model_commitment"], "model_commitment")
+            if "model_commitment" in data
+            else None
+        )
+        if primitive in STATEMENT_PRIMITIVES:
+            _check_statement(primitive, result, model_commitment, regulations, dp)
+
         return cls(
             schema=SCHEMA_V2,
             schema_version=SCHEMA_V2,
@@ -420,15 +430,34 @@ class AuditEnvelopeV2:
             trust_policy_version=tpv,
             receipt={k: receipt[k] for k in sorted(_RECEIPT_KEYS)},
             audience=_audience(data["audience"]) if "audience" in data else None,
-            model_commitment=_commitment(data["model_commitment"], "model_commitment")
-            if "model_commitment" in data
-            else None,
+            model_commitment=model_commitment,
             dataset_commitment=_commitment(data["dataset_commitment"], "dataset_commitment")
             if "dataset_commitment" in data
             else None,
             dp=copy.deepcopy(dp) if "dp" in data else None,
             timestamps=timestamps,
         )
+
+
+def _check_statement(
+    primitive: str,
+    result: dict[str, Any],
+    model_commitment: dict[str, str] | None,
+    regulations: list[str],
+    dp: Any,
+) -> None:
+    """Extra rules for issuer-statement primitives (``ai_run``)."""
+    from .ai_run import validate_result  # local import: ai_run builds on this module
+
+    checked = validate_result(result)
+    if checked != result:
+        raise EnvelopeFormatError("BAD_VALUE", "result is not in its normalised form")
+    if model_commitment is not None and model_commitment != checked["subject"]:
+        raise EnvelopeFormatError("BAD_VALUE", "model_commitment must equal the result subject")
+    if regulations:
+        raise EnvelopeFormatError("BAD_VALUE", "an issuer statement carries no regulation mapping")
+    if dp is not None:
+        raise EnvelopeFormatError("BAD_VALUE", "an issuer statement carries no dp block")
 
 
 def _b64(value: Any, name: str, *, length: int | None = None) -> str:
