@@ -10,10 +10,19 @@
 
 `regaudit-fhe` produces **technical evidence**: numerical scalars,
 boolean breach indicators, decryption-error bounds, depth-budget
-attestations, and Ed25519-signed audit envelopes. The artefacts are
+declarations, and Ed25519-signed audit envelopes. A signature shows that a
+key signed the claim. It does not show that the computation was correct, that
+encryption was used, or that the stated security parameters were achieved. The artefacts are
 designed to fit into compliance workflows but **do not constitute
 compliance, certification, conformity assessment, or regulatory
 acceptance** by themselves.
+
+Three limits apply to every row below. Replay checks are local to one
+verifier's store, not distributed single-use protection. A timestamp in a
+report is the signer's claim, not a trusted time. The optional
+differential-privacy layer records epsilon, delta and sensitivity that the
+caller declares. Nothing derives or validates the sensitivity, and the library
+makes no differential-privacy guarantee.
 
 A regulator, auditor, conformity-assessment body, or licensed
 attorney decides whether a given audit envelope satisfies a given
@@ -23,6 +32,12 @@ does not attempt to.
 ---
 
 ## Mapping primitives to regulations
+
+In the table, "Encrypted" means the optional `regaudit_fhe.fhe` library
+functions. The command line, the HTTP server and the default path run on
+plaintext. The encrypted functions are experimental and have not been
+independently qualified. Those functions take plaintext inputs and decrypt in
+the same process.
 
 The table below is the binding scope statement. Anything not listed is
 out of scope. Items in the **What the library does NOT prove** column
@@ -41,10 +56,10 @@ governance, validation studies, regulator submissions, etc.).
 | **FDA AI-SaMD UQ guidance**             | Distribution-free uncertainty quantification. | Encrypted conformal-prediction-set bitmask. | Validation of the calibration set. Coverage-guarantee proofs in the regulatory submission. |
 | **EMA AI guidance**                     | Survival-AI performance attestation.          | Encrypted concordance audit primitive. | Marketing authorisation. Pharmacovigilance reporting. Real-world-evidence study design. |
 | **OCC Supervisory Letter SR 11-7**      | Model risk management.                        | Encrypted cross-model disagreement (champion-vs-challenger).         | Independent model validation. Effective challenge. Internal audit findings. The SR 11-7 attestation itself. |
-| **HIPAA**                               | PHI minimum necessary.                        | The library never decrypts PHI server-side; PHI stays encrypted under CKKS for the entire audit run. | A HIPAA Security Rule risk assessment. Business-associate agreements. Breach-notification programme. |
+| **HIPAA**                               | PHI minimum necessary.                        | The HTTP server and the default path process inputs in plaintext. The encrypted functions take plaintext inputs and decrypt in the same process. This library alone does not keep PHI from the host that runs it. | A HIPAA Security Rule risk assessment. Business-associate agreements. Breach-notification programme. |
 | **GDPR, Article 22**                    | Algorithmic-decision review.                  | Encrypted attribution-bucket histograms feeding a human review process. | The right-to-explanation as interpreted in your jurisdiction. Lawful basis under Article 6. Data-protection impact assessment. |
-| **21 CFR Part 11**                      | FDA training-data audit trail.                | Ed25519-signed audit envelopes with SHA-256 canonical receipts.                                                          | Validated electronic-signature programme under §11.10. Computer-system-validation lifecycle. |
-| **ISO/IEC 23053**                       | Trustworthy AI framework.                     | Calibrated UQ + concordance + drift primitives that map to several ISO 23053 controls. | ISO 23053 certification. Management-system audit. |
+| **21 CFR Part 11**                      | Electronic records and signatures.               | Ed25519-signed audit envelopes with SHA-256 canonical receipts.                                                          | Validated electronic-signature programme under §11.10. Computer-system-validation lifecycle. |
+| **ISO/IEC 23053**                       | Trustworthy AI framework.                     | Calibrated UQ + concordance + drift primitives that relate to topics in ISO/IEC 23053. No mapping to its controls has been made. | ISO 23053 certification. Management-system audit. |
 | **UNECE WP.29**                         | UQ for autonomous-vehicle AI.                 | Encrypted conformal-prediction-set bitmask. | Type-approval of the AV system. Cybersecurity Management System (CSMS) audit under R155. |
 | **Basel III model risk**                | Distribution-shift evidence for credit models. | Encrypted drift primitive over input-feature histograms. | The Basel III internal-models approval. Capital-floor calculation. Backtesting framework. |
 
@@ -102,6 +117,5 @@ compliance status. It can only produce repeatable, signed,
 parameter-bound technical evidence that compliance professionals then
 use as one input to their decision.
 
-For commercial deployments, VaultBytes Innovations Ltd offers paid
-consulting to map specific deployments to specific regulatory
-requirements; contact **b@vaultbytes.com**.
+For commercial terms, contact **b@vaultbytes.com**. Nothing in this
+repository maps a deployment to a regulatory requirement.
