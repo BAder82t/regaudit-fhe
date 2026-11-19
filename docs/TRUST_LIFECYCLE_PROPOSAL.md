@@ -11,7 +11,7 @@ schema was changed.
 verifier's own file and are not evidence that the issuer authorised a revocation. Their JSON output carries
 `scope`, `issuer_authorized: false`, `notice` and `rollback_detection` (no independently preserved high-water
 mark: rollback of the file and `.prev` is undetectable); the notice is repeated on stderr and in `--help`.
-The owner-signed alternative is `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
+The issuer-owner-signed alternative is `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
 
 ## 1. States and what they mean
 
@@ -145,7 +145,7 @@ differ from a hand-written equivalent only by the existing `as_of` member. The h
 * **Edit attacker** can also enrol their own key. Everything depends on file permissions and the delivery channel.
 * **Concurrency.** A byte-compare before replace narrows but does not close a race between two editors; no lock.
 
-## 8. Owner decisions (not implemented)
+## 8. Maintainer decisions (not implemented)
 
 See `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md` (signed revocation lists, epochs, high-water marks, successor
-evidence, authenticated trust history) and its section 16 for the open owner decisions.
+evidence, authenticated trust history) and its section 16 for the open maintainer decisions.
