@@ -39,13 +39,13 @@ report chose them, so treat them as untrusted text in logs and as possibly sensi
 | Option | Purpose |
 | --- | --- |
 | `--trusted-keys FILE` | Trust store JSON (required unless `--allow-self-signed`). |
-| `--profile {development,confidential,high-assurance}` | Tighten the policy; production profiles require the options below. |
+| `--profile {development,confidential,high-assurance,secure-v1}` | Select the verification profile (default `development`, which is not a high-assurance profile). Stricter profiles require the options below. The profile in effect is stated on stderr when you pass `--profile` and when stderr is a terminal; stdout and exit codes do not change. |
 | `--verifier-id ID` | This verifier's audience identifier. |
 | `--max-age-seconds N` | Refuse reports older than `N` seconds (positive, finite). Do not raise it on a replay store in use: see the [replay advisory](advisories/replay-limitations-0.2.1.md). |
-| `--replay-db FILE`, `--replay-mode {off,check,record}` | Local persistent replay detection. |
+| `--replay-db FILE`, `--replay-mode {off,check,record}` | Local persistent replay detection. `--replay-mode` defaults to `off`. `check` and `record` need `--replay-db`, and `--replay-db` needs `check` or `record`: a replay file with mode `off` (given explicitly or by the default) is a configuration error (exit 2), because replay protection would be disabled and the file never consulted. |
 | `--refuse-legacy-v1` | Refuse `report.v1` envelopes. |
 | `--allow-self-signed` | Development-only integrity check; never accepts a report. |
-| `--strict` | **Has no effect, and selects no assurance profile.** Use `--profile`. It is kept for compatibility, and trust material is required with or without it. |
+| `--strict` | **Refused with a usage error (exit 2).** It selects no profile, is not an alias for one and never changes a verdict. Use `--profile <name>`; the error lists the valid names. See [MIGRATION_0.3.md](MIGRATION_0.3.md#verify---strict-is-now-a-usage-error). |
 
 `regaudit-fhe verify` exits **0 only when the report is accepted** under the
 configured policy:
@@ -54,7 +54,7 @@ configured policy:
 | ---- | ------- |
 | `0` | accepted (`trust_status: TRUSTED`) |
 | `1` | well-formed report refused by policy, including `SELF_SIGNED_ONLY`, a revoked/compromised issuer, a stale or replayed report (the JSON names the `reason`) |
-| `2` | invalid input, command usage or an incompatible combination of options: a malformed report, running with neither `--trusted-keys` nor `--allow-self-signed`, `--allow-self-signed` with a non-development profile, a `confidential`/`high-assurance` profile without its required options (`--max-age-seconds` and the replay options for both profiles, and `--verifier-id` for `high-assurance` only) |
+| `2` | invalid input, command usage or an incompatible combination of options: a malformed report, running with neither `--trusted-keys` nor `--allow-self-signed`, `--allow-self-signed` with a non-development profile, `--strict`, `--replay-db` with replay mode `off`, a `confidential`/`high-assurance` profile without its required options (`--max-age-seconds` and the replay options for both profiles, and `--verifier-id` for `high-assurance` only) |
 | `3` | a required trust or verification resource that **was specified** is unavailable or unusable: an unreadable, malformed or empty `--trusted-keys`, an unusable `--replay-db`, or a replay store that fails while verifying outside development |
 
 `--allow-self-signed` is a development-only integrity check: it can report

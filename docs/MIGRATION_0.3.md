@@ -157,6 +157,15 @@ the level are only exercised against stand-ins here. The chain is still signed e
 **Reports already signed.** They verify as before. A `192`, a `256`, a fixed-default chain or a doubled batch size in an old report cannot be told
 from a correct value by looking at it. Treat `security_bits` as a declaration ([REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean)).
 
+## `verify --strict` is now a usage error
+
+`regaudit-fhe verify --strict` used to be accepted and ignored: it selected no profile and changed no verdict. It now exits 2 with a message that names `--profile <name>` and lists the valid profile names (`development`, `confidential`, `high-assurance`, `secure-v1`). It prints no verdict, and it does not select a profile; it will not become an alias for one.
+
+- If a script passes `--strict` and relied on it for assurance, it never had any. Remove the flag and choose a profile with `--profile`. Stricter profiles require a trust store that states issuers, `--max-age-seconds` and the replay options (and `--verifier-id` for `high-assurance`).
+- If you only want the same behaviour as before, remove `--strict`: verdicts and exit codes for the remaining options are unchanged.
+
+Two related changes in `verify`: `--replay-db` with replay mode `off` (explicit or the default) now exits 2, because replay protection would be disabled; add `--replay-mode check` or `--replay-mode record`, or drop `--replay-db`. And the profile in effect is stated on stderr when you pass `--profile` or when stderr is a terminal.
+
 ## `verify_receipt`
 
 It returns a bare bool, and that bool is not an issuer-attribution or revocation result. When tenant identity matters, use `verify_trusted` with an `entries` store
