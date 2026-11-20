@@ -84,6 +84,12 @@ A `TRUSTED` verdict answers the first two only.
    and the server sign `128` for a plaintext run that performed no encryption, and a `192` or `256` can be higher than
    the parameters support. See [REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean).
 
+Verifier output states this on every verdict: "Encrypted execution not established." and "A signed report can authenticate a claim
+without proving that claim is true." The `regaudit-fhe verify` command writes these to stderr with the rest of the claim labels, and
+the versioned response carries them as `claim_assessment`. They change no decision. Declared TenSEAL parameters are not read as
+encrypted execution, and a declared plaintext backend is not read as proof of plaintext execution: absent evidence is "not
+established". See [REPORT_FORMAT.md](REPORT_FORMAT.md#how-a-verdict-labels-what-a-report-claims).
+
 A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](WALKTHROUGH.md).
 
 ## Regulator side — verify a report (recommended)

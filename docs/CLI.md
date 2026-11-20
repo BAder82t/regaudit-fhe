@@ -25,6 +25,30 @@ regaudit-fhe trust add --store trust_store.json --key-id acme-2026 --issuer acme
 regaudit-fhe verify -i report.json --trusted-keys trust_store.json
 ```
 
+### What `verify` says on stderr about the claims
+
+After every verdict that exists (exit 0 or 1), `regaudit-fhe verify` writes a `claims:` block to stderr. Stdout, the JSON
+keys and the exit codes are exactly what they were. The block starts with these two lines, whatever the report says:
+
+```
+claims:
+  - Encrypted execution not established.
+  - A signed report can authenticate a claim without proving that claim is true.
+```
+
+The lines that follow separate seven kinds of statement: execution mode observed by a trusted component (none: no signed
+field and no independent check records one); execution mode declared in the report (a declaration by the signer); execution
+mode established from the available evidence (cannot be established); cryptographic configuration (parameters the signer
+declared, not measured); authenticated report content (what the signature and your trust store show: who signed these
+bytes, not that what they say is true); independently established computational properties (none); and unsupported or
+unverified claims (that the computation ran encrypted, that the results are correct, that privacy holds, that any regulation
+is met). Declared TenSEAL parameters, `security_bits` and a depth are never read as encrypted execution, and a report that
+declares `backend: "plaintext"` is described as declaring a plaintext backend, because that is also the default a producer signs.
+Absent evidence is "not established", not "plaintext". The text is fixed: nothing a report contains is copied into it.
+Scripts that treated empty stderr on success as a signal need to read the exit code instead.
+
+`--response-format v2` adds the same statements to stdout as `claim_assessment`. See [API.md](API.md).
+
 Without the `--signing-key` options, `regaudit-fhe audit` still emits `report.v1` signed by
 an ephemeral key, which can only ever verify as `SELF_SIGNED_ONLY`. The CLI key file is an
 unencrypted PEM for evaluation; for production use a KMS/HSM-backed signer through the

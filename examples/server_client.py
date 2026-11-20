@@ -108,6 +108,8 @@ def main() -> int:
 
     print("OK — full server/client round trip succeeded under bearer-token "
           "auth, scope checks, and envelope integrity verification.")
+    print("Encrypted execution not established. A signed report can authenticate a claim "
+          "without proving that claim is true.")
     return 0
 
 

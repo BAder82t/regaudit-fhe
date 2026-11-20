@@ -13,8 +13,10 @@ The regulator builds its own trust store (the keys it approved out of band) and 
 
 What the outcomes mean: ``TRUSTED`` says an enrolled key signed these exact bytes and the
 policy rules were met. It does not say the audit is correct, that anything ran encrypted, that
-privacy holds, or that any legal requirement is met. The reports here come from the plaintext
-path on synthetic data, and a signature shows who signed, not what was computed.
+privacy holds, or that any legal requirement is met. A signed report can authenticate a claim
+without proving that claim is true. Encrypted execution not established. The reports here are
+made on synthetic data and declare the default plaintext backend, which is a declaration and
+not an observation.
 
 It exits 0 if every outcome is the expected one, and 1 otherwise.
 """
@@ -27,6 +29,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 ISSUER, KEY_ID, VERIFIER = "example-vendor.example", "vendor-2026-q2", "regulator-a"
 
@@ -125,9 +128,12 @@ def main() -> int:
         "  - INVALID for (c): the content changed after signing, so the signature no longer matches."
     )
     print("\nWhat this does not show")
+    print(f"  - {claim_labels.NOT_ESTABLISHED}")
+    print(f"  - {claim_labels.INVARIANT}")
     print(
-        "  - These reports came from the plaintext path. A signature shows who signed, not what was computed."
+        "  - These reports declare a plaintext backend (the default). That is a declaration, not an observation,"
     )
+    print("    and a signature shows who signed, not what was computed.")
     print(
         "  - It does not show that the audit is correct, that anything ran encrypted, that privacy holds,"
     )

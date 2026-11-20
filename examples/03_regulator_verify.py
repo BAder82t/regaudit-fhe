@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 
 def main(bundle_path: str, trust_store_path: str) -> int:
@@ -49,6 +50,7 @@ def main(bundle_path: str, trust_store_path: str) -> int:
         print(f"\nREJECT: {failures} envelope(s) failed verification.")
         return 1
     print("\nACCEPT: all envelopes verified against the trust store.")
+    print(claim_labels.NOT_ESTABLISHED, claim_labels.INVARIANT)
     return 0
 
 
