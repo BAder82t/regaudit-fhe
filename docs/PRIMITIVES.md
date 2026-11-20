@@ -209,3 +209,23 @@ about 0.002 away. The disagreement sampler is one fixed input about 0.005 away.
 The biggest absolute errors in the table for those primitives are about 7e-6 or
 smaller. Zero flips shows that noise did not change the decision for these inputs.
 This does not show that noise cannot change a decision close to the threshold.
+
+### Numerical accuracy
+
+- The "Max abs err" column is the largest difference seen on the benchmark's own
+  inputs between the encrypted result and the plaintext circuit's result. It is not a
+  bound, and it says nothing about other inputs.
+- The equivalence tests compare the encrypted function with the plaintext *circuit*, not
+  with an exact calculation, and their tolerances (5e-2 for most primitives, 0.25 for
+  the concordance ratio, 2.0 for the calibration set size) are envelopes chosen
+  to pass on the test inputs, not proven error bounds.
+- Concordance and calibration use the degree-3 polynomial `(3x - x^3) / 2` as a
+  stand-in for the sign function. It is close to the sign only for inputs of about 0.75
+  or more in absolute value (its error is 0.09 at 0.75, 0.31 at 0.5, 0.85 at 0.1) and its
+  input must lie in `[-1, 1]`. Pairs or scores close to a boundary are therefore
+  counted wrongly. The plaintext circuit `audit_concordance` uses the same polynomial, so
+  its `concordant_pairs`, `comparable_pairs` and `c_index` are approximations of the exact
+  Harrell values (`c_index_oracle`), not equal to them. On three random 16-row draws
+  (checked on 2026-11-20) the C-index differed from `c_index_oracle` by 0.04 to 0.05. A
+  decision that depends on a value near a threshold can therefore differ from the exact
+  one.
