@@ -22,7 +22,6 @@ import math
 import os
 import stat
 import sys
-import tempfile
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,6 +41,7 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
+from ._store_write import store_lock, write_store_atomic
 from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, status_rows
 from ._trust_lifecycle import migrate as migrate_store_file
 from ._trust_lifecycle import retire as retire_key
@@ -418,6 +418,16 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
                 f"refused, nothing enrolled: {why}; a report key must be another key\n"
             )
             return 2
+    # The read-modify-write is one step for cooperating processes: lock, read, validate, write, sync.
+    try:
+        with store_lock(args.store):
+            return _trust_add_locked(args, pem, actual)
+    except OSError as exc:
+        sys.stderr.write(f"cannot lock {args.store!r}: {exc}\n")
+        return 3
+
+
+def _trust_add_locked(args: argparse.Namespace, pem: str, actual: str) -> int:
     problem = store_file_problem(args.store) or store_location_problem(args.store)
     if problem is not None:
         sys.stderr.write(
@@ -455,18 +465,8 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
     except TrustStoreError as exc:
         sys.stderr.write(f"refused, nothing written: {exc}\n")
         return 2
-    store_path = Path(args.store)
     try:
-        fd, tmp = tempfile.mkstemp(dir=store_path.parent or ".", prefix=".trust-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload, indent=2) + "\n")
-            os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)
-            os.replace(tmp, store_path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
-            raise
+        write_store_atomic(args.store, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
     except OSError as exc:
         sys.stderr.write(f"cannot write {args.store!r}: {exc}\n")
         return 2
