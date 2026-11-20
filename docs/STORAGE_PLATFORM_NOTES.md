@@ -80,7 +80,8 @@ They do not stop the same account or an administrator, or another program that i
 
 - On Linux the policy reads the mode bits only. A POSIX ACL entry that allows writing shows in the group bits, because
   the group bits of `stat` report the ACL mask, so the mode check refuses it. This reasoning is from `acl(5)`. The
-  repository's ACL tests run on macOS only, and the Linux behaviour has not been tested here.
+  macOS ACL tests run only on macOS. One Linux test (`test_linux_acl_that_lets_another_user_write...`) needs `setfacl`; it
+  skips elsewhere and has not been run on a Linux host for this document, so the Linux behaviour is untested here.
 - NFSv4 ACLs and other filesystem-specific access controls are not read. If the store sits on a filesystem that grants
   access in a way the mode bits do not show, the policy does not see it.
 - Extended attributes, capabilities, SELinux or AppArmor labels, and container or bind-mount permissions are not read.

@@ -1,4 +1,4 @@
-"""HTTP audit server (production-hardened reference build).
+"""HTTP audit server (reference build that runs the plaintext audit functions).
 
 Exposes every audit primitive as a POST endpoint that consumes the
 JSON Schema bundled in :mod:`regaudit_fhe.schemas` and emits an

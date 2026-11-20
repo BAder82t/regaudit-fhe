@@ -29,7 +29,7 @@ push and uploads it as a workflow artifact (see
 | `regaudit_fhe.trust` | `TrustStore` and the typed verifier exception hierarchy. |
 | `regaudit_fhe.dp` | Differential-privacy output perturbation (Laplace / Gaussian mechanisms, accountant, `privatize_report`). |
 | `regaudit_fhe.schemas` | JSON Schema loading and validation. |
-| `regaudit_fhe.server` | Hardened FastAPI audit server (optional `[server]` extra). |
+| `regaudit_fhe.server` | FastAPI audit server for the plaintext audit functions, with request limits and optional authentication (optional `[server]` extra). It has no encrypted path. |
 | `regaudit_fhe.fhe` | CKKS backends: parameter validation, the backend registry, and the TenSEAL / OpenFHE slot-vector implementations. |
 
 For prose-level guidance see [the README](../README.md),

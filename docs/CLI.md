@@ -100,9 +100,11 @@ development profile. See [docs/TRUST_SPEC.md](TRUST_SPEC.md).
 each primitive expects.
 
 > **The HTTP server is NOT a privacy boundary by itself.** The default
-> execution path is plaintext; the server runs in-process. Encrypted
-> execution requires the `[fhe]` extra AND CKKS secret-key custody
-> held off-host. Bearer-token authentication uses constant-time
+> execution path is plaintext; the server runs in-process and has no
+> encrypted path: the `[fhe]` extra does not change what the server runs.
+> Encrypted execution is available only through the library's own
+> functions, and then the process that evaluates also holds the CKKS
+> secret key. Bearer-token authentication uses constant-time
 > hashed comparison (no token timing leak) and `REGAUDIT_FHE_DEV_MODE=1`
 > refuses to start on a non-loopback bind, but issuer authenticity
 > still relies on the verifier's trust store. Read
