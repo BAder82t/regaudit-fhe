@@ -116,6 +116,12 @@ filterwarnings = [
   "ignore:verify_receipt\\(\\) without trust material is deprecated:DeprecationWarning",
 ]
 testpaths = ["tests"]
+# The two gate markers are applied by tests/_gate_plugin.py from the reviewed list in tests/_gate_manifest.py
+# (docs/TEST_GATES.md); registering them here keeps --strict-markers working for an explicit decorator too.
+markers = [
+  "security_gate: a mandatory security test; it must run and pass, and a skip fails the gate unless the manifest declares it for the platform",
+  "tenseal_required: needs TenSEAL; mandatory when REGAUDIT_REQUIRE_TENSEAL=1",
+]
 
 [tool.coverage.run]
 branch = true
