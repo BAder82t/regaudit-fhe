@@ -102,7 +102,7 @@ def test_a_store_nobody_else_can_write_decides_correctly_and_keeps_its_mode(
 
 
 def test_a_new_store_from_trust_add_is_accepted(world):
-    assert mode(world / "t.json") == 0o644
+    assert mode(world / "t.json") == 0o600
     assert verify_cli(world, "trusted.json")[1]["trust_status"] == "TRUSTED"
 
 

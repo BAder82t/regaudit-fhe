@@ -882,7 +882,7 @@ def test_cli_refusals_exit_2_unusable_exit_3_and_write_nothing(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits and symlinks")
 def test_cli_mode_after_trust_add_is_preserved_and_symlink_survives(tmp_path):
     _enrolled(tmp_path)
-    assert stat.S_IMODE((tmp_path / "s.json").stat().st_mode) == 0o644  # what trust add writes
+    assert stat.S_IMODE((tmp_path / "s.json").stat().st_mode) == 0o600  # what trust add writes
     os.chmod(tmp_path / "s.json", 0o640)
     (tmp_path / "link.json").symlink_to("s.json")
     r = _cli(tmp_path, "trust", "retire", "--store", "link.json", "--key-id", "k-1")

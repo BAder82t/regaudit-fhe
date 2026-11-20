@@ -246,10 +246,10 @@ def test_trust_add_keeps_the_mode_of_a_safe_store(world, file_mode):
     assert mode(world / "t.json") == file_mode
 
 
-def test_trust_add_still_creates_a_new_store_as_0644(world):
+def test_trust_add_creates_a_new_store_as_0600(world):
     out = _trust_add(world, "new.json")
     assert out.returncode == 0, out.stderr
-    assert mode(world / "new.json") == 0o644
+    assert mode(world / "new.json") == 0o600
 
 
 def test_trust_list_warns_about_an_unsafe_store(world):
