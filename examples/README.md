@@ -17,7 +17,7 @@ regaudit-fhe verify -i demo/report.json --trusted-keys demo/trust_store.json --v
 
 ## Examples
 
-The folder folder ships these flows. They use synthetic data and
+The folder ships these flows. They use synthetic data and
 need only the installed package unless noted. Run them from a checkout (the folder is not
 part of the wheel); `01` and `02` write their JSON output into the current directory.
 
@@ -30,4 +30,4 @@ part of the wheel); `01` and `02` write their JSON output into the current direc
 | `03_regulator_verify.py` | Verify every envelope inside a bundle against a `TrustStore` (`--bundle`, `--trust-store`); surfaces typed failure reasons. |
 | `signed_envelope.py`, `regulator_verify_signature.py` | Signing, tamper detection and trusted-key pinning walk-throughs. |
 | `server_client.py` | Drive the HTTP app in-process with a test client: auth scopes, three audits, one verification (needs `[server]`). |
-| `openfhe_fairness_roundtrip.py`, `benchmark_reproduce.py` | Encrypted-backend demos (need `[fhe]`). |
+| `openfhe_fairness_roundtrip.py`, `benchmark_reproduce.py` | Encrypted-backend demos (need `[fhe]`). Despite its name, `openfhe_fairness_roundtrip.py` runs the TenSEAL backend; the file name is historical. |

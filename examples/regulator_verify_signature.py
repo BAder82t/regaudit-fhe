@@ -1,7 +1,9 @@
 """Example — regulator-side envelope verification with a trusted-keys store.
 
-Mirrors what a regulator portal does when ingesting a signed audit
-submission from a regulated AI vendor:
+Illustrates one way a regulator-side verifier can check a signed audit
+submission from a regulated AI vendor. It uses the older flat
+``trusted_keys=`` map; new code should use ``verify_report`` with a
+``VerificationPolicy``:
 
   1. Pin the vendor's public key by ``key_id``.
   2. Receive the JSON envelope.
@@ -81,7 +83,7 @@ def main() -> int:
     print(f"            timestamp_valid:    {out.timestamp_valid}\n")
 
     if out.trust_status == "TRUSTED" and param_ok:
-        print("[Regulator] ACCEPT — envelope passes every binding check.\n")
+        print("[Regulator] ACCEPT under this example's trust list (no claim that the audit is correct).\n")
     else:
         print("[Regulator] REJECT — envelope failed verification.\n")
         return 1
@@ -98,7 +100,7 @@ def main() -> int:
     print("            REJECT — embedded public key does not match "
           "the trusted-keys store entry for vendor-2026-q2.")
 
-    print("\nOK — regulator-side verification works end-to-end with "
+    print("\nOK — this example ran the checks with "
           "trusted-keys pinning + parameter-set pinning + tamper detection.")
     return 0
 
