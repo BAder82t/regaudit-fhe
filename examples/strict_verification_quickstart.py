@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 ISSUER, KEY_ID, DEPLOYMENT, VERIFIER = "acme-bank", "acme-2026-04", "prod-eu-1", "regulator-a"
 failures: list[str] = []
@@ -143,6 +144,7 @@ def main(out: Path) -> int:
         return 1
     print("OK. Remember: TRUSTED means 'signed by a key in YOUR trust store', and only that.")
     print("It says nothing about the audit being correct, complete or compliant.")
+    print(claim_labels.NOT_ESTABLISHED, claim_labels.INVARIANT)
     return 0
 
 

@@ -38,6 +38,7 @@ from . import (
     audit_drift,
     audit_fairness,
     audit_provenance,
+    claim_labels,
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
@@ -795,8 +796,11 @@ def _refusal_hint(trust_status: str, reason: str | None) -> str:
     )
 
 
-def _versioned_payload(result: Any, decision: Any) -> dict[str, Any]:
-    return response_v2(result.to_dict(), None if decision is None else decision.revocation)
+def _versioned_payload(result: Any, decision: Any, env: Any) -> dict[str, Any]:
+    assessment = claim_labels.assess(env, trust_status=result.trust_status, accepted=result.accepted)
+    return response_v2(
+        result.to_dict(), None if decision is None else decision.revocation, assessment
+    )
 
 
 def _write_profile_notice(profile: str) -> None:
@@ -963,9 +967,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         if (
             versioned
         ):  # an opted-in client still sees the status; the exit code says no verdict was possible
-            print(json.dumps(_versioned_payload(result, decision), indent=2))
+            print(json.dumps(_versioned_payload(result, decision, env), indent=2))
         return 3
-    payload = _versioned_payload(result, decision) if versioned else result.to_dict()
+    payload = _versioned_payload(result, decision, env) if versioned else result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
     if not result.accepted:
         payload["reason"] = (
@@ -974,6 +978,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     print(json.dumps(payload, indent=2))
     if not result.accepted:
         sys.stderr.write(_refusal_hint(result.trust_status, payload.get("reason")) + "\n")
+    # Wording only: what the verdict does and does not establish. Written after the verdict, never read by it.
+    sys.stderr.write(
+        claim_labels.stderr_block(env, trust_status=result.trust_status, accepted=result.accepted)
+    )
     return 0 if result.accepted else 1
 
 
@@ -983,7 +991,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = argparse.ArgumentParser(
         prog="regaudit-fhe",
-        description="Regulatory audit primitives with a plaintext model and an optional TenSEAL CKKS backend.",
+        description=(
+            "Regulatory audit primitives. The audit and verify commands run plaintext functions and sign the "
+            "result. A signed report can authenticate a claim without proving that claim is true."
+        ),
     )
     sub = p.add_subparsers(dest="command", required=True)
 

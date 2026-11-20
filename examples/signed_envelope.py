@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 
 def main() -> int:
@@ -86,6 +87,7 @@ def main() -> int:
     print(f"                     signature_valid: {bad.signature_valid}")
     assert bad.trust_status == "INVALID"
     print("\nOK — fresh envelope verified, tampered envelope rejected.")
+    print(claim_labels.NOT_ESTABLISHED, claim_labels.INVARIANT)
     return 0
 
 

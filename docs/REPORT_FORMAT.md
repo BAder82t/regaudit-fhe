@@ -81,8 +81,31 @@ Verifying a report does not show that FHE execution occurred. `backend` is also 
 
 **Reading existing reports.** A report that signs `backend: "plaintext"` with `security_bits: 128` makes no claim of
 encryption, whatever the number says, and it does not show that none took place. Every published version from 0.0.2 to 0.2.1 signs it this way
-by default, so show such a report as "no encryption claimed", and never as "128-bit". The published schemas are not
+by default, so show such a report as "declares a plaintext backend" with "Encrypted execution not established.", and never as "128-bit". The published schemas are not
 changed by this note, and correcting the field itself would need a new schema version.
+
+## How a verdict labels what a report claims
+
+Verifier output (the CLI's stderr, `--response-format v2`, `POST /v1/verify?response_format=v2` and the portal) separates
+seven kinds of statement. The labels are wording only. They are produced by `regaudit_fhe.claim_labels` from the parsed report,
+they never change `accepted`, `trust_status`, a reason code or an exit code, and they add nothing to the default JSON.
+
+| Kind | What it says today |
+|---|---|
+| Execution mode observed by a trusted component | None. No signed field and no independent check records an execution mode |
+| Execution mode declared in the report | The report declares a plaintext backend, declares an FHE backend (named), names an unrecognised backend, or names none. A declaration by the signer, not an observation |
+| Execution mode established from the available evidence | Cannot be established. **Encrypted execution not established.** |
+| Cryptographic configuration | `backend`, `security_bits`, `multiplicative_depth` and the rest are values the signer declared |
+| Authenticated report content | Who signed these exact bytes, if a trust store you control names the key. Not that the content is true |
+| Independently established computational properties | None |
+| Unsupported or unverified claims | That the computation ran encrypted, that results are correct, that privacy holds, that any regulation is met |
+
+Two rules go with it. First, **a signed report can authenticate a claim without proving that claim is true**, and successful FHE
+tests in this repository do not by themselves prove that an arbitrary signed report was produced through FHE. Second, the absence
+of encrypted-execution evidence is "not established", never "plaintext". Parameters such as `security_bits: 128` or a depth of 6
+are not read as evidence of FHE in either direction. Every verdict today carries "Encrypted execution not established.", because
+no signed field establishes encrypted execution. A later report version could add one with a stated basis; until then these
+labels are the whole answer.
 
 ## JSON schemas
 

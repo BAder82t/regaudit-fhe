@@ -113,6 +113,7 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
+from . import claim_labels
 from ._limits import (
     AdmissionGate,
     GateRefused,
@@ -149,6 +150,10 @@ __all__ = [
     "validate_trust_config",
 ]
 
+SERVER_EXECUTION = (
+    "plaintext-only: the audit routes run plaintext functions. The tenseal field is the version of an installed "
+    "library, not evidence of encrypted execution."
+)
 PRIVACY_WARNING = (
     "regaudit-fhe HTTP server: NOT A PRIVACY BOUNDARY by itself. The "
     "audit routes run plaintext functions and sign with an ephemeral key; "
@@ -1259,10 +1264,11 @@ def build_app(
     app = FastAPI(
         title="regaudit-fhe",
         description=(
-            "Regulatory audit primitives with a plaintext model "
-            "and an optional TenSEAL CKKS backend. The audit routes run "
-            "plaintext functions. NOT a privacy boundary by itself; see "
-            "server module docstring."
+            "Regulatory audit primitives. The audit routes run plaintext "
+            "functions and sign the result; this server has no encrypted "
+            "execution path. NOT a privacy boundary by itself; see "
+            "server module docstring. A signed report can authenticate a "
+            "claim without proving that claim is true."
         ),
         version=LIB_VERSION,
     )
@@ -1360,7 +1366,14 @@ def build_app(
             },
         )
 
-    @app.get("/version")
+    @app.get(
+        "/version",
+        description=(
+            "Library and interpreter versions. `tenseal` is the version of the optional TenSEAL "
+            "package if it is installed; it is not a capability of this server and not evidence of "
+            "encrypted execution. `server_execution` states what the audit routes run."
+        ),
+    )
     def version() -> dict[str, str]:
         try:
             import tenseal
@@ -1372,6 +1385,7 @@ def build_app(
             "library_version": LIB_VERSION,
             "python": platform.python_version(),
             "tenseal": backend_version,
+            "server_execution": SERVER_EXECUTION,
         }
 
     # ----- Schemas (read scope) -------------------------------------------
@@ -1554,7 +1568,11 @@ def build_app(
         response: dict[str, Any] = result.to_dict()
         if response_format == "v2":
             # Opt-in. This server has no revocation gate, so it says revocation was not evaluated.
-            return response_v2(response, None)
+            return response_v2(
+                response,
+                None,
+                claim_labels.assess(env, trust_status=result.trust_status, accepted=result.accepted),
+            )
         return response
 
     return app

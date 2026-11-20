@@ -31,7 +31,9 @@ def test_a_plaintext_report_is_shown_as_no_encryption_and_its_number_as_a_legacy
     body = post(client, demo, "1-trusted.json").json()
     claims = body["encryption_declarations"]
     assert claims["kind"] == "PLAINTEXT" and claims["backend"] == "plaintext"
-    assert claims["statement"] == "No encryption: this report states it was computed on plaintext."
+    assert claims["statement"].startswith("The report declares a plaintext backend.")
+    assert claims["established_statement"] == "Encrypted execution not established."
+    assert claims["invariant"].startswith("A signed report can authenticate a claim")
     assert claims["security_bits"] == 128
     assert claims["security_bits_note"] == "legacy field, not a security level"
     assert claims["encryption_verified"] is False
@@ -68,7 +70,7 @@ def test_a_report_that_was_not_accepted_gets_the_declaration_as_unverified_text(
     note = body["encryption_declarations"]["note"]
     assert body["verification"]["trust_status"] == "INVALID"
     assert "was not accepted" in note and "only what the file says" in note
-    assert body["encryption_declarations"]["statement"].startswith("No encryption")
+    assert body["encryption_declarations"]["statement"].startswith("The report declares a plaintext")
 
 
 def test_a_rejected_report_whose_signature_passed_is_not_called_unverified(client, demo):
