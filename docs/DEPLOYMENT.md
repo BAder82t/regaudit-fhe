@@ -147,7 +147,7 @@ otherwise). Every response carries the same value.
 JSON, one line per request, written to stdout. The line includes
 `request_id`, `method`, `path`, `status`, `duration_ms`, `client`. The
 audit endpoint additionally logs `key_id`, `primitive`, `depth_consumed`,
-`envelope_digest`. **Request and response bodies are never logged**;
+`envelope_digest`. **The server's own logger does not write request or response bodies**;
 audit payloads may carry PHI/PII.
 
 Forward stdout to your aggregator (Loki, Datadog, CloudWatch). `serve` sets the uvicorn log level to `info`; keep it there. The
@@ -289,8 +289,8 @@ tune them for your deployment.
    (`REGAUDIT_FHE_MAX_CONCURRENT_VERIFIES`, same queue length and wait). `503 SERVER_BUSY` is not the per-key
    `429` rate limit: clients should back off and retry, and operators should scale out or raise the limits.
    Because the work is pure Python, more than one or two concurrent audits do not add throughput on one CPU
-   (measured); raise `MAX_CONCURRENT_AUDITS` only if you run the `[fhe]` backend on spare cores and have
-   measured a gain.
+   (measured); raise `MAX_CONCURRENT_AUDITS` only if you have measured a gain on your hardware. The server
+   does not run the `[fhe]` backend, so the extra does not change this.
 3. **Timeouts cancel.** When `REGAUDIT_FHE_REQUEST_TIMEOUT_S` expires the request is answered `504` and
    cancelled; a request waiting for a slot leaves the queue. A computation that is already running on its thread
    cannot be interrupted, so its slot stays taken until it ends: after a timeout at most

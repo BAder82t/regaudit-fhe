@@ -93,6 +93,8 @@ The company runs an audit and signs the result with its private key. The regulat
 | `SELF_SIGNED_ONLY` | It has not been altered, but you gave no list of approved keys, so you cannot tell who signed it. | Do not rely on it. |
 | `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
 
+**Keep this in view:** A signed report can authenticate a claim without proving the claim is true. Successful FHE tests do not prove that an arbitrary signed report was produced through FHE.
+
 Even `TRUSTED` says only that a key in your trust store signed the report, within its scope, with every policy rule met. A signature shows authenticity of the signed claim, not computational correctness. It doesn't say that the audit is correct and it doesn't show that the calculation was done using FHE. The `security_bits` and parameter fields are what the signer configured or declared, not a measured or achieved security level. The timestamp in a report is the signer's claim, not a trusted time.
 
 A report will contain the public key that can check its own signature. Anyone can make a report where the signature is consistent. Only a key that you registered beforehand will tell you who has signed the report. Decide on `result.accepted` or the exit code. Don't use the older `valid` field.
@@ -114,7 +116,7 @@ A report will contain the public key that can check its own signature. Anyone ca
   "algorithm_version": "0.2.1",
   "primitive": "fairness",
   "backend": "plaintext",
-  "result": { "breach": false, "disparity": 0.25 },
+  "result": { "demographic_parity_diff": 0.0, "equal_opportunity_diff": -0.333, "predictive_parity_diff": 0.5, "threshold_breached": true },
   "issuer": "acme-bank",
   "key_id": "acme-2026-04",
   "receipt": { "sha256": "26af001f…", "signature_alg": "Ed25519", "signature_b64": "lVI6L7um…" }

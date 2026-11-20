@@ -70,7 +70,7 @@ contradictions, all fixed with a failing test first:
   allowed in `confidential`; the README and `THREAT_MODEL.md` did not state the
   decisions; a server comment still said "loopback/Unix socket".
 * **Replay store failure during verification** outside development returned a policy
-  refusal; under the owner's rule it is infrastructure failure (CLI 3, HTTP 503).
+  refusal; under the maintainer's rule it is infrastructure failure (CLI 3, HTTP 503).
 * Noted and documented, not changed: input errors (2) are reported before
   infrastructure errors (3) when both apply; in the development profile a replay store
   that fails while verifying fails open with a disclosed `REPLAY_STATE_UNAVAILABLE`.
@@ -114,7 +114,7 @@ hardening nit, all fixed with a failing test first:
   unqualified → qualified (development flag / replay outage; `report.v1` only);
 * a trust-store entry's `key_id` was not checked against its map key → now refused.
 
-One ambiguity the re-check raised for the owner (see §8).
+One ambiguity the re-check raised for the maintainer (see §8).
 
 ## 7. Still open (unchanged)
 
@@ -125,7 +125,7 @@ header-less local proxy limitation, and the larger confidential-computation limi
 (RA-01). Phase 3A remains a candidate trust core, not production readiness. A public
 push, merge or release remains on HOLD.
 
-## 8. Final CLI correction (owner decision applied)
+## 8. Final CLI correction (maintainer decision applied)
 
 A policy-invalid flag combination is a command-configuration error, so it exits **2**,
 not 3: `--allow-self-signed` with `--profile confidential` / `high-assurance`, and a

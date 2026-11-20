@@ -1,6 +1,6 @@
 # regaudit-fhe — Phase 3A report: `report.v2` trust core
 
-> **Superseded in part:** after owner review the six open questions in §10 were
+> **Superseded in part:** after the maintainer's review the six open questions in §10 were
 > decided and a gate-by-gate consistency review was run. The final identities, test
 > counts, boundary semantics and decisions are in
 > [`PHASE3A-CONSISTENCY-REVIEW.md`](PHASE3A-CONSISTENCY-REVIEW.md). This report records
@@ -191,7 +191,7 @@ reviews, **not an external security audit.** Findings and dispositions:
   there are now 40.
 * No cryptographic assertion was removed or relaxed.
 
-## 10. Unresolved specification ambiguities (owner decisions requested)
+## 10. Unresolved specification ambiguities (maintainer decisions requested)
 
 1. **Consumption label.** I report `RECORDED_LOCAL`, not `CONSUMED`, because recording
    at verification is not "after the operation completed". Add it to §6.2 or reserve

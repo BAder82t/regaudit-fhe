@@ -5,6 +5,14 @@
 **Depth budget:** 5 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
+> **Design specification, not a statement of what ships.** This page describes the
+> intended encrypted design. The encrypted functions are experimental and have not been
+> independently qualified. They encrypt, evaluate and decrypt in one process that holds
+> the key and the plaintext inputs, and the command line and HTTP server run the plaintext
+> path only. Security statements below are properties assumed of CKKS at the stated
+> parameters. This repository does not measure or verify them. Where the code differs, the
+> code is what runs.
+
 ## What it does
 
 Computes an encrypted disagreement score across `M ≥ 3` model versions
@@ -68,8 +76,10 @@ plaintext rescale by 1/pairs    : +1 level   = depth 5
 
 ## Security analysis
 
-Polynomial coefficients are auditor-public; the encrypted input is
-never decrypted server-side. IND-CPA at 128-bit is preserved.
+Polynomial coefficients are auditor-public. The function does not decrypt the
+test input itself, only the variance vector and per-model summaries, but the process
+that runs it holds the key and the plaintext input. The ciphertext security of CKKS
+at 128 bits is an assumption at the stated parameters, not measured here.
 
 ## Reference deployment
 

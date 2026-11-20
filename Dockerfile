@@ -1,4 +1,4 @@
-## regaudit-fhe HTTP audit server (production reference build)
+## regaudit-fhe HTTP audit server (reference build)
 ##
 ## Two-stage Docker build. The runtime image runs as a non-root user,
 ## ships the bundled JSON Schemas, and exposes the FastAPI server on

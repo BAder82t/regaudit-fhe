@@ -17,7 +17,7 @@ An audit result is wrapped into a regulator-facing, signed JSON envelope.
   "parameter_set": { "...": "..." },
   "parameter_set_hash": "6b8aedc173e2c94e…",
   "regulations": ["NYC_LL144"],
-  "result": { "breach": false, "disparity": 0.25 },
+  "result": { "demographic_parity_diff": 0.0, "equal_opportunity_diff": -0.333, "predictive_parity_diff": 0.5, "threshold_breached": true },
   "input_commitments": [{ "name": "y_true", "sha256": "a5c4…" }],
   "depth_budget": { "declared": 6, "consumed": 2 },
   "issued_at": "2026-10-01T12:00:00+00:00",

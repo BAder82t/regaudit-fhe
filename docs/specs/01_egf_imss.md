@@ -5,6 +5,14 @@
 **Depth budget:** 4 of 6 *(spec budget, plaintext model — not the observed encrypted depth; see README "Three different depth numbers")*
 **Author:** VaultBytes Innovations Ltd
 
+> **Design specification, not a statement of what ships.** This page describes the
+> intended encrypted design. The encrypted functions are experimental and have not been
+> independently qualified. They encrypt, evaluate and decrypt in one process that holds
+> the key and the plaintext inputs, and the command line and HTTP server run the plaintext
+> path only. Security statements below are properties assumed of CKKS at the stated
+> parameters. This repository does not measure or verify them. Where the code differs, the
+> code is what runs. In `fairness_encrypted` only `y_pred` is encrypted; `y_true` and the group masks are plaintext multipliers, and the breach decision is a plaintext comparison of the decrypted metrics with `threshold`, not an encrypted sign polynomial.
+
 ## What it does
 
 Computes three group-fairness disparity metrics — demographic parity,
@@ -72,9 +80,10 @@ sign-poly threshold         : +2 levels        breached
 ## Security analysis
 
 All ciphertext operations are CKKS Add, Mul (plaintext × ciphertext and
-ciphertext × ciphertext), and Rotate. IND-CPA at 128-bit security is
-preserved at parameter set `N = 2^15`, `log Q ≈ 240`, hybrid key
-switching `dnum = 3`. Group cardinalities and label-positive counts are
+ciphertext × ciphertext), and Rotate. The scheme's IND-CPA security at 128
+bits is an assumption about CKKS at the chosen parameters (the code's `CKKSParams`
+default is `N = 2^15` with a 360-bit chain), not something this repository measures.
+The code does not set a key-switching `dnum`. Group cardinalities and label-positive counts are
 auditor-public; deployments that cannot leak these counts can hide
 them with composite-output noise flooding before decryption.
 

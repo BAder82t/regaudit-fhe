@@ -39,12 +39,15 @@ print(envelope.to_json())  # ship this to the regulator
 
 Everything else in this section is detail layered on that one idea.
 
+**Keep this in view:** A signed report can authenticate a claim without proving the claim is true. Successful FHE tests do not prove that an arbitrary signed report was produced through FHE.
+
 ## A valid signature is not a trusted signer
 
 A report carries the public key that checks its own signature. So anyone can produce a
 report whose hash and signature are perfectly consistent: generate a key, sign, embed the key.
-Consistency proves the bytes were not changed after signing. It proves nothing about **who**
-signed. Only a key the verifier registered beforehand can answer that.
+Consistency shows the bytes match a signature made with the key inside the report, so they
+were not changed after whoever holds that key signed them. It proves nothing about **who**
+that is. Only a key the verifier registered beforehand can answer that.
 
 | What you ran | What a good result means | Does it authenticate the issuer? |
 | --- | --- | --- |
@@ -222,7 +225,7 @@ except rf.TimestampInvalid:  # an attached timestamp failed validation
 ```
 
 * `verify_receipt(env)` with no trust material only checks that the hash and embedded
-  signature agree. That proves the bytes did not change; it does **not** prove an
+  signature agree. That shows the bytes match the embedded key's signature; it does **not** prove an
   approved auditor produced them, and it emits a `DeprecationWarning` (plus a one-time
   `UserWarning`). Pass
   `trust_store=` (recommended: it enforces revocation, pins and scope) or

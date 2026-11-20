@@ -37,7 +37,7 @@ carried over as active: mark it with `trust revoke` after adding it.
 **`trust add` durability.** Exit 3 with `NOT confirmed durable` means the key is in the store but syncing it failed. It is not a success: run the same `trust add` again (an identical repeat is safe and syncs again) or `trust status`. A repeat of an identical add now exits 0 with `already_enrolled: true` instead of 2. See [STORAGE_PLATFORM_NOTES.md](STORAGE_PLATFORM_NOTES.md#write-outcomes-and-recovery).
 
 **`trust add` is normal enrollment, not an authenticated one.** No authenticated enrollment exists yet. It checks the key against the fingerprint you supply, and the result's `issuer_binding` is
-`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the project owner.
+`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the maintainer.
 
 **`trust migrate` is for `development` and the lenient paths.** Every strict profile refuses what it writes (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), because `--issuer` is your statement as a local
 operator and not proof that a key belongs to that issuer.
