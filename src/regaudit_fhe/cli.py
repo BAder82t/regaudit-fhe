@@ -746,6 +746,22 @@ def _versioned_payload(result: Any, decision: Any) -> dict[str, Any]:
     return response_v2(result.to_dict(), None if decision is None else decision.revocation)
 
 
+def _write_profile_notice(profile: str) -> None:
+    """State the effective profile on stderr (stdout and exit codes are untouched)."""
+    if profile == "development":
+        sys.stderr.write(
+            "note: verification profile in effect: development. A development profile is not a "
+            "high-assurance profile: it does not require a maximum report age, replay checking or a "
+            "verifier id, and it only warns about a trust store another account could change. "
+            "Use --profile to select another profile.\n"
+        )
+    else:
+        sys.stderr.write(
+            f"note: verification profile in effect: {profile}. The checks it enforces are listed in "
+            "docs/TRUST_SPEC.md; a passing verdict is a result under that profile only.\n"
+        )
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Exit 0 only if the report is accepted under the selected policy.
 
@@ -755,6 +771,30 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     was specified is unavailable or unusable (trust store, replay store). stdout
     carries the JSON verdict for exit 0 and 1 only.
     """
+    if args.strict:
+        # Never an alias for a profile and never a no-op: the one supported mechanism is --profile.
+        sys.stderr.write(
+            "--strict is not supported and selects no profile. Use --profile <name> to choose the "
+            f"verification profile; valid names: {', '.join(PROFILES)}. "
+            "See docs/MIGRATION_0.3.md.\n"
+        )
+        return 2
+    profile_explicit = args.profile is not None
+    if args.profile is None:
+        args.profile = "development"
+    replay_mode_explicit = args.replay_mode is not None
+    if args.replay_mode is None:
+        args.replay_mode = "off"
+    if args.replay_db and args.replay_mode == "off":
+        # A replay file that nothing consults is a misconfiguration: the operator believes replays are caught.
+        how = "was set explicitly" if replay_mode_explicit else "is the default"
+        sys.stderr.write(
+            f"--replay-db {args.replay_db!r} was given but the replay mode is 'off' (it {how}), so replay "
+            "protection is disabled and the file would never be read or written. To enable it, pass "
+            "--replay-mode check (detect a replay without recording this report) or --replay-mode record "
+            "(also record it as seen). To run without replay protection, remove --replay-db.\n"
+        )
+        return 2
     try:
         env = parse_envelope_strict(_read_report(args.input))
     except OSError as exc:
@@ -828,6 +868,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "compared with that statement, which is not an authenticated binding. confidential, high-assurance and "
             "secure-v1 refuse this store.\n"
         )
+    if profile_explicit or sys.stderr.isatty():
+        _write_profile_notice(args.profile)
     decision = None
     try:
         if args.revocation_mode == "off":
@@ -1014,9 +1056,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--strict",
         action="store_true",
-        help="Has no effect and selects no assurance profile: use --profile. Kept for "
-        "compatibility; trust material is required with or without it (see "
-        "--allow-self-signed for the development-only alternative).",
+        help="Refused with a usage error (exit 2): it selects no profile and never changes a verdict. "
+        "Use --profile <name> instead.",
     )
     verify_p.add_argument(
         "--allow-self-signed",
@@ -1025,7 +1066,12 @@ def build_parser() -> argparse.ArgumentParser:
         "SELF_SIGNED_ONLY and the command exits 1, never 0. With --trusted-keys it has no "
         "effect in the development profile; it is refused (exit 2) in any other profile.",
     )
-    verify_p.add_argument("--profile", choices=PROFILES, default="development")
+    verify_p.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default=None,
+        help="Verification profile (default: development, which is not a high-assurance profile).",
+    )
     verify_p.add_argument("--verifier-id", help="This verifier's audience identifier.")
     verify_p.add_argument(
         "--max-age-seconds",
@@ -1036,9 +1082,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--replay-mode",
         choices=("off", "check", "record"),
-        default="off",
-        help="Local replay detection. 'record' marks the report as seen in --replay-db "
-        "(local only; not a global single-use guarantee).",
+        default=None,
+        help="Local replay detection (default: off). 'record' marks the report as seen in --replay-db "
+        "(local only; not a global single-use guarantee). --replay-db with mode off is a "
+        "configuration error (exit 2): replay protection would be disabled.",
     )
     verify_p.add_argument(
         "--refuse-legacy-v1", action="store_true", help="Refuse report.v1 envelopes."
