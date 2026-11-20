@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ._keys import spki_fingerprint
+from ._store_write import store_lock, sync_directory
 from ._time import parse_rfc3339
 from .canonical import CanonicalError, loads_strict
 from .trust import (
@@ -219,11 +220,9 @@ def _write_atomic(path: str, data: bytes, expected_old: bytes, mode: int) -> Non
             raise LifecycleRefused("the trust store changed while this edit was prepared; retry")
         os.replace(backup_tmp, backup)
         os.replace(new_tmp, target)
-        dir_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        sync_directory(
+            directory
+        )  # DurabilityNotConfirmed: the new store is in place but not confirmed durable
     finally:
         for tmp in tmp_paths:
             with contextlib.suppress(OSError):
@@ -231,6 +230,17 @@ def _write_atomic(path: str, data: bytes, expected_old: bytes, mode: int) -> Non
 
 
 def _mutate(
+    path: str,
+    key_id: str,
+    now: datetime,
+    change: Callable[[dict[str, Any], datetime], None],
+) -> dict[str, Any]:
+    # The same advisory lock as ``trust add``, so a retire/revoke and an add do not lose each other's change.
+    with store_lock(path):
+        return _mutate_locked(path, key_id, now, change)
+
+
+def _mutate_locked(
     path: str,
     key_id: str,
     now: datetime,

@@ -189,10 +189,16 @@ def test_enrolment_never_replaces_or_converts_an_existing_store(work):
     info = _keygen(work)
     assert _trust_add(work, info).returncode == 0
     snapshot = (work / "store.json").read_bytes()
+    # the identical add again is an idempotent repeat: nothing is replaced, the store is only synced again
     dup = _trust_add(work, info)
-    assert dup.returncode == 2 and "already enrolled" in dup.stderr
+    assert dup.returncode == 0 and json.loads(dup.stdout)["already_enrolled"] is True
     assert (work / "store.json").read_bytes() == snapshot
     second = _keygen(work, name="k2", key_id="acme-2027")
+    other = _trust_add(
+        work, {**second, "key_id": info["key_id"]}, name="k2"
+    )  # another key under a used id
+    assert other.returncode == 2 and "already enrolled" in other.stderr
+    assert (work / "store.json").read_bytes() == snapshot
     assert _trust_add(work, second, name="k2").returncode == 0
     assert len(json.loads((work / "store.json").read_text())["entries"]) == 2
     # the same key under a second id is refused by the store's own uniqueness rule
