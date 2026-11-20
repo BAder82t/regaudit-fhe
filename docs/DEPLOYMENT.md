@@ -135,7 +135,7 @@ report can consume its `audit_run_id` before the intended relying party does.
 `check` mode only looks up and never records. A stateless verification response
 reports `consumption: NOT_CHECKED`. Every replay-checked response also reports
 `replay_durable` (`false` for the in-memory cache, whose records are lost when the
-process exits, and, in the experimental code only, for a sqlite file that fails the storage check below).
+process exits, and, in the unreleased 0.3.0 source only, for a sqlite file that fails the storage check below).
 
 Every request gets an `X-Request-Id` (echoed if supplied; generated
 otherwise). Every response carries the same value.
@@ -525,7 +525,7 @@ the deployment, not with this binary.
 
 ## Where the trust store can live
 
-**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/trust-store-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the experimental code from pull request #65, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
+**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/trust-store-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the unreleased 0.3.0 source, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
 
 Under `confidential`, `high-assurance`, and `secure-v1`, another local account must not be able to change which keys the verifier trusts. Therefore, the trust store file needs to be one that other accounts cannot change. The file needs to be a regular file with one name. It cannot be a symlink. It needs to be owned by the account running the verifier or by root. It cannot be writable by group or others. The directories on the way to it have the same rules as below. `0600`, `0640`, and `0644` are all fine. `trust add` writes `0644`. `0660` is refused due to the lack of a way to name a trusted group.
 
@@ -535,7 +535,7 @@ This is only about other unprivileged accounts. A process in the same account, a
 
 ## Where the replay file can live
 
-**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/replay-file-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the experimental code from pull request #65, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
+**Which version this describes.** Published v0.2.1 does not have these checks. Under every profile it does not look at who owns this file or who can write to it, so do not assume it is protected. See the [advisory](advisories/replay-file-permissions-0.2.1.md), which gives the mitigations, because no patch for 0.2.x is planned. The refusals below are in the unreleased 0.3.0 source, and they are not independently security-qualified. v0.3.0 is unreleased and subject to security acceptance.
 
 Under `confidential`, `high-assurance` and `secure-v1` the replay file needs to be one that other accounts cannot change. It needs to be a regular file with one name. It cannot be a symlink. It needs to be owned by the account running the verifier and not writable by group or others. The parent directory of the file needs to be owned by this account or root. This parent directory also cannot be writable by group or others. All the directories above it need to follow the same rules but a sticky directory such as `/tmp` is allowed above the parent directory. A new file is created with permissions `0600` whatever the umask. A good default is `0600` for the file and `0700` for its directory.
 
