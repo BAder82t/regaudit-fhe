@@ -1,6 +1,6 @@
 # 0.3.0 trust protocol: frozen proposal v2
 
-Status: **FROZEN PROPOSAL v2, for the maintainer's decision. Not implemented in the product and not part of the published
+Status: **FROZEN PROPOSAL v2, for owner decision. Not implemented in the product and not part of the published
 protocol.** No schema is registered, no public API or verification rule has changed, nothing under `src/` implements
 or mentions it, and nothing here is wired to the CLI or the server. AI-assisted engineering work. It is not an audit,
 gives no production assurance and has no regulator approval. It says nothing about whether an encrypted computation
@@ -16,12 +16,12 @@ ran. Companion documents: [test matrix](proposals/revocation-list.v1/TEST_MATRIX
   adversarial corpus is pinned byte for byte to its generator. A change needs a deliberate re-pin, and a change to a
   format needs `schema_version: 2`.
 * It builds on `docs/TRUST_SPEC.md` 4.5 and 4.6. TRUST_SPEC stays in force. Section 17 lists where this proposal departs from it
-  and what the maintainer would have to rule before this could ship.
+  and what the owner would have to rule before this could ship.
 
 Sections 7 to 13 are normative for an implementation. A local reference model of them lives in
 `tests/experimental_revocation/`; it is not product code.
 
-## 1. Maintainer decisions encoded
+## 1. Owner decisions encoded
 
 These are settled and are not reopened here. Section 16 lists what is still open.
 
@@ -432,7 +432,7 @@ own clock rescue a listed key; `required` without a baseline, or on a store with
 The gate reads state only. The issuer is taken **from the verifier's trust-store entry for the key**, never from the
 report, so a report cannot select an issuer whose data happens to be fresh. In order:
 
-| # | Condition | Code | Maintainer's term | CLI, HTTP |
+| # | Condition | Code | Owner's term | CLI, HTTP |
 |---|---|---|---|---|
 | 1 | No pin for the issuer | `REVOCATION_NOT_ENROLLED` | absent | 3, 503 |
 | 2 | Record missing | `REVOCATION_STATE_LOST` | absent | 3, 503 |
@@ -448,7 +448,7 @@ Exit codes follow TRUST_SPEC 9.3.5: an unusable required resource is 3, a well-f
 also refuses the report, an infrastructure code still gives 3, as `REPLAY_STATE_UNAVAILABLE` does today. `trust_status` is
 `INVALID` and `accepted` is false for every blocking code.
 
-The evidence age is a setting of its own, not linked to `trust_history_max_age`. It has no ceiling, since the maintainer may trade it against
+The evidence age is a setting of its own, not linked to `trust_history_max_age`. It has no ceiling, since the owner may trade it against
 heartbeat frequency, but the bound in section 9.6 scales with it and every result discloses its value.
 
 A key the trust store does not know skips the gate, and the engine refuses it (`ISSUER_UNKNOWN`).
@@ -676,7 +676,7 @@ what `off` means, and operators need to be told.
 | Stale or withheld data | Staleness rule | Bounded view, without an authority key (9.6). Denial of service for `required` verifiers |
 | Lost, restored or racing state | Section 9 | Restore without detection (9.6) |
 | Writer on the verifier host | Independent store narrows it | Can change the trust store, its issuers and the pin, and on `LOCAL_FILE` the record. Out of scope |
-| Wrong status chosen by the maintainer | Process | Undetectable |
+| Wrong status chosen by the owner | Process | Undetectable |
 | Clock error on the verifier | Floor, skew, staleness | A wrong clock misjudges expiry. Backward errors beyond the floor are caught; forward errors fail closed |
 
 ## 15. Reason codes
@@ -692,7 +692,7 @@ stay reserved and unused.
 | Gate, on a report | `REVOCATION_NOT_ENROLLED`, `REVOCATION_STATE_LOST`, `REVOCATION_STATE_UNAVAILABLE`, `REVOCATION_STATE_ROLLBACK`, `REVOCATION_CONTRADICTORY`, `REVOCATION_CLOCK_REGRESSION`, `REVOCATION_DATA_ABSENT`, `REVOCATION_AUTHORITY_COMPROMISED`, `REVOCATION_DATA_STALE`, and any document code for presented evidence |
 | Configuration, at startup | `REVOCATION_STORE_UNSUPPORTED` |
 
-## 16. Open maintainer decisions
+## 16. Open owner decisions
 
 Not decided here. Each has a recommendation. Until OD-1 to OD-5 and OD-8 are made, TRUST_SPEC 4.5 forbids implementing or advertising
 this as `high-assurance`.
@@ -710,18 +710,18 @@ this as `high-assurance`.
 
 ## 17. What TRUST_SPEC would need
 
-Not edited in this milestone. These are departures or gaps the maintainer has to rule on (OD-8), not settled changes.
+Not edited in this milestone. These are departures or gaps the owner has to rule on (OD-8), not settled changes.
 
 **The mapping.** TRUST_SPEC 4.5 has one anchor, which signs bundles and rotates through a statement it signs. This proposal has two keys.
 The reading proposed here is: the 4.5 **anchor is the pin plus the recovery anchor** (provisioned out of band, kept outside distributed
 data, replaced only by re-provisioning, as 4.5 requires), and the revocation authority is a delegate that signs lists, which are not
 the 4.5 bundle. Under this reading the 4.5 rule that anchor rotation "MUST NOT be accepted from the bundle channel alone" holds. If the
-maintainer instead reads the authority as the 4.5 anchor, then routine transitions served beside lists, and recovery not signed by the outgoing
-key, both conflict with 4.5, and maintainer decisions 3 and 5 would have to supersede it.
+owner instead reads the authority as the 4.5 anchor, then routine transitions served beside lists, and recovery not signed by the outgoing
+key, both conflict with 4.5, and owner decisions 3 and 5 would have to supersede it.
 
 | TRUST_SPEC | Here | Needed |
 |---|---|---|
-| 4.5 "Rotation quorum" pending | Single signer, maintainer decision 4 | Record it against O8 |
+| 4.5 "Rotation quorum" pending | Single signer, owner decision 4 | Record it against O8 |
 | 4.5 "Independent approval authority" pending | Not addressed | OD-8 |
 | 4.5, 4.6 rule 2 durable monotonic head | Rebase lowers the mark, under an anchor-signed statement | Allow it explicitly |
 | 4.2, 4.6 rule 3 no edit removes a compromise | The ceremony can clear joined key actions, explicitly and locally | Allow or forbid |
@@ -753,7 +753,7 @@ in it.
 | Store checks before epoch rules, and latching | A public replay after a local store change latched the issuer | Epoch first; store conflicts do not latch |
 | A condemned mark was still chained against | An honest list after recovery latched | Epoch floor only |
 
-**Added, because the milestone or maintainer decisions require it:**
+**Added, because the milestone or owner decisions require it:**
 
 * Fail closed at verification time. Draft v1 checked lists only at ingest, and its row P accepted with no data in every profile.
   Sections 10.1 to 10.5 are new, including the opt-in modes.
