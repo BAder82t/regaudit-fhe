@@ -28,6 +28,7 @@ part of the wheel); `01` and `02` write their JSON output into the current direc
 | `01_client_local_audit.py` | Internal audit on synthetic data; archive JSON locally. |
 | `02_client_to_regulator.py` | Build a regulator submission bundle. |
 | `03_regulator_verify.py` | Verify every envelope inside a bundle against a `TrustStore` (`--bundle`, `--trust-store`); surfaces typed failure reasons. |
-| `signed_envelope.py`, `regulator_verify_signature.py` | Signing, tamper detection and trusted-key pinning walk-throughs. |
+| `signed_envelope.py` | Signing and tamper detection walk-through. |
+| `regulator_verify_signature.py` | A regulator-side check with an explicit trust store and `verify_report`: an enrolled issuer is `TRUSTED`, a stranger's self-signed report and an edited report are each `INVALID`, for different reasons. Reports come from the plaintext path. |
 | `server_client.py` | Drive the HTTP app in-process with a test client: auth scopes, three audits, one verification (needs `[server]`). |
 | `openfhe_fairness_roundtrip.py`, `benchmark_reproduce.py` | Encrypted-backend demos (need `[fhe]`). Despite its name, `openfhe_fairness_roundtrip.py` runs the TenSEAL backend; the file name is historical. |
