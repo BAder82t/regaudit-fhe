@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests import _gate, _gate_manifest
+from tests import _gate, _gate_identity, _gate_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,7 +63,8 @@ def manifest(sec=None, ten=None, rules=None):
 MAC_RULE = {
     "id": "macos-acl",
     "kind": "platform",
-    "reason": "macOS ACLs",
+    "reason": "^macOS ACLs$",
+    "nodeid": ["tests/sec.py::*", "tests/other.py::*"],
     "when": {"platform_not": ["darwin"]},
     "gate_ok": True,
 }
@@ -386,6 +387,7 @@ EXPECTED_SKIPS = [
     {{"id": "declared", "kind": "environment", "reason": "declared optional skip",
      "when": {{"data_dependent": True}}, "note": "fake"}},
     {{"id": "declared-gate", "kind": "platform", "reason": "declared mandatory skip",
+     "nodeid": ["test_sec.py::test_two"],
      "when": {{"platform_not": ["no-such-platform"]}}, "gate_ok": True, "note": "fake"}},
     {{"id": "no-tenseal", "kind": "dependency", "reason": "no TenSEAL here",
      "when": {{"data_dependent": True}}, "blocked_by": "tenseal", "note": "fake"}},
@@ -393,17 +395,51 @@ EXPECTED_SKIPS = [
 BACKEND_QUALIFICATION = {{"openfhe-ckks": {{"module": "openfhe", "modules": ["test_ofhe.py"],
                          "not_qualified_because": "no test executed"}}}}
 UNTESTED_NOTES = ["fake"]
+SCOPES = {{"full": {{"description": "fake", "full_suite": True}}}}
 """
 
 
-def _project(tmp_path, sec_body, floor=2, extra_files=None):
+def _write_inventory(tmp_path):
+    proc = subprocess.run(  # noqa: S603 - fixed argv
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "gate_inventory.py"),
+            "--write",
+            "--no-env-check",
+            "--root",
+            str(tmp_path),
+            "--manifest",
+            str(tmp_path / "manifest.py"),
+            "--out",
+            str(tmp_path / "inventory.json"),
+            ".",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "src")])},
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def _project(tmp_path, sec_body, floor=2, extra_files=None, inventory_from=None):
+    """Write the synthetic project. The inventory is generated from ``inventory_from`` (the reviewed, GOOD
+    state) when given, else from the files as written; the run is then compared with it."""
     (tmp_path / "pytest.ini").write_text("[pytest]\naddopts = -q\n", encoding="utf-8")
     (tmp_path / "manifest.py").write_text(MANIFEST_SRC.format(floor=floor), encoding="utf-8")
-    (tmp_path / "test_sec.py").write_text(textwrap.dedent(sec_body), encoding="utf-8")
     (tmp_path / "test_fhe.py").write_text("def test_fhe():\n    assert True\n", encoding="utf-8")
+    first = inventory_from if inventory_from is not None else sec_body
+    (tmp_path / "test_sec.py").write_text(textwrap.dedent(first), encoding="utf-8")
     for name, body in (extra_files or {}).items():
         (tmp_path / name).write_text(textwrap.dedent(body), encoding="utf-8")
-    return {"REGAUDIT_GATE_MANIFEST": str(tmp_path / "manifest.py")}
+    _write_inventory(tmp_path)
+    (tmp_path / "test_sec.py").write_text(textwrap.dedent(sec_body), encoding="utf-8")
+    return {
+        "REGAUDIT_GATE_MANIFEST": str(tmp_path / "manifest.py"),
+        "REGAUDIT_GATE_INVENTORY": str(tmp_path / "inventory.json"),
+    }
 
 
 def _ledger(tmp_path):
@@ -464,6 +500,7 @@ def test_e2e_a_mandatory_module_that_cannot_be_imported_is_not_a_quiet_skip(tmp_
         def test_one():
             assert True
         """,
+        inventory_from=GOOD,
     )
     proc = _inner(tmp_path, ["."], extra_env=e)
     assert proc.returncode != 0
@@ -510,7 +547,8 @@ def test_e2e_a_mandatory_skip_the_manifest_declares_for_the_platform_passes(tmp_
 
 
 def test_e2e_deleting_a_mandatory_test_fails_the_run(tmp_path):
-    e = _project(tmp_path, GOOD, floor=3)
+    three = GOOD + "\n    def test_three():\n        assert True\n"
+    e = _project(tmp_path, GOOD, floor=3, inventory_from=three)
     proc = _inner(tmp_path, ["."], extra_env=e)
     assert proc.returncode != 0
     assert codes(_ledger(tmp_path)) == {"REQUIRED_TESTS_MISSING"}
@@ -521,7 +559,7 @@ def test_e2e_a_missing_mandatory_file_fails_the_run(tmp_path):
     (tmp_path / "test_sec.py").unlink()
     proc = _inner(tmp_path, ["."], extra_env=e)
     assert proc.returncode != 0
-    assert codes(_ledger(tmp_path)) == {"REQUIRED_TESTS_MISSING"}
+    assert codes(_ledger(tmp_path)) == {"REQUIRED_TESTS_MISSING", "SCOPE_MODULE_NOT_COLLECTED"}
 
 
 def test_e2e_a_failing_mandatory_test_fails_the_run(tmp_path):
@@ -579,3 +617,178 @@ def test_e2e_require_tenseal_mode_refuses_to_start_when_tenseal_cannot_be_import
     )
     assert proc.returncode != 0
     assert "REGAUDIT_REQUIRE_TENSEAL=1" in proc.stderr + proc.stdout
+
+
+# ---------------------------------------------------------------------------------------------------
+# Inventory, scopes and rule scoping (identity-based gate)
+# ---------------------------------------------------------------------------------------------------
+
+INVENTORY = ROOT / "tests" / "_gate_inventory.json"
+
+
+def test_every_gate_ok_rule_names_its_tests_and_anchors_its_reason():
+    for r in _gate_manifest.EXPECTED_SKIPS:
+        if r.get("gate_ok"):
+            assert _gate_identity.rule_is_scoped(r), f"{r['id']}: gate_ok needs a scoped nodeid"
+            assert str(r["reason"]).startswith("^"), f"{r['id']}: gate_ok reason must be anchored"
+            assert r["kind"] in (_gate.KIND_PLATFORM, _gate.KIND_ENVIRONMENT)
+            assert r["note"]
+
+
+def test_no_data_dependent_rule_can_excuse_a_mandatory_test_unless_it_names_it():
+    for r in _gate_manifest.EXPECTED_SKIPS:
+        if "data_dependent" in r["when"]:
+            assert _gate_identity.rule_is_scoped(r), r["id"]
+
+
+def test_an_unscoped_rule_never_excuses_a_mandatory_test_even_with_gate_ok():
+    unscoped = dict(MAC_RULE, nodeid="*")
+    del unscoped["nodeid"]
+    for rule in (unscoped, dict(MAC_RULE, nodeid="*"), dict(MAC_RULE, nodeid=["*"])):
+        out = [
+            oc("tests/sec.py::a", "passed", tier=SEC),
+            oc("tests/sec.py::mac", "skipped", "macOS ACLs", SEC),
+        ]
+        ledger = run(out, {"tests/sec.py": 2}, manifest(rules=[rule]), env(platform="linux"))
+        assert "REQUIRED_UNEXPECTEDLY_SKIPPED" in codes(ledger)
+
+
+def test_a_rule_scoped_to_other_tests_does_not_excuse_this_one():
+    rule = dict(MAC_RULE, nodeid=["tests/other.py::*"])
+    out = [
+        oc("tests/sec.py::a", "passed", tier=SEC),
+        oc("tests/sec.py::mac", "skipped", "macOS ACLs", SEC),
+    ]
+    ledger = run(out, {"tests/sec.py": 2}, manifest(rules=[rule]), env(platform="linux"))
+    assert "REQUIRED_UNEXPECTEDLY_SKIPPED" in codes(ledger)
+
+
+def test_node_id_globs_treat_brackets_literally():
+    assert _gate_identity.glob_match("t.py::f[a-b]", "t.py::f[a-b]")
+    assert not _gate_identity.glob_match("t.py::f[a]", "t.py::f[a-b]")
+    assert _gate_identity.glob_match("t.py::f[x]", "t.py::*")
+
+
+def test_the_inventory_scopes_match_the_manifest_scopes():
+    inv = _gate_identity.load_inventory(INVENTORY)
+    assert set(inv["scopes"]) == set(_gate_manifest.SCOPES)
+    declared = set(_gate_manifest.SECURITY_GATE_MODULES) | set(
+        _gate_manifest.TENSEAL_REQUIRED_MODULES
+    )
+    assert set(inv["modules"]) == declared
+    for name, meta in _gate_manifest.SCOPES.items():
+        mods = set(inv["scopes"][name]["modules"])
+        assert mods == declared - set(meta.get("exclude_modules", {})), name
+        for module, reason in meta.get("exclude_modules", {}).items():
+            assert module in declared and reason, (name, module)
+    assert inv["scopes"]["full"]["full_suite"] is True
+    assert set(inv["scopes"]["full"]["modules"]) == declared
+
+
+def test_the_count_floors_equal_the_inventory_counts():
+    """Floors are only a supplemental diagnostic now, but a stale one would mislead: keep them exact."""
+    inv = _gate_identity.load_inventory(INVENTORY)
+    for table in (_gate_manifest.SECURITY_GATE_MODULES, _gate_manifest.TENSEAL_REQUIRED_MODULES):
+        for module, meta in table.items():
+            assert meta["min_tests"] == len(inv["modules"][module]["ids"]), module
+
+
+def test_every_inventory_id_has_a_body_hash():
+    inv = _gate_identity.load_inventory(INVENTORY)
+    for module, entry in inv["modules"].items():
+        keys = {_gate_identity.function_key(i) for i in entry["ids"]}
+        assert keys == set(entry["functions"]), module
+        for h in entry["functions"].values():
+            assert re.fullmatch(r"[0-9a-f]{64}", h), (module, h)
+            assert h != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def _facts(**kw):
+    inv = {
+        "schema": _gate_identity.INVENTORY_SCHEMA,
+        "modules": {
+            "tests/sec.py": {
+                "tier": "security",
+                "ids": ["a", "b"],
+                "functions": {"a": "h1", "b": "h2"},
+            }
+        },
+        "scopes": {
+            "full": {
+                "modules": ["tests/sec.py"],
+                "full_suite": True,
+                "all_modules": ["tests/sec.py"],
+            }
+        },
+    }
+    base = dict(
+        scope="full",
+        inventory=inv,
+        selected=["tests/sec.py::a", "tests/sec.py::b"],
+        deselected=[],
+        hashes={"tests/sec.py::a": "h1", "tests/sec.py::b": "h2"},
+        modules_seen={"tests/sec.py"},
+    )
+    base.update(kw)
+    return _gate.RunFacts(**base)
+
+
+def _run_facts(facts, outcomes=None):
+    m = manifest()
+    m.SCOPES = {"full": {"description": "d", "full_suite": True}}
+    outs = outcomes or [
+        oc("tests/sec.py::a", "passed", tier=SEC),
+        oc("tests/sec.py::b", "passed", tier=SEC),
+    ]
+    return _gate.evaluate(outs, {"tests/sec.py": 2}, m, env(), facts)
+
+
+def test_facts_all_present_executed_and_unchanged_passes_with_a_full_account():
+    led = _run_facts(_facts())
+    assert led["verdict"] == "PASS"
+    sc = led["scope"]
+    assert (
+        sc["expected"],
+        sc["collected"],
+        sc["deselected"],
+        sc["executed"],
+        sc["passed"],
+        sc["failed"],
+    ) == (2, 2, 0, 2, 2, 0)
+
+
+def test_facts_a_deselected_mandatory_test_is_named_in_the_ledger():
+    led = _run_facts(
+        _facts(selected=["tests/sec.py::b"], deselected=["tests/sec.py::a"]),
+        [oc("tests/sec.py::b", "passed", tier=SEC)],
+    )
+    assert {"REQUIRED_TESTS_DESELECTED", "DESELECTED_TESTS"} <= codes(led)
+    assert led["scope"]["missing_mandatory"]["deselected"] == ["tests/sec.py::a"]
+
+
+def test_facts_collected_but_not_executed_fails():
+    led = _run_facts(_facts(), [oc("tests/sec.py::a", "passed", tier=SEC)])
+    assert "REQUIRED_TESTS_NOT_EXECUTED" in codes(led)
+    assert led["scope"]["missing_mandatory"]["not_executed"] == ["tests/sec.py::b"]
+
+
+def test_facts_a_changed_hash_fails_and_a_stopped_run_fails():
+    led = _run_facts(
+        _facts(
+            hashes={"tests/sec.py::a": "other", "tests/sec.py::b": "h2"},
+            stopped="stopping after 1 failures",
+        )
+    )
+    assert {"TEST_BODY_CHANGED", "RUN_STOPPED_EARLY"} <= codes(led)
+
+
+def test_facts_an_unknown_scope_fails():
+    led = _run_facts(_facts(scope="nope"))
+    assert "UNKNOWN_SCOPE" in codes(led)
+
+
+def test_the_body_hash_ignores_formatting_but_not_content():
+    a = _gate_identity.normalise_source("    def f():\n        return 1   \n\n")
+    b = _gate_identity.normalise_source("def f():\n    return 1\n")
+    c = _gate_identity.normalise_source("def f():\n    pass\n")
+    assert a == b != c
