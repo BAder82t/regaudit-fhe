@@ -33,7 +33,7 @@ print(envelope.to_json())  # ship this to the regulator
 
 | Answer | In plain words | What to do |
 | --- | --- | --- |
-| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Accept it. |
+| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Treat the signed claims as made by an enrolled key. This does not show that the audit is correct, that encryption was used, or that the report is unused elsewhere. |
 | `SELF_SIGNED_ONLY` | It has not been altered, but you gave no list of approved keys, so you cannot tell who signed it. | Do not rely on it. Useful only for development checks. |
 | `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
 
@@ -177,7 +177,7 @@ persistent replay cache, and refuse development-only options.
 * **Replay detection is local.** `consumption` is `NOT_CHECKED`,
   `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL`. `RECORDED_LOCAL` means "recorded in this
   verifier's own store at verification time"; it does not prove the authorised operation
-  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the experimental code from pull request #65 and not in published v0.2.1. It is never
+  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the unreleased 0.3.0 source and not in published v0.2.1. It is never
   global single-use protection or an exactly-once guarantee. Changing freshness settings on an
   existing store has its own limits: see the [replay advisory](advisories/replay-limitations-0.2.1.md).
 * **Retired or compromised keys.** They are accepted for historical reports only with

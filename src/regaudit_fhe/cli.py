@@ -888,7 +888,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = argparse.ArgumentParser(
         prog="regaudit-fhe",
-        description="Encrypted regulatory audit primitives at CKKS depth six.",
+        description="Regulatory audit primitives with a plaintext model and an optional TenSEAL CKKS backend.",
     )
     sub = p.add_subparsers(dest="command", required=True)
 

@@ -5,8 +5,7 @@ What a signed report contains and the schemas that describe it. The exact rules 
 ## Audit envelope
 
 An audit result is wrapped into a regulator-facing, signed JSON envelope.
-`regaudit_fhe.envelope(...)` (and `regaudit-fhe audit`) produce `report.v1`;
-`regaudit_fhe.envelope_v2(...)` produces `report.v2`. An abridged `report.v2`:
+`regaudit_fhe.envelope(...)` produces `report.v1` signed with a throwaway key unless a signer is passed. `regaudit-fhe audit` produces `report.v1` signed with a throwaway key, or `report.v2` with `--signing-key`. The HTTP server's `/v1/audit/*` routes produce only the throwaway-key `report.v1`, from the plaintext functions. `regaudit_fhe.envelope_v2(...)` produces `report.v2`. An abridged `report.v2`:
 
 ```json
 {

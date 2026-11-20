@@ -29,8 +29,10 @@ legal entity, but the cryptographic contract treats them as distinct.
 | ------------- | ------------------------------------------------------ | -------------------------- |
 | **Subject**   | Plaintext per-row sensitive data (labels, predictions, protected attributes, training rows). | Trusted to encrypt before sending; never expected to decrypt. |
 | **Auditee**   | The model under audit and the encryption keys.         | Honest-but-curious. Honest about which parameters they used; curious about the audit data. |
-| **Operator**  | The host running `regaudit_fhe.audit_*`.               | Honest-but-curious. Sees only ciphertexts and auditor-public scalars. |
+| **Operator**  | The host running `regaudit_fhe.audit_*`.               | Honest-but-curious. In the intended deployment it sees only ciphertexts and auditor-public scalars. The shipped server does not meet this: it runs plaintext functions, so the host sees every input. |
 | **Auditor**   | The Ed25519 verification key chain and the regulatory rule (threshold). | Honest. Holds the secret CKKS key only when acting as the regulator-side decryptor. |
+
+The roles and key custody above describe the intended design. The shipped code does not enforce this separation: the command line and the HTTP server run the plaintext path and hold no CKKS key, and the library's encrypted functions encrypt, evaluate and decrypt in one process. The encrypted functions are experimental and have not been independently qualified.
 
 Standard configuration:
 
@@ -88,7 +90,8 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
   (see `docs/REPORT_FORMAT.md`).
 - Default parameter set of `CKKSParams`: `poly_modulus_degree = 2^15`,
   `coeff_modulus` chain `[60, 40, 40, 40, 40, 40, 40, 60]` (360 bits),
-  hybrid key switching with `dnum = 3`, scaling factor `2^40`. The
+  scaling factor `2^40`. The code does not set a key-switching `dnum`.
+  (`build_d6_context` uses a different default, `poly_modulus_degree = 2^14`.) The
   envelope's `parameter_set` block records these values only when the
   producer passes a parameter set built for the encrypted path. The CLI
   and the server sign `plaintext`, `poly_modulus_degree = 0` and
@@ -103,19 +106,27 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
 - Body canonicalised under the rules in [`docs/specs/`](specs/) and
   `regaudit_fhe.reports.canonical_json` (sorted keys, no whitespace
   separators, UTF-8, no ASCII escapement).
-- SHA-256 over the canonical body proves the envelope has not been
-  modified since issuance.
-- Ed25519 signature over the SAME canonical body proves the envelope
-  was issued by a holder of the named `key_id` private key.
-- `parameter_set_hash` binds the envelope to a specific set of CKKS
-  parameters; verifiers reject mismatches against their pinned
-  parameter list.
-- `input_commitments[].sha256` lets an auditor confirm that the
-  Auditee submitted the same encrypted inputs the verifier holds,
-  without revealing the inputs themselves.
+- SHA-256 over the canonical body is unauthenticated. It detects accidental
+  change only; the signature check under a trust store is what means
+  something.
+- A valid Ed25519 signature over the SAME canonical body shows that the
+  holder of the key behind the receipt's public key signed these bytes. Who
+  that is depends on the verifier's trust store: in `report.v1` the `key_id`
+  and the public key are unsigned receipt fields, and the verifier checks
+  them only against its own trust store. The signature shows authenticity of
+  the claim, not that the computation was correct or encrypted.
+- `parameter_set_hash` binds the envelope to the parameter set the signer
+  declared. A verifier that holds a `parameter_set_pin` for that key in its
+  `TrustStore` refuses a different parameter-set hash. The parameters are
+  what the signer configured, not a measured or achieved security level.
+- `input_commitments[].sha256` are hashes of the inputs the issuer chose to
+  commit to, taken over the payload the caller supplied by name. Someone
+  holding the same inputs can compare them. They do not show that the inputs
+  were encrypted, and the HTTP server's path does not produce them.
 - Optional `timestamp.token_b64` field carries an RFC 3161 TSA
   response when an external timestamp authority is wired into the
-  signer.
+  signer. Without a verified token, a timestamp in a report is the signer's
+  claim, not a trusted time.
 
 ---
 
@@ -236,8 +247,9 @@ The library does not defend against:
 - **Malicious Operator who modifies parameter_set.** A signed envelope
   binds the parameters used; an Operator who silently downgrades
   parameters BEFORE signing produces an envelope whose
-  `parameter_set_hash` will not match the Auditor's pinned list, and
-  verification rejects it. A truly malicious Operator that controls
+  `parameter_set_hash` will not match a `parameter_set_pin` the verifier
+  holds for that key, and verification rejects it only when such a pin
+  exists. The parameters are what the signer declared. A truly malicious Operator that controls
   the signing key entirely is out of scope — defense relies on
   KMS-backed signing keys and key-chain rotation handled at the
   deployment layer.
@@ -285,8 +297,12 @@ last category.
 A regulator-side verifier MUST run the following before accepting an
 envelope:
 
-  1. **Schema check.** `schema == "regaudit-fhe.report.v1"` and
-     `schema_version` matches the regulator's accepted versions.
+  1. **Schema check.** The schema is one the verifier accepts
+     (`regaudit-fhe.report.v2` is the current format; `report.v1` is
+     still parsed but refused under the `confidential` and
+     `high-assurance` profiles). `regaudit_fhe.verify_report` with a
+     `VerificationPolicy` is the verification engine and performs these
+     checks; the list below describes what they establish.
   2. **Algorithm version check.** `algorithm_version` is on the
      regulator's accepted list (the regulator publishes the supported
      range; envelopes outside it are rejected pending re-issuance).
@@ -332,7 +348,7 @@ unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted an
 `3` when it is supplied but unusable. None of this establishes that the trust
 history is complete; the O8 freshness requirement stays in force.
 
-**Trust store custody.** In the experimental code from pull request #65, not in published
+**Trust store custody.** In the unreleased 0.3.0 source, not in published
 v0.2.1, the strict profiles refuse a trust store file that another
 unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
 it cannot read, because a writer of that file decides which keys are trusted. A process under the same
@@ -340,7 +356,7 @@ account, an administrator or a restored copy can still change it and the verifie
 not notice. A store built in memory is the caller's responsibility. See
 [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
 
-**Replay file custody.** In the experimental code from pull request #65, not in published
+**Replay file custody.** In the unreleased 0.3.0 source, not in published
 v0.2.1, the strict profiles refuse a replay file that another
 unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
 it cannot read. The records themselves

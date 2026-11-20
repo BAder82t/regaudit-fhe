@@ -33,8 +33,9 @@ Two audiences are served by the same surface area:
 | **Regulator**  | External or in-house auditor.       | `rf.verify_report(env, policy)` with a `VerificationPolicy` over a `TrustStore`; `regaudit-fhe verify --trusted-keys ...`. |
 
 A run produces an audit envelope (JSON) with a SHA-256 receipt. The
-client archives it, ships it to the regulator, or both. The regulator
-recomputes the receipt to detect tampering between issuance and review.
+client archives it, ships it to the regulator, or both. A verifier
+checks the signature and the issuer under its own trust store. The SHA-256 receipt
+alone detects accidental change only, because anyone can recompute it.
 
 ## The six primitives
 
@@ -43,7 +44,7 @@ recomputes the receipt to detect tampering between issuance and review.
 | `egf_imss`    | `audit_fairness`          | 4                            | 4                        | NYC LL144, EU AI Act Art. 10/15, Colorado SB26-189 (fit unconfirmed), ECOA and Regulation B workflows. |
 | `etk_fpa_hbc` | `audit_provenance`        | 3                            | 3                        | EU AI Act Art. 10, 21 CFR Part 11, GDPR Art. 22, HIPAA workflows.        |
 | `esc_cia`     | `audit_concordance`       | 4                            | 5                        | FDA SaMD oncology PCCP, EU AI Act Art. 15/72, EMA workflows.             |
-| `ecp_qssp`    | `audit_calibration`       | 3                            | 4                        | FDA SaMD UQ, EU AI Act Art. 15/72, ISO/IEC 23053, UNECE WP.29 workflows. |
+| `ecp_qssp`    | `audit_calibration`       | 3                            | 4                        | FDA SaMD UQ, EU AI Act Art. 15/72, topics in ISO/IEC 23053 (no control mapping has been made), UNECE WP.29 workflows. |
 | `ew1_cdsf`    | `audit_drift`             | 1                            | 2                        | EU AI Act Art. 15/72, FDA SaMD PCCP, Basel III workflows.                |
 | `ecmd_jps`    | `audit_disagreement`      | 5                            | 5                        | SR 26-2 and OCC Bulletin 2026-13, EU AI Act Art. 15/72, FDA SaMD PCCP workflows. |
 
