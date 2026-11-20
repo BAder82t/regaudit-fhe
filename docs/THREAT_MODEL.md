@@ -32,6 +32,8 @@ legal entity, but the cryptographic contract treats them as distinct.
 | **Operator**  | The host running `regaudit_fhe.audit_*`.               | Honest-but-curious. In the intended deployment it sees only ciphertexts and auditor-public scalars. The shipped server does not meet this: it runs plaintext functions, so the host sees every input. |
 | **Auditor**   | The Ed25519 verification key chain and the regulatory rule (threshold). | Honest. Holds the secret CKKS key only when acting as the regulator-side decryptor. |
 
+The roles and key custody above describe the intended design. The shipped code does not enforce this separation: the command line and the HTTP server run the plaintext path and hold no CKKS key, and the library's encrypted functions encrypt, evaluate and decrypt in one process. The encrypted functions are experimental and have not been independently qualified.
+
 Standard configuration:
 
 - Subject and Auditee are the same legal entity (the regulated AI vendor).
