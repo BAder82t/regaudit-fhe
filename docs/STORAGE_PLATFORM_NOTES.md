@@ -34,10 +34,47 @@ An unsafe store is refused or reported. Nothing in this page makes a store more 
   with `os.replace`, and the directory is then `fsync`ed. A failure before the replace leaves the old store as it was and
   removes the temporary file.
 - Reading, validating and writing happen under an exclusive `flock` on the directory that holds the store. This orders
-  concurrent `regaudit-fhe trust add` runs on one local filesystem, so two adds do not lose each other's entry. No lock
-  file is created and the store format does not change.
-- `trust retire` and `trust revoke` keep their own behaviour: they re-read the store just before the replace and refuse
-  if it changed. That narrows the race but does not take the directory lock.
+  concurrent `regaudit-fhe` runs that edit the store on one local filesystem, so two edits do not lose each other's change.
+  No lock file is created and the store format does not change. `trust add`, `trust retire` and `trust revoke` take this
+  lock. `trust migrate` writes a new file and refuses an existing target; it does not take it.
+- Where the lock cannot be taken, the command refuses (exit 3, `cannot lock`) and writes nothing. That includes a platform
+  without `flock` and a store directory the account cannot open for reading (for example mode 0300, which worked before the
+  lock existed). Locking the store file instead would not order writers, because the replace creates a new file, so the
+  command does not fall back to it. Make the directory readable, or do not use `trust add` there.
+- `trust retire` and `trust revoke` also re-read the store just before the replace and refuse if it changed.
+
+## Write outcomes and recovery
+
+A write ends in exactly one of three ways.
+
+| Outcome | What happened | `trust add` exit and message | Store | What you do |
+| --- | --- | --- | --- | --- |
+| 1. Failed | An error before `os.replace`: temp file write, file `fsync`, `chmod` or the replace itself | 2, `cannot write ...` | The old content, byte for byte; no temp file | Fix the cause and run it again |
+| 2. Written, durability not confirmed | `os.replace` succeeded, then opening or `fsync`ing the directory failed | 3, `NOT confirmed durable: ... is in ... and is visible, but syncing it to disk failed ...`; no success JSON | The new content is in place and visible | Run the same `trust add` again, or `trust status` |
+| 3. Durable | Every step succeeded | 0 and the JSON result | The new content | Nothing |
+
+Outcome 2 is never reported as success, and it is never reported as "nothing written". `trust retire` and `trust revoke`
+use the same wording and exit 3.
+
+**Repeating `trust add` after outcome 2.** An identical repeat (same `key_id`, same issuer, same key, entry still plain
+`active`) replaces nothing, `fsync`s the store file and its directory again, and exits 0 with `already_enrolled: true` only if
+that works; if the sync fails again it exits 3 with the same message. The same `key_id` with a different key or issuer, or an
+entry that is no longer plain `active`, is refused with exit 2 as before. No file needs editing by hand. For `trust retire`
+and `trust revoke`, check with `trust status`; the edit is in the store, and a repeat reports what the store now holds.
+
+**Operations that can end in outcome 2:** the store replace in `trust add`, `trust retire` and `trust revoke` (directory open or
+`fsync` after the replace), and the re-sync on an identical `trust add` repeat. `trust migrate` creates a new file and removes it
+if its directory sync fails, so it ends in outcome 1. The replay file and the revocation pin and state stores have their own
+commit code and are not changed here.
+
+**An interrupted process** (`SIGKILL`, power loss) leaves the store either as it was or as the new content, never partly
+written, because the replace is atomic. A killed process can leave one `.trust-*.tmp` file in the store directory; it is never
+read as the store and can be deleted. After a crash, run `trust status` to see which one you have, and repeat the command.
+
+**Limits.** These are tested on a local filesystem on macOS. The outcomes depend on `fsync` and `os.replace` being honoured:
+on a network or synced filesystem outcome 3 can be reported for a write that is not durable, and `flock` may not order writers.
+They do not stop the same account or an administrator, or another program that ignores the lock. On a platform without `flock`
+(Windows) the commands that edit the store refuse.
 
 ## Linux
 

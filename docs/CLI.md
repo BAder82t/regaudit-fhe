@@ -25,6 +25,13 @@ regaudit-fhe trust add --store trust_store.json --key-id acme-2026 --issuer acme
 regaudit-fhe verify -i report.json --trusted-keys trust_store.json
 ```
 
+`trust add` and `trust retire`/`trust revoke` exit **0** only when the store holds the change and it has been synced to disk,
+**2** when the change was refused or the write failed before the store was replaced (the old store is intact), and **3** when the
+store or its lock is unusable. Exit **3** with the message `NOT confirmed durable` is the one case where the change *is* in the
+store but a later sync failed: it is not a success. Run the same `trust add` again (an identical repeat is idempotent, replaces nothing and
+syncs again; the same `key_id` with a different key or issuer is still refused with exit 2) or `trust status` to see what the store holds. See
+[STORAGE_PLATFORM_NOTES.md](STORAGE_PLATFORM_NOTES.md#write-outcomes-and-recovery).
+
 Without the `--signing-key` options, `regaudit-fhe audit` still emits `report.v1` signed by
 an ephemeral key, which can only ever verify as `SELF_SIGNED_ONLY`. The CLI key file is an
 unencrypted PEM for evaluation; for production use a KMS/HSM-backed signer through the
