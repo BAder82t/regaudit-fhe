@@ -41,7 +41,13 @@ from . import (
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
-from ._store_write import store_lock, write_store_atomic
+from ._store_write import (
+    DurabilityNotConfirmed,
+    StoreLockError,
+    store_lock,
+    sync_store,
+    write_store_atomic,
+)
 from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, status_rows
 from ._trust_lifecycle import migrate as migrate_store_file
 from ._trust_lifecycle import retire as retire_key
@@ -419,12 +425,34 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
             )
             return 2
     # The read-modify-write is one step for cooperating processes: lock, read, validate, write, sync.
-    try:
-        with store_lock(args.store):
+    # Only taking the lock is reported as "cannot lock"; anything later is reported by the step that failed.
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(store_lock(args.store))
+        except StoreLockError as exc:
+            sys.stderr.write(f"cannot lock {args.store!r}: {exc}\n")
+            return 3
+        try:
             return _trust_add_locked(args, pem, actual)
-    except OSError as exc:
-        sys.stderr.write(f"cannot lock {args.store!r}: {exc}\n")
-        return 3
+        except OSError as exc:
+            sys.stderr.write(
+                f"trust add failed with an I/O error: {exc}. Run 'regaudit-fhe trust status --store {args.store}' "
+                "to see what the store holds before you rely on it.\n"
+            )
+            return 3
+
+
+NOT_DURABLE = "NOT confirmed durable"
+
+
+def _not_durable_message(store: str, key_id: str | None, exc: OSError) -> str:
+    what = f"key_id {key_id!r} is in" if key_id else "the new content is in"
+    return (
+        f"{NOT_DURABLE}: {what} {store!r} and is visible, but syncing it to disk failed ({exc}). "
+        "This is not a success and the store may revert after a crash or power loss. Run the same command "
+        "again (re-running 'trust add' with the same issuer and key is idempotent and syncs again) or run "
+        f"'regaudit-fhe trust status --store {store}' to check what the store holds.\n"
+    )
 
 
 def _trust_add_locked(args: argparse.Namespace, pem: str, actual: str) -> int:
@@ -449,17 +477,27 @@ def _trust_add_locked(args: argparse.Namespace, pem: str, actual: str) -> int:
     if not isinstance(entries, dict):
         sys.stderr.write("--store: 'entries' must be an object\n")
         return 3
+    wanted = {
+        "issuer": args.issuer,
+        "public_key_pem": pem.strip().replace("\r\n", "\n") + "\n",
+        "status": "active",
+    }
+    if entries.get(args.key_id) == wanted:
+        # Same key_id, issuer and key, still plain active: a repeat (for example after an unconfirmed write). Nothing
+        # is replaced; the store is synced again and success is reported only if that now works.
+        try:
+            sync_store(args.store)
+        except DurabilityNotConfirmed as exc:
+            sys.stderr.write(_not_durable_message(args.store, args.key_id, exc))
+            return 3
+        return _print_enrolled(args, actual, len(entries), already=True)
     if args.key_id in entries:
         sys.stderr.write(
             f"key_id {args.key_id!r} is already enrolled; rotate by enrolling the new key under a "
             "new key_id (existing entries are never replaced)\n"
         )
         return 2
-    entries[args.key_id] = {
-        "issuer": args.issuer,
-        "public_key_pem": pem.strip().replace("\r\n", "\n") + "\n",
-        "status": "active",
-    }
+    entries[args.key_id] = wanted
     try:
         TrustStore.from_dict(payload)  # the same validation verification will apply
     except TrustStoreError as exc:
@@ -467,23 +505,28 @@ def _trust_add_locked(args: argparse.Namespace, pem: str, actual: str) -> int:
         return 2
     try:
         write_store_atomic(args.store, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
+    except DurabilityNotConfirmed as exc:
+        sys.stderr.write(_not_durable_message(args.store, args.key_id, exc))
+        return 3
     except OSError as exc:
         sys.stderr.write(f"cannot write {args.store!r}: {exc}\n")
         return 2
-    print(
-        json.dumps(
-            {
-                "enrolled": args.key_id,
-                "issuer": args.issuer,
-                "issuer_binding": "store_entry",
-                "authenticated_binding": False,
-                "fingerprint_sha256": actual,
-                "store": args.store,
-                "entries": len(entries),
-            },
-            indent=2,
-        )
-    )
+    return _print_enrolled(args, actual, len(entries), already=False)
+
+
+def _print_enrolled(args: argparse.Namespace, actual: str, count: int, *, already: bool) -> int:
+    result: dict[str, Any] = {
+        "enrolled": args.key_id,
+        "issuer": args.issuer,
+        "issuer_binding": "store_entry",
+        "authenticated_binding": False,
+        "fingerprint_sha256": actual,
+        "store": args.store,
+        "entries": count,
+    }
+    if already:
+        result["already_enrolled"] = True
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -517,7 +560,9 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> int:
+def _lifecycle(
+    action: Callable[[], dict[str, Any]], *, edits: bool = False, store: str = "the trust store"
+) -> int:
     """Run one lifecycle action. Exit 0 done | 2 refused | 3 store unusable."""
     try:
         print(json.dumps(action(), indent=2))
@@ -528,6 +573,12 @@ def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> 
         return 2
     except TrustStoreError as exc:
         sys.stderr.write(f"--store: {exc}\n")
+        return 3
+    except DurabilityNotConfirmed as exc:
+        sys.stderr.write(_not_durable_message(store, None, exc))
+        return 3
+    except StoreLockError as exc:
+        sys.stderr.write(f"cannot lock {store!r}: {exc}\n")
         return 3
     except OSError as exc:
         sys.stderr.write(f"cannot write the trust store: {exc}\n")
@@ -543,6 +594,7 @@ def _cmd_trust_retire(args: argparse.Namespace) -> int:
     return _lifecycle(
         lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc)),
         edits=True,
+        store=args.store,
     )
 
 
@@ -555,6 +607,7 @@ def _cmd_trust_revoke(args: argparse.Namespace) -> int:
             now=datetime.now(timezone.utc),
         ),
         edits=True,
+        store=args.store,
     )
 
 

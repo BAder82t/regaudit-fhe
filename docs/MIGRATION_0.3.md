@@ -34,6 +34,8 @@ Copy each name exactly from the `issuer` field of reports you already trust, sin
 has one issuer: reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution. A key flagged `revoked` in the old store must not be
 carried over as active: mark it with `trust revoke` after adding it.
 
+**`trust add` durability.** Exit 3 with `NOT confirmed durable` means the key is in the store but syncing it failed. It is not a success: run the same `trust add` again (an identical repeat is safe and syncs again) or `trust status`. A repeat of an identical add now exits 0 with `already_enrolled: true` instead of 2. See [STORAGE_PLATFORM_NOTES.md](STORAGE_PLATFORM_NOTES.md#write-outcomes-and-recovery).
+
 **`trust add` is normal enrollment, not an authenticated one.** No authenticated enrollment exists yet. It checks the key against the fingerprint you supply, and the result's `issuer_binding` is
 `store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the project owner.
 
