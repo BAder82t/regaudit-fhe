@@ -8,6 +8,9 @@ field was added to it. A client that asks for this format gets an explicit ``rev
   may still be refused because of what it said;
 * ``required_but_unavailable``: revocation was required and could not be established. Never trusted.
 
+The format also carries ``claim_assessment``: "Encrypted execution not established." and what is authenticated,
+declared or established (see ``claim_labels``). It is wording, and it changes no field above.
+
 ``TRUSTED`` keeps its meaning: signed by a key in the verifier's trust store, under its policy. None of these values
 strengthens it, and no shipped path satisfies a revocation-aware high-assurance profile, which is unavailable.
 
@@ -77,17 +80,28 @@ def issuer_binding(result: dict[str, Any]) -> str:
     return "operator_declared" if "ISSUER_OPERATOR_DECLARED" in result["reasons"] else "store_entry"
 
 
-def response_v2(result: dict[str, Any], disclosure: dict[str, Any] | None) -> dict[str, Any]:
-    """``result`` is ``VerificationResult.to_dict()``. Its fields are kept exactly and these are added."""
+def response_v2(
+    result: dict[str, Any],
+    disclosure: dict[str, Any] | None,
+    claim_assessment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """``result`` is ``VerificationResult.to_dict()``. Its fields are kept exactly and these are added.
+
+    ``claim_assessment`` (when given) is the presentation-only label set of :mod:`regaudit_fhe.claim_labels`: what is
+    observed, declared, authenticated and established. It is text for a reader and takes no part in the decision.
+    """
     value = revocation_evaluation(disclosure)
     if value == REQUIRED_BUT_UNAVAILABLE and (
         result["accepted"] or result["valid"] or result["trust_status"] == "TRUSTED"
     ):
         raise RuntimeError("required_but_unavailable can never be represented as trusted")
-    return {
+    out = {
         **result,
         "response_format": RESPONSE_FORMAT_V2,
         "revocation_evaluation": value,
         "issuer_binding": issuer_binding(result),
         "policy_evidence": policy_evidence(disclosure),
     }
+    if claim_assessment is not None:
+        out["claim_assessment"] = claim_assessment
+    return out

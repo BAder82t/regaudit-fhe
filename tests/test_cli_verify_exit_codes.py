@@ -84,7 +84,7 @@ def test_exit_0_trusted_v2_report(tmp_path, signer):
     v = _verdict(p)
     assert v["trust_status"] == "TRUSTED" and v["accepted"] is True and v["valid"] is True
     assert v["format"] == "v2" and v["trusted_issuer"] is True
-    assert p.stderr.strip() == ""
+    assert p.stderr.startswith("claims:\n")  # only the claim labels
 
 
 def test_exit_0_trusted_legacy_v1_report_keeps_a_legacy_label(tmp_path, signer):

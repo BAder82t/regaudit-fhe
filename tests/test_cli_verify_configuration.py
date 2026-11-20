@@ -111,9 +111,10 @@ def test_explicit_profile_prints_a_notice_on_stderr_only(files):
     assert "development" in explicit.stderr and "not a high-assurance profile" in explicit.stderr
 
 
-def test_default_non_tty_run_keeps_stderr_empty(files):
+def test_default_non_tty_run_writes_only_the_claim_labels_to_stderr(files):
     report, store = files
-    assert run("-i", report, "--trusted-keys", store).stderr == ""
+    err = run("-i", report, "--trusted-keys", store).stderr
+    assert err.startswith("claims:\n") and "verification profile in effect" not in err
 
 
 def test_notice_is_shown_on_a_terminal_for_the_default_profile(files, monkeypatch, capsys):
