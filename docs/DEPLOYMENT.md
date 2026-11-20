@@ -6,9 +6,12 @@ its threat model, see [README.md](../README.md), [LICENSING.md](../LICENSING.md)
 [COMPLIANCE.md](../COMPLIANCE.md), and [docs/THREAT_MODEL.md](THREAT_MODEL.md).
 
 > **PRIVACY-BOUNDARY WARNING.** The HTTP server is a thin reference
-> deployment. By itself it is **not a privacy boundary**. Production
-> deployments must hold the CKKS secret key off-host (KMS / HSM),
-> terminate TLS at the ingress, and apply the controls listed below.
+> deployment. By itself it is **not a privacy boundary**. The server
+> computes in plaintext. Its `/v1/audit/*` routes call the plaintext
+> functions and sign with an ephemeral key (self-signed `report.v1`). It
+> does not encrypt, hold a CKKS key or run the encrypted functions, and no
+> encrypted path exists in the server. Anything sent to it is visible to the
+> host. Terminate TLS at the ingress and apply the controls listed below.
 > Read [docs/THREAT_MODEL.md](THREAT_MODEL.md) before exposing the
 > server to untrusted clients.
 
@@ -20,7 +23,7 @@ its threat model, see [README.md](../README.md), [LICENSING.md](../LICENSING.md)
 pip install "regaudit-fhe[server]"
 ```
 
-or, with the encrypted backend baked in:
+or, with the TenSEAL backend importable for library use (the server does not call it):
 
 ```bash
 pip install "regaudit-fhe[server,fhe]"
@@ -98,7 +101,7 @@ Encode them in `REGAUDIT_FHE_API_KEYS` per key, e.g.::
 | GET    | `/version`                        | none          | Library + Python + TenSEAL versions.            |
 | GET    | `/v1/schemas`                     | `audit:read`  | List bundled JSON Schemas.                      |
 | GET    | `/v1/schemas/{name}`              | `audit:read`  | Fetch a specific schema.                        |
-| POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive; returns signed envelope. Refusals: `413` (body or input limit), `422`, `429` (per-key rate), `503` (`SERVER_BUSY`, with `Retry-After`), `504` (timeout). See "Resource bounds". |
+| POST   | `/v1/audit/{primitive}`           | `audit:run`   | Run an audit primitive on the plaintext path; returns a `report.v1` signed with an ephemeral key. Refusals: `413` (body or input limit), `422`, `429` (per-key rate), `503` (`SERVER_BUSY`, with `Retry-After`), `504` (timeout). See "Resource bounds". |
 | POST   | `/v1/verify`                      | `audit:verify`| Verify a signed envelope against the trust store. Returns 503 if none is configured (unless the development-only self-signed check is enabled, which can never accept a report) or if the replay store is unavailable outside development. |
 
 `/v1/verify` fails closed: with no trust store it returns **503** rather
@@ -147,9 +150,8 @@ audit endpoint additionally logs `key_id`, `primitive`, `depth_consumed`,
 `envelope_digest`. **Request and response bodies are never logged**;
 audit payloads may carry PHI/PII.
 
-Forward stdout to your aggregator (Loki, Datadog, CloudWatch). Do not
-turn on uvicorn `--log-level debug` in production: it would echo
-request bodies.
+Forward stdout to your aggregator (Loki, Datadog, CloudWatch). `serve` sets the uvicorn log level to `info`; keep it there. The
+request and response bodies are not logged by the server's own logger.
 
 ---
 
@@ -175,7 +177,7 @@ in-process token bucket for a Redis-backed counter; the
 The audit primitives are CPU-bound pure Python, and JSON Schema validation of a large array cannot be
 interrupted. A 1 MiB body (the body limit) holds up to about 500 000 array elements, which cost seconds of CPU
 per request before these bounds existed (see `docs/RESOURCE_BOUNDS_MEASUREMENTS.md`, AI-assisted measurements,
-not an audit). The server now bounds the work at four points. Defaults are safe for a single small replica;
+not an audit). The memory figures here, such as 512 MiB, are for the plaintext server only. They do not apply to the library's encrypted functions, which need several GB. The server now bounds the work at four points. Defaults are safe for a single small replica;
 tune them for your deployment.
 
 1. **Input structure (`/v1/audit` only).** Before schema validation the parsed payload is checked against the
@@ -193,7 +195,7 @@ tune them for your deployment.
 
    | Setting | Default | Why this value |
    | --- | --- | --- |
-   | `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` | `131072` | Owner-decided maximum for one array (and for the member count of one object). The input schemas themselves set no `maxItems`; 131072 is a policy value, not a schema value. |
+   | `REGAUDIT_FHE_MAX_ARRAY_ELEMENTS` | `131072` | Policy maximum for one array (and for the member count of one object). The input schemas themselves set no `maxItems`; 131072 is a policy value, not a schema value. |
    | `REGAUDIT_FHE_MAX_TOTAL_ELEMENTS` | `524288` | Sum of all array lengths in one payload. The widest input is `fairness`: four equal-length arrays, 4 x 131072. Every primitive's largest request at the per-array maximum therefore fits; a fifth maximum array does not. Measured peak memory of such a request is about 50 MB above baseline (Python 3.12), which keeps six admitted requests (2 running + 4 queued) inside 512 MiB. |
    | `REGAUDIT_FHE_MAX_JSON_DEPTH` | `4` | The root object is depth 1. The deepest valid input is `disagreement` (`model_polynomials` is an array of 4-number arrays): depth 3. One level of headroom; anything deeper is invalid under the schemas anyway (every input schema has `additionalProperties: false`). Minimum accepted setting: 3. |
    | `REGAUDIT_FHE_MAX_CONCORDANCE_SAMPLES` | `8192` | The concordance circuit does O(n^2) vector work: measured 0.5 s at 2048 samples, 3.3 s at 8192, 9.9 s at 16384, 32 s at 32768 (loaded host, directional), and minutes at 131072, which would hold an audit slot far past any request timeout. |
@@ -421,10 +423,11 @@ reverse proxy anyway (see "Reverse-proxy requirements"). Revoking a key in the t
 
 `/healthz`, `/readyz`, `/version`, `/docs` and `/openapi.json` are served without authentication by design
 (`/version` discloses the library, Python and TenSEAL versions). Put them behind your ingress policy if
-that is not acceptable; `/v1/*` always requires a bearer token.
+that is not acceptable; `/v1/*` requires a bearer token unless `REGAUDIT_FHE_DEV_MODE=1`, which disables authentication.
 
-To bake in the encrypted backend, uncomment the `[fhe]` install line in
-the Dockerfile (adds ~120 MiB).
+The `[fhe]` extra makes the TenSEAL backend importable for library use.
+The HTTP server does not call it, so uncommenting the `[fhe]` install line in
+the Dockerfile (adds ~120 MiB) does not make the server encrypt anything.
 
 ---
 
@@ -480,7 +483,7 @@ limits egress to the destinations the deployment actually requires
 Under `confidential`, `high-assurance` or `secure-v1` the trust store must be an `entries` store built with `trust add`: see
 [Upgrading a trust store without issuers](#upgrading-a-trust-store-without-issuers), and [MIGRATION_0.3.md](MIGRATION_0.3.md) for both upgrade actions.
 
-- [ ] HTTPS termination at the ingress (TLS 1.2+, OCSP stapling).
+- [ ] HTTPS termination at the ingress (TLS 1.2+, valid certificate chain).
 - [ ] API keys stored in a secret manager, rotated quarterly.
 - [ ] WAF in front of the server (block obvious payload classes).
 - [ ] CORS allow-list explicitly populated; no `*`.
@@ -501,11 +504,14 @@ Under `confidential`, `high-assurance` or `secure-v1` the trust store must be an
 
 - Encrypt the network payload itself — that is your TLS terminator's
   job.
-- Authenticate the issuer for you. The server signs envelopes with
-  whatever Ed25519 key you generate or pass in; the verifying party
-  decides which `key_id` to trust.
-- Hold the CKKS secret key. That key MUST live in a separate KMS
-  account / HSM, accessed only by the auditor decryption host.
+- Authenticate the issuer for you. The server signs `report.v1` with a
+  throwaway key it generates for each request and takes no key to sign with.
+  Its output verifies at most as `SELF_SIGNED_ONLY`. To issue a report a
+  verifier can trust, sign with `envelope_v2` and a key the verifier has
+  enrolled.
+- Encrypt or hold a CKKS key. The server has no encrypted path. If you use
+  the library's encrypted functions elsewhere, that key is your own
+  responsibility and is outside this server.
 - Isolate probes from CPU saturation. `/healthz` runs on the event loop and stays prompt while audit slots are
   busy, but a computation on a worker thread shares one interpreter (and one GIL) with it.
 - Interrupt a running computation. A timeout cancels the request and removes it from the queue; a job already

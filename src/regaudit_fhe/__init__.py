@@ -1,9 +1,10 @@
-"""regaudit-fhe — encrypted regulatory audit primitives at CKKS depth six.
+"""regaudit-fhe — regulatory audit primitives with a plaintext model and an optional CKKS backend.
 
 A single import surface gives access to all six audit primitives. Each
 primitive exposes a plaintext oracle (for testing and reference) and a
-depth-budgeted slot-vector circuit that mirrors the on-encrypted execution
-under CKKS.
+depth-budgeted slot-vector circuit that mirrors the encrypted execution
+under CKKS in the optional library backend. The command line and the HTTP
+server run the plaintext path.
 
 Example
 -------
