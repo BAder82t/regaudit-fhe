@@ -12,6 +12,10 @@ Only the latest release receives security updates. See `CHANGELOG.md` and
 releases rely on AI-assisted testing and review. They have had no independent external
 security audit, and no production assurance is claimed.
 
+The release records for `0.1.1` and `0.2.0` use wording about review ("waived") that can be misread. An
+[erratum](docs/releases/ERRATUM_2026-11-19_REVIEW_WAIVER_WORDING.md) explains what that wording does and does not
+mean. The records themselves are unchanged.
+
 ## Known limitations
 
 The issuer attribution limitation in v0.2.1 is described in

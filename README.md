@@ -133,6 +133,8 @@ A report signed with a retired or compromised key will be refused by default. Ac
 
 Four limitations of version 0.2.1 have their own advisory: [issuer attribution](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/issuer-attribution-0.2.1.md), [replay protection](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-limitations-0.2.1.md), [trust store file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/trust-store-permissions-0.2.1.md) and [replay file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-file-permissions-0.2.1.md).
 
+The 0.1.1 and 0.2.0 release records use wording about review ("waived") that can be misread. An [erratum](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/releases/ERRATUM_2026-11-19_REVIEW_WAIVER_WORDING.md) explains what that wording does and does not mean. The records themselves are unchanged.
+
 ## Documentation
 
 | Read this | For |
