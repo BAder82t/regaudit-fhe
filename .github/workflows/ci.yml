@@ -73,7 +73,10 @@ jobs:
       - run: python -c "import regaudit_fhe; print(regaudit_fhe.__version__)"
       - run: regaudit-fhe --help
       - run: regaudit-fhe schema --list
-      - run: pytest -q
+      - name: tests with the release-gate scope
+        # Only [dev] is installed here, so the server and TenSEAL tests cannot run. The scope says exactly
+        # which mandatory tests this job requires (see SCOPES in tests/_gate_manifest.py) and never claims the full suite.
+        run: pytest -q --gate-scope release-gate --gate-dir test-gate-release-gate
 
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python-version }})

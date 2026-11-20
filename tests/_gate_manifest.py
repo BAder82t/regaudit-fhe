@@ -94,11 +94,11 @@ SECURITY_GATE_MODULES: dict[str, dict[str, object]] = {
     "tests/test_server_body_limits.py": {"min_tests": 10, "why": "parser and input limits"},
     # CLI verdict and exit-code contract (real processes)
     "tests/test_cli_verify_exit_codes.py": {
-        "min_tests": 46,
+        "min_tests": 47,
         "why": "CLI verdict and exit-code contract",
     },
     "tests/test_cli_verify_configuration.py": {
-        "min_tests": 10,
+        "min_tests": 11,
         "why": "CLI verdict and exit-code contract",
     },
     "tests/test_trust_add_storage.py": {
@@ -136,6 +136,25 @@ SECURITY_GATE_MODULES: dict[str, dict[str, object]] = {
         "why": "HTTP verify and server trust paths",
     },
 }
+
+# Gate-tooling tests (mandatory too: the gate's own guard-off tests must not skip or vanish).
+SECURITY_GATE_MODULES.update(
+    {
+        "tests/test_gate_tooling.py": {"min_tests": 46, "why": "the test gate's own accounting"},
+        "tests/test_gate_bypass.py": {
+            "min_tests": 55,
+            "why": "the test gate's own guard-off tests",
+        },
+        "tests/test_gate_inventory.py": {
+            "min_tests": 1,
+            "why": "collection equals the checked-in inventory, both directions",
+        },
+        "tests/test_gate_workflows.py": {
+            "min_tests": 9,
+            "why": "every CI pytest run carries a gate scope",
+        },
+    }
+)
 
 # Modules whose tests need TenSEAL. Mandatory only under REGAUDIT_REQUIRE_TENSEAL=1 (then a skip or a missing
 # module fails the gate); otherwise a missing TenSEAL is reported as 'blocked by dependency'.
@@ -178,13 +197,22 @@ TENSEAL_REQUIRED_MODULES: dict[str, dict[str, object]] = {
 #        dependency                                           -> counted as "blocked by unavailable dependency"
 # gate_ok: the rule may also excuse a MANDATORY (security_gate) test. Only platform/environment rules can.
 #          Dependency and optional-backend rules never do: a security test cannot be blocked by a missing package.
+# nodeid:  a node-id glob (``*`` and ``?`` only) or a list of them: the tests the rule was written for. A rule
+#          without a scoped nodeid never excuses a mandatory test, whatever its reason text matches. Every gate_ok
+#          rule must name its tests, and its reason is anchored (^...$). Add the test to the list when you add a skip.
 # Rules are tried in order; the first whose reason, nodeid and condition all match is the one reported.
 EXPECTED_SKIPS: list[dict[str, object]] = [
     # --- platform --------------------------------------------------------------------------------
     {
         "id": "macos-acl-tests",
         "kind": "platform",
-        "reason": "macOS ACLs",
+        "reason": "^macOS ACLs$",
+        "nodeid": [
+            "tests/test_replay_storage_policy.py::*",
+            "tests/test_revocation_cli_store_exit_codes.py::*",
+            "tests/test_storage_policy_paths.py::*",
+            "tests/test_trust_store_storage_policy.py::*",
+        ],
         "when": {"platform_not": ["darwin"]},
         "gate_ok": True,
         "note": "macOS-only ACL tests (storage policy, trust store, revocation store); run on the macOS CI entries",
@@ -192,7 +220,8 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "linux-acl-tests",
         "kind": "platform",
-        "reason": "needs Linux POSIX ACLs and setfacl",
+        "reason": "^needs Linux POSIX ACLs and setfacl$",
+        "nodeid": ["tests/test_trust_add_storage.py::*"],
         "when": {"platform_not": ["linux"]},
         "gate_ok": True,
         "note": "Linux-only ACL test for trust add; runs on the Ubuntu CI entries, where a skip fails the gate",
@@ -201,6 +230,7 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
         "id": "posix-only-tests",
         "kind": "platform",
         "reason": "^(POSIX permissions|flock and SIGKILL)$",
+        "nodeid": ["tests/test_cli_trust_workflow.py::*", "tests/test_revocation_file_store.py::*"],
         "when": {"os_name_not": ["posix"]},
         "gate_ok": True,
         "note": "POSIX permission bits, flock and SIGKILL; never expected on the Linux and macOS CI entries",
@@ -209,6 +239,10 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
         "id": "windows-permission-and-symlink-tests",
         "kind": "platform",
         "reason": "^(POSIX permission bits|symlinks|POSIX permission bits and symlinks)$",
+        "nodeid": [
+            "tests/test_trust_add_storage.py::*",
+            "tests/test_trust_lifecycle_qualification.py::*",
+        ],
         "when": {"os_name_not": ["posix"]},
         "gate_ok": True,
         "note": "trust-lifecycle tests that need POSIX permission bits or symlinks",
@@ -216,7 +250,8 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "no-mkfifo",
         "kind": "platform",
-        "reason": "needs mkfifo",
+        "reason": "^needs mkfifo$",
+        "nodeid": ["tests/test_trust_lifecycle_qualification.py::*"],
         "when": {"absent_attr": ["mkfifo"]},
         "gate_ok": True,
         "note": "named pipes are not available on this platform",
@@ -224,7 +259,8 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "no-dev-fd",
         "kind": "platform",
-        "reason": "needs /dev/fd",
+        "reason": "^needs /dev/fd$",
+        "nodeid": ["tests/test_storage_policy_paths.py::*"],
         "when": {"absent_file": ["/dev/fd"]},
         "gate_ok": True,
         "note": "/dev/fd is not available on this platform",
@@ -233,7 +269,8 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "root-owned-file-needs-non-root",
         "kind": "environment",
-        "reason": "needs a root-owned file and a non-root user",
+        "reason": "^needs a root-owned file and a non-root user$",
+        "nodeid": ["tests/test_storage_policy_paths.py::*"],
         "when": {"running_as_root": True},
         "gate_ok": True,
         "note": "the test needs a non-root user; a root runner (a container) cannot run it",
@@ -241,15 +278,20 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "group-degeneracy",
         "kind": "environment",
-        "reason": "^group degeneracy",
+        "reason": "^group degeneracy( at this size)?$",
+        "nodeid": ["tests/test_edge_cases.py::*", "tests/test_precision_bounds.py::*"],
         "when": {"data_dependent": True},
-        "gate_ok": True,
         "note": "a seeded random sample drew an empty group; deterministic per seed, not per machine",
     },
     {
         "id": "primitive-has-no-breach-indicator",
         "kind": "environment",
-        "reason": "has no boolean breach indicator$",
+        "reason": "^(provenance|concordance|calibration) has no boolean breach indicator$",
+        "nodeid": [
+            "tests/test_fhe_equivalence_matrix.py::test_threshold_decision_is_stable_under_encryption[provenance]",
+            "tests/test_fhe_equivalence_matrix.py::test_threshold_decision_is_stable_under_encryption[concordance]",
+            "tests/test_fhe_equivalence_matrix.py::test_threshold_decision_is_stable_under_encryption[calibration]",
+        ],
         "when": {"data_dependent": True},
         "gate_ok": True,
         "note": "the equivalence matrix skips the breach-flip check for the three primitives that return no boolean indicator; fixed by the test data, not by the machine",
@@ -257,15 +299,20 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
     {
         "id": "python-lt-3-11-no-tomllib",
         "kind": "environment",
-        "reason": "needs tomllib",
+        "reason": "^needs tomllib \\(Python 3\\.11\\+\\)",
+        "nodeid": ["tests/test_release_scripts.py::*"],
         "when": {"python_lt": [3, 11]},
-        "gate_ok": True,
         "note": "tomllib is in the standard library from Python 3.11",
     },
     {
         "id": "no-bash-or-git",
         "kind": "environment",
-        "reason": "(bash is required|needs bash and git)",
+        "reason": "^(bash is required|needs bash and git)$",
+        "nodeid": [
+            "tests/test_installed_distribution.py::*",
+            "tests/test_release_workflow_shell.py::*",
+            "tests/test_trust_lifecycle_qualification.py::*",
+        ],
         "when": {"absent_executable": ["bash"]},
         "gate_ok": True,
         "note": "the shell-driven tests need bash",
@@ -397,3 +444,53 @@ UNTESTED_NOTES: list[str] = [
     "Windows: no CI entry runs on Windows; POSIX-only and ACL tests are not executed there at all.",
     "A passing ledger says the listed tests executed and passed. It is not an audit or a security certification.",
 ]
+
+# Named gate scopes. ``pytest --gate`` is the FULL scope. A CI run that is legitimately partial must say so with
+# ``--gate-scope NAME`` and is held to the identities of its own scope, listed in tests/_gate_inventory.json (generated
+# by scripts/gate_inventory.py from this file). A partial scope never claims the full suite: its ledger says so.
+# ``exclude_modules`` maps each mandatory module a scope does not require to the reason. ``full_suite`` scopes
+# additionally require that every test module in the inventory was collected.
+SCOPES: dict[str, dict[str, object]] = {
+    "full": {
+        "description": "every mandatory test, in a full run of tests/ (all extras installed)",
+        "full_suite": True,
+    },
+    "sdist": {
+        "description": "the shipped tests, run from the sdist against the installed wheel (release-build.yml)",
+        "exclude_modules": {
+            "tests/test_gate_workflows.py": "an sdist has no .github/workflows to read",
+            "tests/test_gate_inventory.py": "needs every optional package to collect the whole suite",
+        },
+    },
+    "release-gate": {
+        "description": "a [dev]-only install (ci.yml release-gate): no server extra, no TenSEAL",
+        "exclude_modules": {
+            "tests/test_defensive_patch_011.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_f09_issuer_substitution.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_input_limit_bypass.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_migration_operator_declared.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_phase3a_contract.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_provenance_and_config_limits.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_provenance_consistency.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_public_api_v2.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_replay_migration.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_replay_storage_policy.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_response_mode.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_revocation_public_gate.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_server_body_limits.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_server_hardening.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_server_security_maintenance.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_server_trust.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_storage_policy_paths.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_trust_store_storage_policy.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_tenseal_backend.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_fhe_equivalence_matrix.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_precision_bounds.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_property_based.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_params_validation.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_ckks_producer_claims.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_backends.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
+            "tests/test_gate_inventory.py": "needs every optional package to collect the whole suite",
+        },
+    },
+}
