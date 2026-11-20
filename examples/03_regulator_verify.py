@@ -6,8 +6,8 @@ receipt fails verification against the regulator's trust store.
 
 The regulator MUST authenticate the issuer; the bare
 ``verify_receipt(env)`` path only checks the embedded signature
-against the embedded public key, which proves only that the bytes have
-not changed in transit. To check that an enrolled key signed the
+against the embedded public key, which shows only that the signature
+matches the key inside the report, not who holds that key. To check that an enrolled key signed the
 envelope, load a :class:`TrustStore` from a JSON
 file mapping ``key_id`` to PEM-encoded public key and pass it to
 :func:`verify_envelope_or_raise` — failures raise a typed exception

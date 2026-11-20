@@ -11,10 +11,12 @@ The regulator builds its own trust store (the keys it approved out of band) and 
 (b) a self-signed report from a stranger's key     -> INVALID (the key is not enrolled)
 (c) the enrolled issuer's report, edited afterwards -> INVALID (the signature no longer matches)
 
-What the outcomes mean: ``TRUSTED`` says an enrolled key signed these exact bytes and the
-policy rules were met. It does not say the audit is correct, that anything ran encrypted, that
+What the outcomes mean: ``TRUSTED`` says a key enrolled in the regulator's trust store signed
+this report's canonical content and the policy rules were met. This example's policy is the
+``development`` profile with no maximum age and no replay check, so the issue time is the
+signer's claim and a resubmitted copy would also be accepted. ``TRUSTED`` does not say the audit is correct, that anything ran encrypted, that
 privacy holds, or that any legal requirement is met. The reports here come from the plaintext
-path on synthetic data, and a signature shows who signed, not what was computed.
+path on synthetic data, and a signature shows which key signed, not what was computed.
 
 It exits 0 if every outcome is the expected one, and 1 otherwise.
 """
@@ -97,7 +99,7 @@ def main() -> int:
     print("regaudit-fhe: regulator verification example (synthetic data, plaintext path)\n")
     print(f"[Regulator] trust store: one enrolled key, {KEY_ID!r}, issuer {ISSUER!r}")
     print(
-        f"[Regulator] policy: development profile, trust store required, verifier_id {VERIFIER!r}\n"
+        f"[Regulator] policy: development profile (no maximum age, no replay check), trust store required, verifier_id {VERIFIER!r}\n"
     )
     outcomes = run_scenarios()
     for o in outcomes:
@@ -116,17 +118,20 @@ def main() -> int:
 
     print("\nWhat this shows")
     print(
-        "  - TRUSTED: a key in the regulator's own trust store signed these exact bytes, and the policy's rules were met."
+        "  - TRUSTED: a key in the regulator's own trust store signed this report's content, and the policy's rules were met."
+    )
+    print(
+        "    The policy sets no maximum age and no replay check, so the issue time is the signer's claim and a resubmitted copy would also pass."
     )
     print(
         "  - INVALID for (b): the signature is internally consistent, but the key was never enrolled. A report cannot enrol itself."
     )
     print(
-        "  - INVALID for (c): the content changed after signing, so the signature no longer matches."
+        "  - INVALID for (c): the content changed after signing, so the hash and the signature no longer match."
     )
     print("\nWhat this does not show")
     print(
-        "  - These reports came from the plaintext path. A signature shows who signed, not what was computed."
+        "  - These reports came from the plaintext path. A signature shows which key signed, not what was computed."
     )
     print(
         "  - It does not show that the audit is correct, that anything ran encrypted, that privacy holds,"

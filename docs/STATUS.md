@@ -8,7 +8,7 @@ What is checked automatically, what is not provided, and what the current releas
 compliance product, and the verification core is a candidate. The tables below say
 exactly what is checked automatically, what is only partly done, and what is not provided.
 
-> The release gate in [DEVELOPMENT.md](DEVELOPMENT.md#verify-a-fresh-clone) guarantees the package builds, imports,
+> The release gate in [DEVELOPMENT.md](DEVELOPMENT.md#verify-a-fresh-clone) checks that the package builds, imports,
 > exposes the documented CLI / API, and passes its test suite. That
 > is **not** the same as being validated for regulated production use.
 > The matrix below is the honest current state.
@@ -16,12 +16,12 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Property                                | Status                                                                              |
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
-| pytest suite (800+ tests)               | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
+| pytest suite                            | Run by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13). `pytest --collect-only -q` prints the current count; it was 4,306 on 2026-11-20 with the server and fhe extras installed, and it varies with the extras. |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; currently about 89%.                          |
 | Type checking                           | `mypy` gates CI: zero errors across the source tree.                                 |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
-| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested. Library only: not used by the CLI or the |
+| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; compared with the plaintext model within test tolerances (envelopes, not proven bounds). Library only: not used by the CLI or the |
 |                                         | server. Experimental; not independently qualified.                                  |
 | OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; covers 5 of the 6 primitives        |
 |                                         | (rectangular `mm_pt` pending). CI does not install it and its tests skip without    |
@@ -88,8 +88,10 @@ prove, regulation by regulation.
 The current release ships:
 
 - the plaintext SlotVec model with strict depth-budget enforcement,
-- a TenSEAL CKKS backend that mirrors the SlotVec algebra and passes
-  end-to-end ciphertext / plaintext equivalence tests,
+- a TenSEAL CKKS backend that mirrors the SlotVec algebra and agrees with the plaintext
+  model within the tolerances of its equivalence tests (an envelope, not a proven error
+  bound; concordance and calibration rely on a degree-3 sign polynomial that is
+  inaccurate near zero),
 - a pluggable backend registry (`regaudit_fhe.fhe.get_backend` /
   `available_backends`) with an experimental OpenFHE CKKS backend that
   runs the same circuits via the Halevi–Shoup diagonal method,
@@ -106,7 +108,7 @@ The current release ships:
   (`verify_report`) with explicit `trust_status` and `accepted` outcomes,
   fail-closed key-lifecycle and chronology rules, local replay detection with
   disclosed durability, and `regaudit-fhe verify` exit codes 0/1/2/3. It is
-  verified by process-level, golden-vector and mutation-sensitivity tests, and it
+  tested at process level and with golden vectors, plus a mutation check of the Phase 3A files that is run by hand, and it
   explicitly refuses configurations it cannot support (see the table above),
 - a key-custody seam — `CallableKeyProvider` keeps the Ed25519 signing
   key in a KMS/HSM, so only a public PEM and a sign-callable enter the

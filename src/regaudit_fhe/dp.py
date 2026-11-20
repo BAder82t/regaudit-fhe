@@ -7,9 +7,10 @@ disagreement variance — and those released aggregates can themselves leak
 information about individuals when groups are small (a parity gap computed
 over a five-person subgroup is close to a membership oracle).
 
-This module adds calibrated noise to the *released* aggregates so the
-published envelope satisfies (epsilon)- or (epsilon, delta)-differential
-privacy with respect to one record. It is deliberately *not* automatic:
+This module adds calibrated noise to the *released* aggregates. If the
+caller's sensitivity bound is correct, each release is intended to satisfy
+(epsilon)- or (epsilon, delta)-differential privacy with respect to one record;
+the library does not check that. It is deliberately *not* automatic:
 the privacy guarantee depends entirely on a correct per-output
 **sensitivity** bound, which is a modelling decision the library cannot
 make for the deployer. The caller supplies the sensitivity; this module
@@ -25,7 +26,9 @@ Given a correct sensitivity ``s`` for an output and a fresh draw:
     ``epsilon``-DP for that release.
   - **Gaussian**: adding ``N(0, sigma^2)`` with
     ``sigma = s * sqrt(2 ln(1.25 / delta)) / epsilon`` gives
-    ``(epsilon, delta)``-DP for that release (analytic-classic bound).
+    ``(epsilon, delta)``-DP for that release when ``0 < epsilon < 1`` (the classic
+    bound). For ``epsilon`` of 1 or more it is not guaranteed; see
+    :func:`gaussian_sigma`.
 
 What it does NOT do
 -------------------
@@ -103,9 +106,13 @@ def gaussian_sigma(*, sensitivity: float, epsilon: float, delta: float) -> float
     """Gaussian standard deviation for ``(epsilon, delta)``-DP.
 
     Uses the classic analytic bound
-    ``sigma = s * sqrt(2 ln(1.25 / delta)) / epsilon``. Valid for
-    ``epsilon <= 1``; for larger ``epsilon`` it remains a conservative
-    (over-noising) choice rather than an under-noising one.
+    ``sigma = s * sqrt(2 ln(1.25 / delta)) / epsilon``, which is a
+    sufficient condition for ``(epsilon, delta)``-DP only when
+    ``0 < epsilon < 1``. For larger ``epsilon`` it is not guaranteed: it can add
+    too little noise. For sensitivity 1, ``epsilon = 10`` and ``delta = 1e-5`` the
+    exact Gaussian mechanism (Balle and Wang, 2018) gives about ``2.3e-5``, above
+    the requested delta. Nothing here checks ``epsilon``, so the caller must stay
+    below 1 or calibrate sigma another way.
     """
     s = _check_sensitivity(sensitivity)
     eps = _check_epsilon(epsilon)

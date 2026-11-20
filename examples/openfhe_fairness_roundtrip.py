@@ -2,14 +2,16 @@
 
 Demonstrates the full encrypted-execution path against the open-source
 **TenSEAL CKKS** backend (`regaudit_fhe.fhe`). The file name retains
-the historical ``openfhe_*`` prefix because OpenFHE is the *target*
-production backend; the active backend in this repo is TenSEAL, and
-this script reports that backend honestly. The script:
+the historical ``openfhe_*`` prefix. The script runs the TenSEAL
+backend (OpenFHE has only an experimental backend here), and it reports
+that backend honestly. The encrypted backend is experimental and has not
+been independently qualified. The script:
 
   1. Generates synthetic labels, predictions, and protected-attribute
      vectors (the kind of data NYC LL144 / EU AI Act §15 audits run
      against in production).
-  2. Builds a validated CKKS context at d=6, N=2^14, 128-bit security.
+  2. Builds a CKKS context at d=6, N=2^14 whose parameters pass the library's
+     checks against a table of 128-bit limits (not a measured security level).
   3. Runs the encrypted ``fairness_encrypted`` primitive, decrypts the
      three disparity scalars, and prints them next to the plaintext
      oracle for side-by-side comparison.

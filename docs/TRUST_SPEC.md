@@ -758,8 +758,8 @@ one function, called by every entry point.
    documented in the README; `3` is unused. Two present behaviours change:
    (a) a self-consistent self-signed report currently exits `0` and will exit
    `1`; (b) an unreadable or malformed `--trusted-keys` file currently exits
-   `2` and will exit `3`. `--strict` without trust material stays `2` (a
-   usage error). `serve` keeps `2` for "refusing to start". Both changes need
+   `2` and will exit `3`. `--strict` is refused with `2` (a usage error) in every
+   case: it selects no profile, so use `--profile <name>`. `serve` keeps `2` for "refusing to start". Both changes need
    a changelog entry and a README update.
 
 ### 9.4 Profiles

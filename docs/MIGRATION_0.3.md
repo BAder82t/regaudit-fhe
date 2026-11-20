@@ -35,7 +35,7 @@ has one issuer: reports a key signed under an earlier name get `ISSUER_MISMATCH`
 carried over as active: mark it with `trust revoke` after adding it.
 
 **`trust add` is normal enrollment, not an authenticated one.** No authenticated enrollment exists yet. It checks the key against the fingerprint you supply, and the result's `issuer_binding` is
-`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the project owner.
+`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the maintainer.
 
 **`trust migrate` is for `development` and the lenient paths.** Every strict profile refuses what it writes (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), because `--issuer` is your statement as a local
 operator and not proof that a key belongs to that issuer.

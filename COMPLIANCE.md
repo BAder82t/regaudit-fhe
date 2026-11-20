@@ -9,8 +9,9 @@
 ## What the library is
 
 `regaudit-fhe` produces **technical evidence**: numerical scalars,
-boolean breach indicators, decryption-error bounds, depth-budget
-declarations, and Ed25519-signed audit envelopes. A signature shows that a
+boolean breach indicators, depth-budget
+declarations, a declared precision-loss bound that is a parameter and not a
+measured error, and Ed25519-signed audit envelopes. A signature shows that a
 key signed the claim. It does not show that the computation was correct, that
 encryption was used, or that the stated security parameters were achieved. The artefacts are
 designed to fit into compliance workflows but **do not constitute
