@@ -105,6 +105,18 @@ SECURITY_GATE_MODULES: dict[str, dict[str, object]] = {
         "min_tests": 8,
         "why": "storage policy: trust add writes, locks and permissions",
     },
+    "tests/test_trust_store_durability.py": {
+        "min_tests": 15,
+        "why": "storage policy: durability outcomes, lock and recovery",
+    },
+    "tests/test_claim_labels.py": {
+        "min_tests": 40,
+        "why": "verification output: claim labels never present plaintext or unknown runs as proven encrypted",
+    },
+    "tests/test_claims_equivalence.py": {
+        "min_tests": 11,
+        "why": "verification output: decisions and default JSON unchanged by the labels",
+    },
     "tests/test_cli_trust_workflow.py": {
         "min_tests": 16,
         "why": "CLI verdict and exit-code contract",
