@@ -97,6 +97,14 @@ SECURITY_GATE_MODULES: dict[str, dict[str, object]] = {
         "min_tests": 46,
         "why": "CLI verdict and exit-code contract",
     },
+    "tests/test_cli_verify_configuration.py": {
+        "min_tests": 10,
+        "why": "CLI verdict and exit-code contract",
+    },
+    "tests/test_trust_add_storage.py": {
+        "min_tests": 8,
+        "why": "storage policy: trust add writes, locks and permissions",
+    },
     "tests/test_cli_trust_workflow.py": {
         "min_tests": 16,
         "why": "CLI verdict and exit-code contract",
@@ -180,6 +188,14 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
         "when": {"platform_not": ["darwin"]},
         "gate_ok": True,
         "note": "macOS-only ACL tests (storage policy, trust store, revocation store); run on the macOS CI entries",
+    },
+    {
+        "id": "linux-acl-tests",
+        "kind": "platform",
+        "reason": "needs Linux POSIX ACLs and setfacl",
+        "when": {"platform_not": ["linux"]},
+        "gate_ok": True,
+        "note": "Linux-only ACL test for trust add; runs on the Ubuntu CI entries, where a skip fails the gate",
     },
     {
         "id": "posix-only-tests",
