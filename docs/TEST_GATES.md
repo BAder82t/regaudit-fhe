@@ -22,7 +22,14 @@ Every test outcome lands in exactly one line of the ledger:
 | optional, passed / failed | everything else | a failure fails pytest as usual |
 
 A mandatory module that is missing from the run, or that collects fewer tests than its floor, also fails the gate.
-Deleting or deselecting a security test cannot pass silently.
+Deleting a mandatory test, or a whole mandatory module, makes the gate fail.
+
+Known gaps, found in review and not yet closed at this commit. The floor counts the tests pytest collected BEFORE
+it applied its own selection options, and nothing checks that the counted tests ran. So `--gate` together with
+`-k`, `--deselect` or `--collect-only` still prints `TEST GATE: PASS`, and `-m "not security_gate"` is rescued
+only because pytest itself exits non-zero when nothing runs. A mandatory test whose body is replaced by `pass`
+also still counts. A skip rule is not tied to the tests it was written for. Do not read a PASS from a run that
+used a selection option as full-suite evidence. The CI jobs shipped today pass none of those options.
 
 The ledger is written as `test-gate/test-gate-ledger.json` (machine readable) and `.txt` (the same summary the run
 prints). It records the platform, Python version, which optional packages were importable, every skip with its
@@ -35,8 +42,10 @@ pip install -e ".[dev,server,fhe]"
 REGAUDIT_REQUIRE_TENSEAL=1 pytest tests/ --gate --gate-dir test-gate
 ```
 
-`--gate` belongs on the full-suite run. A partial run cannot satisfy the per-module floors. Without `--gate`
-nothing is enforced and nothing is written; the markers are still applied (`pytest -m security_gate`).
+`--gate` belongs on the full-suite run. A run that leaves out whole mandatory modules fails the per-module floors,
+but a run that selects tests inside a module with `-k`, `--deselect` or `--collect-only` is not detected (see
+above). Without `--gate` nothing is enforced and nothing is written; the markers are still applied
+(`pytest -m security_gate`).
 
 ## Which tests are mandatory
 
