@@ -15,6 +15,9 @@
       "backend": "tenseal-ckks",
       "backend_shortened": false,
       "encryption_verified": false,
+      "encrypted_execution": "not_established",
+      "established_statement": "Encrypted execution not established.",
+      "invariant": "A signed report can authenticate a claim without proving that claim is true.",
       "kind": "ENCRYPTED_BACKEND_DECLARED",
       "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
       "security_bits": 192,
@@ -125,13 +128,16 @@
       "backend": "plaintext",
       "backend_shortened": false,
       "encryption_verified": false,
+      "encrypted_execution": "not_established",
+      "established_statement": "Encrypted execution not established.",
+      "invariant": "A signed report can authenticate a claim without proving that claim is true.",
       "kind": "PLAINTEXT",
       "note": "The report was not accepted, so these statements are only what the file says. Nothing has established them. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
       "security_bits": 128,
       "security_bits_note": "legacy field, not a security level",
       "security_bits_state": "SHOWN",
       "security_bits_text": "128 (legacy field, not a security level)",
-      "statement": "No encryption: this report states it was computed on plaintext."
+      "statement": "The report declares a plaintext backend. That is a declaration, and it is also the value a producer signs by default. It does not show how the computation was actually run."
     },
     "engine": {
       "api": "regaudit_fhe.verify_report",
@@ -240,13 +246,16 @@
       "backend": "plaintext",
       "backend_shortened": false,
       "encryption_verified": false,
+      "encrypted_execution": "not_established",
+      "established_statement": "Encrypted execution not established.",
+      "invariant": "A signed report can authenticate a claim without proving that claim is true.",
       "kind": "PLAINTEXT",
       "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
       "security_bits": 128,
       "security_bits_note": "legacy field, not a security level",
       "security_bits_state": "SHOWN",
       "security_bits_text": "128 (legacy field, not a security level)",
-      "statement": "No encryption: this report states it was computed on plaintext."
+      "statement": "The report declares a plaintext backend. That is a declaration, and it is also the value a producer signs by default. It does not show how the computation was actually run."
     },
     "engine": {
       "api": "regaudit_fhe.verify_report",
@@ -352,13 +361,16 @@
       "backend": "plaintext",
       "backend_shortened": false,
       "encryption_verified": false,
+      "encrypted_execution": "not_established",
+      "established_statement": "Encrypted execution not established.",
+      "invariant": "A signed report can authenticate a claim without proving that claim is true.",
       "kind": "PLAINTEXT",
       "note": "These are claims made by the signer. The trust rules checked who signed the report. They did not check these claims. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
       "security_bits": 128,
       "security_bits_note": "legacy field, not a security level",
       "security_bits_state": "SHOWN",
       "security_bits_text": "128 (legacy field, not a security level)",
-      "statement": "No encryption: this report states it was computed on plaintext."
+      "statement": "The report declares a plaintext backend. That is a declaration, and it is also the value a producer signs by default. It does not show how the computation was actually run."
     },
     "engine": {
       "api": "regaudit_fhe.verify_report",
@@ -462,13 +474,16 @@
       "backend": "plaintext",
       "backend_shortened": false,
       "encryption_verified": false,
+      "encrypted_execution": "not_established",
+      "established_statement": "Encrypted execution not established.",
+      "invariant": "A signed report can authenticate a claim without proving that claim is true.",
       "kind": "PLAINTEXT",
       "note": "The report was not accepted, so these statements are only what the file says. Nothing has established them. A valid signature does not substantiate these declarations. Verification does not show that any encrypted (FHE) computation happened.",
       "security_bits": 128,
       "security_bits_note": "legacy field, not a security level",
       "security_bits_state": "SHOWN",
       "security_bits_text": "128 (legacy field, not a security level)",
-      "statement": "No encryption: this report states it was computed on plaintext."
+      "statement": "The report declares a plaintext backend. That is a declaration, and it is also the value a producer signs by default. It does not show how the computation was actually run."
     },
     "engine": {
       "api": "regaudit_fhe.verify_report",

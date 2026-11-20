@@ -20,6 +20,11 @@ FHE_NOTICE = (
     "Signature verification does not verify that any FHE (encrypted) computation was executed."
 )
 
+# Shown beside FHE_NOTICE on every result. The exact wording matches regaudit_fhe.claim_labels in the library, which
+# this portal cannot import (it is pinned to the published 0.2.1 engine); a test compares the two texts.
+NOT_ESTABLISHED = "Encrypted execution not established."
+INVARIANT = "A signed report can authenticate a claim without proving that claim is true."
+
 # On every sample result and in every saved sample result. The samples are made-up reports checked against a
 # demonstration trust list, never against anything an administrator set up.
 DEMONSTRATION_NOTICE = (
@@ -248,7 +253,10 @@ _NOT_SUBSTANTIATED = (
     "A valid signature does not substantiate these declarations. Verification does not show that any encrypted "
     "(FHE) computation happened."
 )
-_PLAINTEXT = "No encryption: this report states it was computed on plaintext."
+_PLAINTEXT = (
+    "The report declares a plaintext backend. That is a declaration, and it is also the value a producer signs by "
+    "default. It does not show how the computation was actually run."
+)
 _ENCRYPTED = (
     "The signer declares an encrypted backend. This portal cannot verify that encryption was used."
 )
@@ -316,6 +324,9 @@ def declarations(env: Any, trust_status: str) -> dict[str, Any]:
         "security_bits_note": bits_note if state != "ABSENT" else None,
         "security_bits_text": bits_text,
         "encryption_verified": False,
+        "encrypted_execution": "not_established",
+        "established_statement": NOT_ESTABLISHED,
+        "invariant": INVARIANT,
         "note": f"{source} {_NOT_SUBSTANTIATED}",
     }
 
