@@ -231,6 +231,14 @@ EXPECTED_SKIPS: list[dict[str, object]] = [
         "note": "a seeded random sample drew an empty group; deterministic per seed, not per machine",
     },
     {
+        "id": "primitive-has-no-breach-indicator",
+        "kind": "environment",
+        "reason": "has no boolean breach indicator$",
+        "when": {"data_dependent": True},
+        "gate_ok": True,
+        "note": "the equivalence matrix skips the breach-flip check for the three primitives that return no boolean indicator; fixed by the test data, not by the machine",
+    },
+    {
         "id": "python-lt-3-11-no-tomllib",
         "kind": "environment",
         "reason": "needs tomllib",
