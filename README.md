@@ -1,11 +1,22 @@
 # regaudit-fhe
 
-Depth-tracked regulatory audit primitives for privacy-preserving AI audits.
+Signed, checkable evidence for AI audits: run fairness, drift and other checks on a model, sign the result, and let a reviewer verify it against keys they chose.
 
 [![ci](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/BAder82t/regaudit-fhe/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
 [![Python](https://img.shields.io/pypi/pyversions/regaudit-fhe.svg)](https://pypi.org/project/regaudit-fhe/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://github.com/BAder82t/regaudit-fhe/blob/master/LICENSE)
+
+**The problem.** When a company says its AI system was audited, the reviewer usually gets a PDF and has to take its word. regaudit-fhe turns the audit numbers into a signed report, so a regulator, auditor or customer can check who made the claim and whether it was changed afterwards, using a list of issuers they approved themselves.
+
+- **Six audit calculations:** fairness, provenance, concordance, calibration, drift and disagreement, with plaintext as the default.
+- **Signed reports:** each result goes into a `report.v2` envelope signed with Ed25519, naming the issuer, the key and the audience.
+- **Verification on the reviewer's terms:** a report is accepted only if its key is on the reviewer's own trust list and the policy checks pass. Tampered reports and unknown issuers are refused, with a reason code.
+- **Command line, Python library, HTTP server and a local browser portal** (the portal is experimental).
+- **Optional local replay checking and a maximum report age**, off by default.
+- **An optional, experimental CKKS backend** for running the calculations on encrypted data. Today one process holds the key, so it is not a setup where the data holder and the evaluator are different parties.
+
+A signature shows who signed a claim. It does not show that the claim is true, that anything ran encrypted, or that any law or regulation is met.
 
 regaudit-fhe runs 6 audit calculations on an AI system: fairness, provenance, concordance, calibration, drift, and disagreement. Then it adds each result to a signed report that a regulator or auditor can check. A company can use it to show evidence on its model and the regulator would check this evidence with a list of keys it has approved.
 
