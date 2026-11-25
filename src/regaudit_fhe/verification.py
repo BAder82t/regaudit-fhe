@@ -11,7 +11,7 @@ compromised) against a **locally provisioned** trust store, chronology from a
 caller-pinned timestamp verifier, freshness, audience, and local replay
 detection.
 
-Not implemented (held by the project owner, see the spec): trust-anchor
+Not implemented (held by the maintainer, see the spec): trust-anchor
 distribution, anchor-signed bundles, any production timestamp authority,
 shared replay infrastructure, and high-assurance historical acceptance. In
 particular there is no mechanism in this release that produces an

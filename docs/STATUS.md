@@ -8,7 +8,7 @@ What is checked automatically, what is not provided, and what the current releas
 compliance product, and the verification core is a candidate. The tables below say
 exactly what is checked automatically, what is only partly done, and what is not provided.
 
-> The release gate in [DEVELOPMENT.md](DEVELOPMENT.md#verify-a-fresh-clone) guarantees the package builds, imports,
+> The release gate in [DEVELOPMENT.md](DEVELOPMENT.md#verify-a-fresh-clone) checks that the package builds, imports,
 > exposes the documented CLI / API, and passes its test suite. That
 > is **not** the same as being validated for regulated production use.
 > The matrix below is the honest current state.
@@ -16,19 +16,21 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Property                                | Status                                                                              |
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
 | Python syntax + imports                 | Verified by CI on every push.                                                       |
-| pytest suite (800+ tests)               | Verified by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13).             |
+| pytest suite                            | Run by CI on every push (Linux py3.10–3.13 + macOS py3.12 / 3.13). `pytest --collect-only -q` prints the current count; it was 4,306 on 2026-11-20 with the server and fhe extras installed, and it varies with the extras. |
 | Coverage gate                           | `--cov-fail-under=80` enforced in CI; currently about 89%.                          |
 | Type checking                           | `mypy` gates CI: zero errors across the source tree.                                 |
 | Static security                         | `bandit` (medium+) gates CI; CodeQL (security-and-quality) runs on push and weekly. |
 | Lint                                    | `ruff check` gates CI with E/F/W/B/S/UP/I/SIM/RUF/A rule set.                       |
-| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; equivalence-tested.                                          |
+| Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; compared with the plaintext model within test tolerances (envelopes, not proven bounds). Library only: not used by the CLI or the |
+|                                         | server. Experimental; not independently qualified.                                  |
 | OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; covers 5 of the 6 primitives        |
 |                                         | (rectangular `mm_pt` pending). CI does not install it and its tests skip without    |
 |                                         | OpenFHE: the repository records no qualification run against a real OpenFHE        |
 |                                         | installation. Not the verified reference.                                           |
 | External key custody (KMS / HSM)        | `CallableKeyProvider` keeps the signing key off-host; fails closed on bad sig.      |
-| Differential-privacy output noise       | Optional `regaudit_fhe.dp` (Laplace / Gaussian); signed `dp` block. Sensitivity is  |
-|                                         | the deployer's responsibility — the library calibrates, it does not bound.          |
+| Differential-privacy output noise       | Optional `regaudit_fhe.dp` (Laplace / Gaussian); signed `dp` block. Epsilon, delta  |
+|                                         | and sensitivity are self-declared by the caller. The library calibrates noise to them; it |
+|                                         | does not derive, clip or validate sensitivity, so no DP guarantee is claimed. The CLI and server do not call it. |
 | Generated API reference                 | `pdoc` HTML built in CI (`docs.yml`); see [docs/API.md](API.md).               |
 | Signed audit envelope (Ed25519)         | `report.v1` and `report.v2`; canonical-JSON + tamper tests.                         |
 | `report.v2` signed identity (candidate) | Issuer, key id + fingerprint, deployment, run id, audience signed under a           |
@@ -38,10 +40,13 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Trust store + typed verifier failures   | `TrustStore` (flat and `entries` forms) + typed `EnvelopeVerificationError`s.       |
 | CLI exit codes                          | `verify`: 0 accepted / 1 refused / 2 usage / 3 resource unusable; process-tested.   |
 | Local replay detection                  | In-memory and sqlite caches; `RECORDED_LOCAL`, durability disclosed. Local only.    |
-| Mutation-sensitivity check              | `scripts/mutation_check_phase3a.py`: trust-core tests catch deliberate bugs.        |
+| Mutation-sensitivity check              | `scripts/mutation_check_phase3a.py`: a mutation check of the Phase 3A trust core    |
+|                                         | (96 mutants). Run by hand, not in CI. Newer guards are not covered.                |
 | JSON Schemas                            | Shipped; validated on every CLI / API request.                                      |
-| Hardened HTTP server                    | Constant-time bearer compare, opaque key_id in logs, `DEV_MODE` non-loopback bind   |
-|                                         | refusal, scopes, rate limit, CORS, audit log.                                       |
+| HTTP reference server                   | Bearer-token scopes, input and concurrency limits, structured logs, CORS allow-list, |
+|                                         | `DEV_MODE` non-loopback bind refusal. It runs the plaintext functions and signs with |
+|                                         | an ephemeral key (self-signed `report.v1`). No TLS and no encrypted path. A proxy is |
+|                                         | still required.                                                                     |
 | Concurrency-safe depth state            | `ContextVar`-backed `last_depth` / `last_depths`; cross-thread / asyncio isolated.  |
 | Reproducible wheel                      | CI builds twice with pinned `SOURCE_DATE_EPOCH`, asserts SHA-256 stable.            |
 | Sigstore-signed wheel + sdist           | Keyless OIDC bundles attached to every GitHub Release.                              |
@@ -68,11 +73,12 @@ prove, regulation by regulation.
 
 ## Maturity and status
 
-> **Description:** *Depth-tracked regulatory audit primitives for
-> privacy-preserving AI audits.*
+> **Description:** *Depth-tracked regulatory audit primitives, with a
+> plaintext model and an optional CKKS backend.*
 >
-> **Backends:** TenSEAL CKKS is the verified reference backend
-> (`regaudit_fhe.fhe`). An **experimental** OpenFHE CKKS backend
+> **Backends:** TenSEAL CKKS is the reference backend
+> (`regaudit_fhe.fhe`); it is experimental and has not been independently
+> qualified. An **experimental** OpenFHE CKKS backend
 > (`regaudit_fhe.fhe.openfhe`) is also selectable through the backend
 > registry; it covers every primitive except encrypted concordance
 > (which needs rectangular `mm_pt`). See
@@ -82,8 +88,10 @@ prove, regulation by regulation.
 The current release ships:
 
 - the plaintext SlotVec model with strict depth-budget enforcement,
-- a TenSEAL CKKS backend that mirrors the SlotVec algebra and passes
-  end-to-end ciphertext / plaintext equivalence tests,
+- a TenSEAL CKKS backend that mirrors the SlotVec algebra and agrees with the plaintext
+  model within the tolerances of its equivalence tests (an envelope, not a proven error
+  bound; concordance and calibration rely on a degree-3 sign polynomial that is
+  inaccurate near zero),
 - a pluggable backend registry (`regaudit_fhe.fhe.get_backend` /
   `available_backends`) with an experimental OpenFHE CKKS backend that
   runs the same circuits via the Halevi–Shoup diagonal method,
@@ -100,7 +108,7 @@ The current release ships:
   (`verify_report`) with explicit `trust_status` and `accepted` outcomes,
   fail-closed key-lifecycle and chronology rules, local replay detection with
   disclosed durability, and `regaudit-fhe verify` exit codes 0/1/2/3. It is
-  verified by process-level, golden-vector and mutation-sensitivity tests, and it
+  tested at process level and with golden vectors, plus a mutation check of the Phase 3A files that is run by hand, and it
   explicitly refuses configurations it cannot support (see the table above),
 - a key-custody seam — `CallableKeyProvider` keeps the Ed25519 signing
   key in a KMS/HSM, so only a public PEM and a sign-callable enter the
@@ -109,12 +117,13 @@ The current release ships:
   (`regaudit_fhe.dp`: Laplace / Gaussian mechanisms, a basic-composition
   accountant, and a signed `dp` disclosure block in the envelope),
 - JSON Schemas for every input, output, and the envelope itself,
-- the hardened HTTP audit server with constant-time bearer-token
+- the HTTP reference audit server (plaintext functions, ephemeral-key
+  self-signed `report.v1`, no encrypted path) with constant-time bearer-token
   compare, opaque hashed key_id in logs, scopes, body-size limit,
   rate limiting, structured logs, CORS controls, and a `DEV_MODE`
   non-loopback bind guard,
 - concurrency-safe depth recording via `ContextVar` so concurrent
-  encrypted requests cannot race on the depth state,
+  calls in the library cannot race on the depth state,
 - supply-chain controls: Trusted-Publisher PyPI release, Sigstore
   keyless signing of the wheel + sdist, reproducible-build CI gate
   (pinned `SOURCE_DATE_EPOCH`, two builds, identical SHA),

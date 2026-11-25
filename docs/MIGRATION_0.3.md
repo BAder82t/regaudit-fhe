@@ -34,8 +34,10 @@ Copy each name exactly from the `issuer` field of reports you already trust, sin
 has one issuer: reports a key signed under an earlier name get `ISSUER_MISMATCH`, since a rename cannot be told from a substitution. A key flagged `revoked` in the old store must not be
 carried over as active: mark it with `trust revoke` after adding it.
 
+**`trust add` durability.** Exit 3 with `NOT confirmed durable` means the key is in the store but syncing it failed. It is not a success: run the same `trust add` again (an identical repeat is safe and syncs again) or `trust status`. A repeat of an identical add now exits 0 with `already_enrolled: true` instead of 2. See [STORAGE_PLATFORM_NOTES.md](STORAGE_PLATFORM_NOTES.md#write-outcomes-and-recovery).
+
 **`trust add` is normal enrollment, not an authenticated one.** No authenticated enrollment exists yet. It checks the key against the fingerprint you supply, and the result's `issuer_binding` is
-`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the project owner.
+`store_entry`, meaning the name was compared with what your store states. Your store is a local file. Whether this should be enough for a strict profile is an open question for the maintainer.
 
 **`trust migrate` is for `development` and the lenient paths.** Every strict profile refuses what it writes (`ISSUER_ENROLLMENT_UNAUTHENTICATED`), because `--issuer` is your statement as a local
 operator and not proof that a key belongs to that issuer.
@@ -156,6 +158,15 @@ the level are only exercised against stand-ins here. The chain is still signed e
 
 **Reports already signed.** They verify as before. A `192`, a `256`, a fixed-default chain or a doubled batch size in an old report cannot be told
 from a correct value by looking at it. Treat `security_bits` as a declaration ([REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean)).
+
+## `verify --strict` is now a usage error
+
+`regaudit-fhe verify --strict` used to be accepted and ignored: it selected no profile and changed no verdict. It now exits 2 with a message that names `--profile <name>` and lists the valid profile names (`development`, `confidential`, `high-assurance`, `secure-v1`). It prints no verdict, and it does not select a profile; it will not become an alias for one.
+
+- If a script passes `--strict` and relied on it for assurance, it never had any. Remove the flag and choose a profile with `--profile`. Stricter profiles require a trust store that states issuers, `--max-age-seconds` and the replay options (and `--verifier-id` for `high-assurance`).
+- If you only want the same behaviour as before, remove `--strict`: verdicts and exit codes for the remaining options are unchanged.
+
+Two related changes in `verify`: `--replay-db` with replay mode `off` (explicit or the default) now exits 2, because replay protection would be disabled; add `--replay-mode check` or `--replay-mode record`, or drop `--replay-db`. And the profile in effect is stated on stderr when you pass `--profile` or when stderr is a terminal.
 
 ## `verify_receipt`
 

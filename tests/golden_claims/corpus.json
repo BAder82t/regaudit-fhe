@@ -1,0 +1,563 @@
+{
+ "texts": {
+  "expired_v2": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"audience\": [\n    \"corpus-verifier\"\n  ],\n  \"audit_run_id\": \"5c22cb1e-7678-53d2-96b7-4dc4e11948c1\",\n  \"backend\": \"plaintext\",\n  \"deployment_id\": \"prod-eu-1\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2024-01-01T00:00:00+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"key_id\": \"corpus-key-1\",\n  \"parameter_set\": {\n    \"backend\": \"plaintext\",\n    \"backend_version\": \"\",\n    \"coeff_mod_bit_sizes\": [],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 0,\n    \"scaling_factor_bits\": 0,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"primitive\": \"fairness\",\n  \"public_key_fingerprint\": \"324be2dea8bc44461b0233e51fa48902ed6b1cc671e7739af2551e0bfe68f54e\",\n  \"receipt\": {\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"064977fd32383792896eb29593b72dc4c25b978f79d329bb4e2b127855e6d794\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"HT4HtfCZ9XNzHvYYWRd5sMX6JlRGd711+u5/m4iBPJ2yO8SqPjGR9X11Ejidv61Pcenr7+amAa65lpPasAuLBg==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v2\",\n  \"schema_version\": \"regaudit-fhe.report.v2\",\n  \"trust_policy_version\": 1\n}",
+  "replayed_v2": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"audience\": [\n    \"corpus-verifier\"\n  ],\n  \"audit_run_id\": \"f065c130-be28-51b3-a74c-38db5aebbb5e\",\n  \"backend\": \"plaintext\",\n  \"deployment_id\": \"prod-eu-1\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-19T12:00:00+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"key_id\": \"corpus-key-1\",\n  \"parameter_set\": {\n    \"backend\": \"plaintext\",\n    \"backend_version\": \"\",\n    \"coeff_mod_bit_sizes\": [],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 0,\n    \"scaling_factor_bits\": 0,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"primitive\": \"fairness\",\n  \"public_key_fingerprint\": \"324be2dea8bc44461b0233e51fa48902ed6b1cc671e7739af2551e0bfe68f54e\",\n  \"receipt\": {\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"657195f347d4db3313efa17747f30797e982a7edd807e818d16d26e425f17d23\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"HEkf45XcRcbniISIIsMLoelJ8+4/WjnMEL9n1/f42kXDg2qr691WwV12z8LzW+v3hylKLRUL+QUZqVI/Ejq8Bw==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v2\",\n  \"schema_version\": \"regaudit-fhe.report.v2\",\n  \"trust_policy_version\": 1\n}",
+  "stranger_v2": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"audience\": [\n    \"corpus-verifier\"\n  ],\n  \"audit_run_id\": \"b3bf5b0b-512d-5a11-9028-66ff6c74600b\",\n  \"backend\": \"plaintext\",\n  \"deployment_id\": \"prod-eu-1\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-19T12:00:00+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"key_id\": \"corpus-stranger\",\n  \"parameter_set\": {\n    \"backend\": \"plaintext\",\n    \"backend_version\": \"\",\n    \"coeff_mod_bit_sizes\": [],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 0,\n    \"scaling_factor_bits\": 0,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"primitive\": \"fairness\",\n  \"public_key_fingerprint\": \"3dba97edb866520d36063a0d9f79576893f3b13014ae7061d7c3dba608b9ec6a\",\n  \"receipt\": {\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"6c325228ba5e763ae8f8159be87c4bd2e441975721d5821f6de0bcecae4cd4ae\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"FQCX7tLCT/fLd5JcV+xbHYgkbFvqbeU+nAeuIw2JX6qIA8OnC9HfxTEJH4kAxsv8kPgFwq0zNENX2NZOfKrtBg==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v2\",\n  \"schema_version\": \"regaudit-fhe.report.v2\",\n  \"trust_policy_version\": 1\n}",
+  "tampered_v2": "{\"algorithm_version\": \"0.2.1\", \"audience\": [\"corpus-verifier\"], \"audit_run_id\": \"f065c130-be28-51b3-a74c-38db5aebbb5e\", \"backend\": \"plaintext\", \"deployment_id\": \"prod-eu-1\", \"depth_budget\": {\"consumed\": 6, \"declared\": 6}, \"input_commitments\": [], \"issued_at\": \"2026-11-19T12:00:00+00:00\", \"issuer\": \"corpus-vendor.example\", \"key_id\": \"corpus-key-1\", \"parameter_set\": {\"backend\": \"plaintext\", \"backend_version\": \"\", \"coeff_mod_bit_sizes\": [], \"library_version\": \"0.2.1\", \"multiplicative_depth\": 6, \"poly_modulus_degree\": 0, \"scaling_factor_bits\": 0, \"security_bits\": 128}, \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\", \"primitive\": \"fairness\", \"public_key_fingerprint\": \"324be2dea8bc44461b0233e51fa48902ed6b1cc671e7739af2551e0bfe68f54e\", \"receipt\": {\"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\", \"sha256\": \"657195f347d4db3313efa17747f30797e982a7edd807e818d16d26e425f17d23\", \"signature_alg\": \"Ed25519\", \"signature_b64\": \"HEkf45XcRcbniISIIsMLoelJ8+4/WjnMEL9n1/f42kXDg2qr691WwV12z8LzW+v3hylKLRUL+QUZqVI/Ejq8Bw==\"}, \"regulations\": [\"NYC_LL144\", \"EU_AI_ACT_ART10\", \"EU_AI_ACT_ART15\", \"COLORADO_AI_ACT\", \"CFPB_ALG_DISCRIM\"], \"result\": {\"demographic_parity_diff\": 0.4375, \"equal_opportunity_diff\": -0.0714285714285714, \"predictive_parity_diff\": -0.2142857142857143, \"threshold_breached\": true}, \"schema\": \"regaudit-fhe.report.v2\", \"schema_version\": \"regaudit-fhe.report.v2\", \"trust_policy_version\": 1}",
+  "valid_fhe_declared_v2": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"audience\": [\n    \"corpus-verifier\"\n  ],\n  \"audit_run_id\": \"01ded022-184b-5276-8e16-b8e80416f735\",\n  \"backend\": \"tenseal-ckks\",\n  \"deployment_id\": \"prod-eu-1\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-19T12:00:00+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"key_id\": \"corpus-key-1\",\n  \"parameter_set\": {\n    \"backend\": \"tenseal-ckks\",\n    \"backend_version\": \"0.3.16\",\n    \"coeff_mod_bit_sizes\": [\n      60,\n      40,\n      40,\n      60\n    ],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 8192,\n    \"scaling_factor_bits\": 40,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"b65cb64cc5d8c11a9c37e40abc2102f66aadd86e67243ae302794233fdf4a355\",\n  \"primitive\": \"fairness\",\n  \"public_key_fingerprint\": \"324be2dea8bc44461b0233e51fa48902ed6b1cc671e7739af2551e0bfe68f54e\",\n  \"receipt\": {\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"00c092f2613f86eec7304754c073f3596dda3502d4f2079bdd96435fa5914342\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"hTElkcau2V/jRX6A1HnUL5oIo7zPerFmrWbrfy0e+JepowtKGKkx6aOzrEwpILi0yjggOL3Z+Xn0dzZmmHfIDA==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v2\",\n  \"schema_version\": \"regaudit-fhe.report.v2\",\n  \"trust_policy_version\": 1\n}",
+  "valid_plaintext_v2": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"audience\": [\n    \"corpus-verifier\"\n  ],\n  \"audit_run_id\": \"f065c130-be28-51b3-a74c-38db5aebbb5e\",\n  \"backend\": \"plaintext\",\n  \"deployment_id\": \"prod-eu-1\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-19T12:00:00+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"key_id\": \"corpus-key-1\",\n  \"parameter_set\": {\n    \"backend\": \"plaintext\",\n    \"backend_version\": \"\",\n    \"coeff_mod_bit_sizes\": [],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 0,\n    \"scaling_factor_bits\": 0,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"primitive\": \"fairness\",\n  \"public_key_fingerprint\": \"324be2dea8bc44461b0233e51fa48902ed6b1cc671e7739af2551e0bfe68f54e\",\n  \"receipt\": {\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"657195f347d4db3313efa17747f30797e982a7edd807e818d16d26e425f17d23\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"HEkf45XcRcbniISIIsMLoelJ8+4/WjnMEL9n1/f42kXDg2qr691WwV12z8LzW+v3hylKLRUL+QUZqVI/Ejq8Bw==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v2\",\n  \"schema_version\": \"regaudit-fhe.report.v2\",\n  \"trust_policy_version\": 1\n}",
+  "valid_v1_fhe_declared": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"backend\": \"tenseal-ckks\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-20T18:21:26.996595+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"parameter_set\": {\n    \"backend\": \"tenseal-ckks\",\n    \"backend_version\": \"0.3.16\",\n    \"coeff_mod_bit_sizes\": [\n      60,\n      40,\n      40,\n      60\n    ],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 8192,\n    \"scaling_factor_bits\": 40,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"b65cb64cc5d8c11a9c37e40abc2102f66aadd86e67243ae302794233fdf4a355\",\n  \"primitive\": \"fairness\",\n  \"receipt\": {\n    \"key_id\": \"corpus-key-1\",\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"ff11810863a917ed37eb45c85520956b70232b701bc5f51f7bcb85bb18cadfa9\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"YDbvRwhGeoVYliWKJqLgvaLAnZwt71GdKXmpUrslVLUpy8iORT4QCaUZBx+ENYmL9sFI94WuGVSp6b/D5dA5Bg==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v1\",\n  \"schema_version\": \"regaudit-fhe.report.v1\"\n}",
+  "valid_v1_plaintext": "{\n  \"algorithm_version\": \"0.2.1\",\n  \"backend\": \"plaintext\",\n  \"depth_budget\": {\n    \"consumed\": 6,\n    \"declared\": 6\n  },\n  \"input_commitments\": [],\n  \"issued_at\": \"2026-11-20T18:21:26.995951+00:00\",\n  \"issuer\": \"corpus-vendor.example\",\n  \"parameter_set\": {\n    \"backend\": \"plaintext\",\n    \"backend_version\": \"\",\n    \"coeff_mod_bit_sizes\": [],\n    \"library_version\": \"0.2.1\",\n    \"multiplicative_depth\": 6,\n    \"poly_modulus_degree\": 0,\n    \"scaling_factor_bits\": 0,\n    \"security_bits\": 128\n  },\n  \"parameter_set_hash\": \"9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606\",\n  \"primitive\": \"fairness\",\n  \"receipt\": {\n    \"key_id\": \"corpus-key-1\",\n    \"public_key_pem\": \"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\\n-----END PUBLIC KEY-----\\n\",\n    \"sha256\": \"7024e872f145ec599bdb5f7ea6df4f848f159adf8035a47e2619cd611dad9261\",\n    \"signature_alg\": \"Ed25519\",\n    \"signature_b64\": \"OqaIwgIP9+WbSHT23GC/9oIvvG9+DB6PnWGN0fiJvJfCvnbe2wQUgMgA92B36AfiE1CtQ+wo6BhC5ShXezDZCQ==\"\n  },\n  \"regulations\": [\n    \"NYC_LL144\",\n    \"EU_AI_ACT_ART10\",\n    \"EU_AI_ACT_ART15\",\n    \"COLORADO_AI_ACT\",\n    \"CFPB_ALG_DISCRIM\"\n  ],\n  \"result\": {\n    \"demographic_parity_diff\": -0.0625,\n    \"equal_opportunity_diff\": -0.0714285714285714,\n    \"predictive_parity_diff\": -0.2142857142857143,\n    \"threshold_breached\": true\n  },\n  \"schema\": \"regaudit-fhe.report.v1\",\n  \"schema_version\": \"regaudit-fhe.report.v1\"\n}"
+ },
+ "verdicts": {
+  "expired_v2": {
+   "trust_status": "INVALID",
+   "accepted": false,
+   "valid": false,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "REPORT_TOO_OLD"
+   ],
+   "blocking_reasons": [
+    "REPORT_TOO_OLD"
+   ],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2024-01-01T00:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "5c22cb1e-7678-53d2-96b7-4dc4e11948c1"
+  },
+  "replayed_v2": {
+   "trust_status": "INVALID",
+   "accepted": false,
+   "valid": false,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "REPLAY_DETECTED"
+   ],
+   "blocking_reasons": [
+    "REPLAY_DETECTED"
+   ],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "LOCAL_PROCESS",
+   "replay_durable": false,
+   "consumption": "CHECKED_NOT_CONSUMED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-19T12:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "f065c130-be28-51b3-a74c-38db5aebbb5e"
+  },
+  "stranger_v2": {
+   "trust_status": "INVALID",
+   "accepted": false,
+   "valid": false,
+   "integrity_valid": false,
+   "issuer_trusted": false,
+   "key_status": "unknown",
+   "chronology": "NONE",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "ISSUER_UNKNOWN"
+   ],
+   "blocking_reasons": [
+    "ISSUER_UNKNOWN"
+   ],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-stranger",
+   "primitive": "fairness",
+   "issued_at": "2026-11-19T12:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "b3bf5b0b-512d-5a11-9028-66ff6c74600b"
+  },
+  "tampered_v2": {
+   "trust_status": "INVALID",
+   "accepted": false,
+   "valid": false,
+   "integrity_valid": false,
+   "issuer_trusted": false,
+   "key_status": "active",
+   "chronology": "NONE",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "HASH_MISMATCH",
+    "SIGNATURE_INVALID"
+   ],
+   "blocking_reasons": [
+    "HASH_MISMATCH",
+    "SIGNATURE_INVALID"
+   ],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-19T12:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "f065c130-be28-51b3-a74c-38db5aebbb5e"
+  },
+  "valid_fhe_declared_v2": {
+   "trust_status": "TRUSTED",
+   "accepted": true,
+   "valid": true,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [],
+   "blocking_reasons": [],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-19T12:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "b65cb64cc5d8c11a9c37e40abc2102f66aadd86e67243ae302794233fdf4a355",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "01ded022-184b-5276-8e16-b8e80416f735"
+  },
+  "valid_plaintext_v2": {
+   "trust_status": "TRUSTED",
+   "accepted": true,
+   "valid": true,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [],
+   "blocking_reasons": [],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v2",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-19T12:00:00+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": "prod-eu-1",
+   "audit_run_id": "f065c130-be28-51b3-a74c-38db5aebbb5e"
+  },
+  "valid_v1_fhe_declared": {
+   "trust_status": "TRUSTED",
+   "accepted": true,
+   "valid": true,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "LEGACY_V1_FORMAT"
+   ],
+   "blocking_reasons": [],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v1",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-20T18:21:26.996595+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "b65cb64cc5d8c11a9c37e40abc2102f66aadd86e67243ae302794233fdf4a355",
+   "deployment_id": null,
+   "audit_run_id": null
+  },
+  "valid_v1_plaintext": {
+   "trust_status": "TRUSTED",
+   "accepted": true,
+   "valid": true,
+   "integrity_valid": true,
+   "issuer_trusted": true,
+   "key_status": "active",
+   "chronology": "SIGNER_ASSERTED",
+   "signed_not_after": null,
+   "timestamp_status": "ABSENT",
+   "reasons": [
+    "LEGACY_V1_FORMAT"
+   ],
+   "blocking_reasons": [],
+   "policy_id": "regaudit-fhe/development/v1",
+   "format": "v1",
+   "replay_scope": "NONE",
+   "replay_durable": null,
+   "consumption": "NOT_CHECKED",
+   "trust_history": "UNPROVEN",
+   "trust_store_as_of": null,
+   "issuer": "corpus-vendor.example",
+   "key_id": "corpus-key-1",
+   "primitive": "fairness",
+   "issued_at": "2026-11-20T18:21:26.995951+00:00",
+   "regulations": [
+    "NYC_LL144",
+    "EU_AI_ACT_ART10",
+    "EU_AI_ACT_ART15",
+    "COLORADO_AI_ACT",
+    "CFPB_ALG_DISCRIM"
+   ],
+   "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+   "deployment_id": null,
+   "audit_run_id": null
+  }
+ },
+ "cli": {
+  "valid_plaintext_v2": {
+   "exit": 0,
+   "stdout": {
+    "trust_status": "TRUSTED",
+    "accepted": true,
+    "valid": true,
+    "integrity_valid": true,
+    "issuer_trusted": true,
+    "key_status": "active",
+    "chronology": "SIGNER_ASSERTED",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [],
+    "blocking_reasons": [],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v2",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-key-1",
+    "primitive": "fairness",
+    "issued_at": "2026-11-19T12:00:00+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+    "deployment_id": "prod-eu-1",
+    "audit_run_id": "f065c130-be28-51b3-a74c-38db5aebbb5e",
+    "trusted_issuer": true
+   },
+   "stderr_before": ""
+  },
+  "valid_fhe_declared_v2": {
+   "exit": 0,
+   "stdout": {
+    "trust_status": "TRUSTED",
+    "accepted": true,
+    "valid": true,
+    "integrity_valid": true,
+    "issuer_trusted": true,
+    "key_status": "active",
+    "chronology": "SIGNER_ASSERTED",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [],
+    "blocking_reasons": [],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v2",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-key-1",
+    "primitive": "fairness",
+    "issued_at": "2026-11-19T12:00:00+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "b65cb64cc5d8c11a9c37e40abc2102f66aadd86e67243ae302794233fdf4a355",
+    "deployment_id": "prod-eu-1",
+    "audit_run_id": "01ded022-184b-5276-8e16-b8e80416f735",
+    "trusted_issuer": true
+   },
+   "stderr_before": ""
+  },
+  "valid_v1_plaintext": {
+   "exit": 0,
+   "stdout": {
+    "trust_status": "TRUSTED",
+    "accepted": true,
+    "valid": true,
+    "integrity_valid": true,
+    "issuer_trusted": true,
+    "key_status": "active",
+    "chronology": "SIGNER_ASSERTED",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [
+     "LEGACY_V1_FORMAT"
+    ],
+    "blocking_reasons": [],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v1",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-key-1",
+    "primitive": "fairness",
+    "issued_at": "2026-11-20T18:21:26.995951+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+    "deployment_id": null,
+    "audit_run_id": null,
+    "trusted_issuer": true
+   },
+   "stderr_before": ""
+  },
+  "tampered_v2": {
+   "exit": 1,
+   "stdout": {
+    "trust_status": "INVALID",
+    "accepted": false,
+    "valid": false,
+    "integrity_valid": false,
+    "issuer_trusted": false,
+    "key_status": "active",
+    "chronology": "NONE",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [
+     "HASH_MISMATCH",
+     "SIGNATURE_INVALID"
+    ],
+    "blocking_reasons": [
+     "HASH_MISMATCH",
+     "SIGNATURE_INVALID"
+    ],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v2",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-key-1",
+    "primitive": "fairness",
+    "issued_at": "2026-11-19T12:00:00+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+    "deployment_id": "prod-eu-1",
+    "audit_run_id": "f065c130-be28-51b3-a74c-38db5aebbb5e",
+    "trusted_issuer": false,
+    "reason": "HASH_MISMATCH"
+   },
+   "stderr_before": "not accepted: INVALID (HASH_MISMATCH). See blocking_reasons in the JSON above and docs/TRUST_SPEC.md.\n"
+  },
+  "stranger_v2": {
+   "exit": 1,
+   "stdout": {
+    "trust_status": "INVALID",
+    "accepted": false,
+    "valid": false,
+    "integrity_valid": false,
+    "issuer_trusted": false,
+    "key_status": "unknown",
+    "chronology": "NONE",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [
+     "ISSUER_UNKNOWN"
+    ],
+    "blocking_reasons": [
+     "ISSUER_UNKNOWN"
+    ],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v2",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-stranger",
+    "primitive": "fairness",
+    "issued_at": "2026-11-19T12:00:00+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+    "deployment_id": "prod-eu-1",
+    "audit_run_id": "b3bf5b0b-512d-5a11-9028-66ff6c74600b",
+    "trusted_issuer": false,
+    "reason": "ISSUER_UNKNOWN"
+   },
+   "stderr_before": "not accepted: INVALID (ISSUER_UNKNOWN). See blocking_reasons in the JSON above and docs/TRUST_SPEC.md.\n"
+  },
+  "expired_v2": {
+   "exit": 1,
+   "stdout": {
+    "trust_status": "INVALID",
+    "accepted": false,
+    "valid": false,
+    "integrity_valid": true,
+    "issuer_trusted": true,
+    "key_status": "active",
+    "chronology": "SIGNER_ASSERTED",
+    "signed_not_after": null,
+    "timestamp_status": "ABSENT",
+    "reasons": [
+     "REPORT_TOO_OLD"
+    ],
+    "blocking_reasons": [
+     "REPORT_TOO_OLD"
+    ],
+    "policy_id": "regaudit-fhe/development/v1",
+    "format": "v2",
+    "replay_scope": "NONE",
+    "replay_durable": null,
+    "consumption": "NOT_CHECKED",
+    "trust_history": "UNPROVEN",
+    "trust_store_as_of": null,
+    "issuer": "corpus-vendor.example",
+    "key_id": "corpus-key-1",
+    "primitive": "fairness",
+    "issued_at": "2024-01-01T00:00:00+00:00",
+    "regulations": [
+     "NYC_LL144",
+     "EU_AI_ACT_ART10",
+     "EU_AI_ACT_ART15",
+     "COLORADO_AI_ACT",
+     "CFPB_ALG_DISCRIM"
+    ],
+    "parameter_set_hash": "9f6e012d6c51ca883991d1c1485883564a9642f92a74bba6bba656753a89b606",
+    "deployment_id": "prod-eu-1",
+    "audit_run_id": "5c22cb1e-7678-53d2-96b7-4dc4e11948c1",
+    "trusted_issuer": true,
+    "reason": "REPORT_TOO_OLD"
+   },
+   "stderr_before": "not accepted: INVALID (REPORT_TOO_OLD). See blocking_reasons in the JSON above and docs/TRUST_SPEC.md.\n"
+  }
+ }
+}

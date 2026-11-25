@@ -22,7 +22,6 @@ import math
 import os
 import stat
 import sys
-import tempfile
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,9 +38,17 @@ from . import (
     audit_drift,
     audit_fairness,
     audit_provenance,
+    claim_labels,
 )
 from ._keys import load_ed25519_public_key, spki_fingerprint
 from ._limits import active_limits, check_primitive_cost
+from ._store_write import (
+    DurabilityNotConfirmed,
+    StoreLockError,
+    store_lock,
+    sync_store,
+    write_store_atomic,
+)
 from ._trust_lifecycle import LOCAL_NOTICE, LifecycleRefused, MigrationRefused, status_rows
 from ._trust_lifecycle import migrate as migrate_store_file
 from ._trust_lifecycle import retire as retire_key
@@ -418,6 +425,38 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
                 f"refused, nothing enrolled: {why}; a report key must be another key\n"
             )
             return 2
+    # The read-modify-write is one step for cooperating processes: lock, read, validate, write, sync.
+    # Only taking the lock is reported as "cannot lock"; anything later is reported by the step that failed.
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(store_lock(args.store))
+        except StoreLockError as exc:
+            sys.stderr.write(f"cannot lock {args.store!r}: {exc}\n")
+            return 3
+        try:
+            return _trust_add_locked(args, pem, actual)
+        except OSError as exc:
+            sys.stderr.write(
+                f"trust add failed with an I/O error: {exc}. Run 'regaudit-fhe trust status --store {args.store}' "
+                "to see what the store holds before you rely on it.\n"
+            )
+            return 3
+
+
+NOT_DURABLE = "NOT confirmed durable"
+
+
+def _not_durable_message(store: str, key_id: str | None, exc: OSError) -> str:
+    what = f"key_id {key_id!r} is in" if key_id else "the new content is in"
+    return (
+        f"{NOT_DURABLE}: {what} {store!r} and is visible, but syncing it to disk failed ({exc}). "
+        "This is not a success and the store may revert after a crash or power loss. Run the same command "
+        "again (re-running 'trust add' with the same issuer and key is idempotent and syncs again) or run "
+        f"'regaudit-fhe trust status --store {store}' to check what the store holds.\n"
+    )
+
+
+def _trust_add_locked(args: argparse.Namespace, pem: str, actual: str) -> int:
     problem = store_file_problem(args.store) or store_location_problem(args.store)
     if problem is not None:
         sys.stderr.write(
@@ -439,51 +478,56 @@ def _cmd_trust_add(args: argparse.Namespace) -> int:
     if not isinstance(entries, dict):
         sys.stderr.write("--store: 'entries' must be an object\n")
         return 3
+    wanted = {
+        "issuer": args.issuer,
+        "public_key_pem": pem.strip().replace("\r\n", "\n") + "\n",
+        "status": "active",
+    }
+    if entries.get(args.key_id) == wanted:
+        # Same key_id, issuer and key, still plain active: a repeat (for example after an unconfirmed write). Nothing
+        # is replaced; the store is synced again and success is reported only if that now works.
+        try:
+            sync_store(args.store)
+        except DurabilityNotConfirmed as exc:
+            sys.stderr.write(_not_durable_message(args.store, args.key_id, exc))
+            return 3
+        return _print_enrolled(args, actual, len(entries), already=True)
     if args.key_id in entries:
         sys.stderr.write(
             f"key_id {args.key_id!r} is already enrolled; rotate by enrolling the new key under a "
             "new key_id (existing entries are never replaced)\n"
         )
         return 2
-    entries[args.key_id] = {
-        "issuer": args.issuer,
-        "public_key_pem": pem.strip().replace("\r\n", "\n") + "\n",
-        "status": "active",
-    }
+    entries[args.key_id] = wanted
     try:
         TrustStore.from_dict(payload)  # the same validation verification will apply
     except TrustStoreError as exc:
         sys.stderr.write(f"refused, nothing written: {exc}\n")
         return 2
-    store_path = Path(args.store)
     try:
-        fd, tmp = tempfile.mkstemp(dir=store_path.parent or ".", prefix=".trust-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload, indent=2) + "\n")
-            os.chmod(tmp, stat.S_IMODE(store_path.stat().st_mode) if store_path.exists() else 0o644)
-            os.replace(tmp, store_path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
-            raise
+        write_store_atomic(args.store, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
+    except DurabilityNotConfirmed as exc:
+        sys.stderr.write(_not_durable_message(args.store, args.key_id, exc))
+        return 3
     except OSError as exc:
         sys.stderr.write(f"cannot write {args.store!r}: {exc}\n")
         return 2
-    print(
-        json.dumps(
-            {
-                "enrolled": args.key_id,
-                "issuer": args.issuer,
-                "issuer_binding": "store_entry",
-                "authenticated_binding": False,
-                "fingerprint_sha256": actual,
-                "store": args.store,
-                "entries": len(entries),
-            },
-            indent=2,
-        )
-    )
+    return _print_enrolled(args, actual, len(entries), already=False)
+
+
+def _print_enrolled(args: argparse.Namespace, actual: str, count: int, *, already: bool) -> int:
+    result: dict[str, Any] = {
+        "enrolled": args.key_id,
+        "issuer": args.issuer,
+        "issuer_binding": "store_entry",
+        "authenticated_binding": False,
+        "fingerprint_sha256": actual,
+        "store": args.store,
+        "entries": count,
+    }
+    if already:
+        result["already_enrolled"] = True
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -517,7 +561,9 @@ def _cmd_trust_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> int:
+def _lifecycle(
+    action: Callable[[], dict[str, Any]], *, edits: bool = False, store: str = "the trust store"
+) -> int:
     """Run one lifecycle action. Exit 0 done | 2 refused | 3 store unusable."""
     try:
         print(json.dumps(action(), indent=2))
@@ -528,6 +574,12 @@ def _lifecycle(action: Callable[[], dict[str, Any]], *, edits: bool = False) -> 
         return 2
     except TrustStoreError as exc:
         sys.stderr.write(f"--store: {exc}\n")
+        return 3
+    except DurabilityNotConfirmed as exc:
+        sys.stderr.write(_not_durable_message(store, None, exc))
+        return 3
+    except StoreLockError as exc:
+        sys.stderr.write(f"cannot lock {store!r}: {exc}\n")
         return 3
     except OSError as exc:
         sys.stderr.write(f"cannot write the trust store: {exc}\n")
@@ -543,6 +595,7 @@ def _cmd_trust_retire(args: argparse.Namespace) -> int:
     return _lifecycle(
         lambda: retire_key(args.store, args.key_id, at=args.at, now=datetime.now(timezone.utc)),
         edits=True,
+        store=args.store,
     )
 
 
@@ -555,6 +608,7 @@ def _cmd_trust_revoke(args: argparse.Namespace) -> int:
             now=datetime.now(timezone.utc),
         ),
         edits=True,
+        store=args.store,
     )
 
 
@@ -742,8 +796,29 @@ def _refusal_hint(trust_status: str, reason: str | None) -> str:
     )
 
 
-def _versioned_payload(result: Any, decision: Any) -> dict[str, Any]:
-    return response_v2(result.to_dict(), None if decision is None else decision.revocation)
+def _versioned_payload(result: Any, decision: Any, env: Any) -> dict[str, Any]:
+    assessment = claim_labels.assess(
+        env, trust_status=result.trust_status, accepted=result.accepted
+    )
+    return response_v2(
+        result.to_dict(), None if decision is None else decision.revocation, assessment
+    )
+
+
+def _write_profile_notice(profile: str) -> None:
+    """State the effective profile on stderr (stdout and exit codes are untouched)."""
+    if profile == "development":
+        sys.stderr.write(
+            "note: verification profile in effect: development. A development profile is not a "
+            "high-assurance profile: it does not require a maximum report age, replay checking or a "
+            "verifier id, and it only warns about a trust store another account could change. "
+            "Use --profile to select another profile.\n"
+        )
+    else:
+        sys.stderr.write(
+            f"note: verification profile in effect: {profile}. The checks it enforces are listed in "
+            "docs/TRUST_SPEC.md; a passing verdict is a result under that profile only.\n"
+        )
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
@@ -755,6 +830,30 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     was specified is unavailable or unusable (trust store, replay store). stdout
     carries the JSON verdict for exit 0 and 1 only.
     """
+    if args.strict:
+        # Never an alias for a profile and never a no-op: the one supported mechanism is --profile.
+        sys.stderr.write(
+            "--strict is not supported and selects no profile. Use --profile <name> to choose the "
+            f"verification profile; valid names: {', '.join(PROFILES)}. "
+            "See docs/MIGRATION_0.3.md.\n"
+        )
+        return 2
+    profile_explicit = args.profile is not None
+    if args.profile is None:
+        args.profile = "development"
+    replay_mode_explicit = args.replay_mode is not None
+    if args.replay_mode is None:
+        args.replay_mode = "off"
+    if args.replay_db and args.replay_mode == "off":
+        # A replay file that nothing consults is a misconfiguration: the operator believes replays are caught.
+        how = "was set explicitly" if replay_mode_explicit else "is the default"
+        sys.stderr.write(
+            f"--replay-db {args.replay_db!r} was given but the replay mode is 'off' (it {how}), so replay "
+            "protection is disabled and the file would never be read or written. To enable it, pass "
+            "--replay-mode check (detect a replay without recording this report) or --replay-mode record "
+            "(also record it as seen). To run without replay protection, remove --replay-db.\n"
+        )
+        return 2
     try:
         env = parse_envelope_strict(_read_report(args.input))
     except OSError as exc:
@@ -828,6 +927,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "compared with that statement, which is not an authenticated binding. confidential, high-assurance and "
             "secure-v1 refuse this store.\n"
         )
+    if profile_explicit or sys.stderr.isatty():
+        _write_profile_notice(args.profile)
     decision = None
     try:
         if args.revocation_mode == "off":
@@ -868,9 +969,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         if (
             versioned
         ):  # an opted-in client still sees the status; the exit code says no verdict was possible
-            print(json.dumps(_versioned_payload(result, decision), indent=2))
+            print(json.dumps(_versioned_payload(result, decision, env), indent=2))
         return 3
-    payload = _versioned_payload(result, decision) if versioned else result.to_dict()
+    payload = _versioned_payload(result, decision, env) if versioned else result.to_dict()
     payload["trusted_issuer"] = result.issuer_trusted
     if not result.accepted:
         payload["reason"] = (
@@ -879,6 +980,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     print(json.dumps(payload, indent=2))
     if not result.accepted:
         sys.stderr.write(_refusal_hint(result.trust_status, payload.get("reason")) + "\n")
+    # Wording only: what the verdict does and does not establish. Written after the verdict, never read by it.
+    sys.stderr.write(
+        claim_labels.stderr_block(env, trust_status=result.trust_status, accepted=result.accepted)
+    )
     return 0 if result.accepted else 1
 
 
@@ -888,7 +993,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = argparse.ArgumentParser(
         prog="regaudit-fhe",
-        description="Encrypted regulatory audit primitives at CKKS depth six.",
+        description=(
+            "Regulatory audit primitives. The audit and verify commands run plaintext functions and sign the "
+            "result. A signed report can authenticate a claim without proving that claim is true."
+        ),
     )
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -1014,9 +1122,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--strict",
         action="store_true",
-        help="Has no effect and selects no assurance profile: use --profile. Kept for "
-        "compatibility; trust material is required with or without it (see "
-        "--allow-self-signed for the development-only alternative).",
+        help="Refused with a usage error (exit 2): it selects no profile and never changes a verdict. "
+        "Use --profile <name> instead.",
     )
     verify_p.add_argument(
         "--allow-self-signed",
@@ -1025,7 +1132,12 @@ def build_parser() -> argparse.ArgumentParser:
         "SELF_SIGNED_ONLY and the command exits 1, never 0. With --trusted-keys it has no "
         "effect in the development profile; it is refused (exit 2) in any other profile.",
     )
-    verify_p.add_argument("--profile", choices=PROFILES, default="development")
+    verify_p.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default=None,
+        help="Verification profile (default: development, which is not a high-assurance profile).",
+    )
     verify_p.add_argument("--verifier-id", help="This verifier's audience identifier.")
     verify_p.add_argument(
         "--max-age-seconds",
@@ -1036,9 +1148,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument(
         "--replay-mode",
         choices=("off", "check", "record"),
-        default="off",
-        help="Local replay detection. 'record' marks the report as seen in --replay-db "
-        "(local only; not a global single-use guarantee).",
+        default=None,
+        help="Local replay detection (default: off). 'record' marks the report as seen in --replay-db "
+        "(local only; not a global single-use guarantee). --replay-db with mode off is a "
+        "configuration error (exit 2): replay protection would be disabled.",
     )
     verify_p.add_argument(
         "--refuse-legacy-v1", action="store_true", help="Refuse report.v1 envelopes."

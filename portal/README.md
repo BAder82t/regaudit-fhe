@@ -23,7 +23,7 @@ You need:
 
 **The page works only while the portal is running.** The `serve` command (step 5 below) is the portal. While it runs in its terminal the page works. If you close that terminal or press Ctrl-C, the page stops. For routine use, the administrator starts it on one computer and keeps it running (see [Keeping it running](#keeping-it-running) below, after the install steps).
 
-It only answers on the computer it runs on (`127.0.0.1`). Other people's computers cannot reach it.
+It only answers on the computer it runs on (`127.0.0.1`). Other computers cannot reach it. Another account on the same computer can.
 
 The synthetic sample reports will be in `~/portal-demo/sample-reports` (a folder called `portal-demo` in your home folder). Step 7 below says how to find it in the file chooser.
 
@@ -95,7 +95,7 @@ If there is no file there, `serve` starts in welcome mode: the samples work and 
 
 ### For a launcher
 
-An application that starts the portal for someone who never opens a terminal can run `regaudit-portal serve --port 0`. That takes any free port on this computer (`127.0.0.1` only, as always). Before the existing human line ("open http://... in a browser"), the portal prints one line a launcher can read once the portal is listening:
+An application that starts the portal for someone who never opens a terminal can run `regaudit-portal serve --port 0`. That takes any free port on this computer (`127.0.0.1` only, as always). Before the existing readable line ("open http://... in a browser"), the portal prints one line a launcher can read once the portal is listening:
 
 ```
 portal-listening url=http://127.0.0.1:PORT/ mode=MODE

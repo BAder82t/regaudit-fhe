@@ -6,9 +6,9 @@ receipt fails verification against the regulator's trust store.
 
 The regulator MUST authenticate the issuer; the bare
 ``verify_receipt(env)`` path only checks the embedded signature
-against the embedded public key, which proves only that the bytes have
-not changed in transit. To prove the envelope was produced by an
-auditor the regulator approved, load a :class:`TrustStore` from a JSON
+against the embedded public key, which shows only that the signature
+matches the key inside the report, not who holds that key. To check that an enrolled key signed the
+envelope, load a :class:`TrustStore` from a JSON
 file mapping ``key_id`` to PEM-encoded public key and pass it to
 :func:`verify_envelope_or_raise` — failures raise a typed exception
 that names the specific reason (untrusted issuer, revoked issuer,
@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 
 def main(bundle_path: str, trust_store_path: str) -> int:
@@ -49,6 +50,7 @@ def main(bundle_path: str, trust_store_path: str) -> int:
         print(f"\nREJECT: {failures} envelope(s) failed verification.")
         return 1
     print("\nACCEPT: all envelopes verified against the trust store.")
+    print(claim_labels.NOT_ESTABLISHED, claim_labels.INVARIANT)
     return 0
 
 

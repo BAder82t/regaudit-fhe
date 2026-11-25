@@ -303,7 +303,7 @@ def signed(tmp_path: Path) -> Path:
 
 def test_default_cli_output_has_exactly_the_published_fields(signed):
     proc = _cli("verify", "-i", "r.json", "--trusted-keys", "t.json", cwd=signed)
-    assert proc.returncode == 0 and proc.stderr == ""
+    assert proc.returncode == 0 and proc.stderr.startswith("claims:\n")
     assert set(json.loads(proc.stdout)) == RESULT_FIELDS | {"trusted_issuer"}
 
 
@@ -319,6 +319,7 @@ def test_the_evidence_section_appears_only_when_asked_for(signed):
         "response_format",
         "revocation_evaluation",
         "issuer_binding",
+        "claim_assessment",
     }
     assert payload["policy_evidence"]["revocation"]["revocation_evaluation"] == "not_evaluated"
 

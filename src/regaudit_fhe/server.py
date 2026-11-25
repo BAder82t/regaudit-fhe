@@ -1,4 +1,4 @@
-"""HTTP audit server (production-hardened reference build).
+"""HTTP audit server (reference build that runs the plaintext audit functions).
 
 Exposes every audit primitive as a POST endpoint that consumes the
 JSON Schema bundled in :mod:`regaudit_fhe.schemas` and emits an
@@ -9,7 +9,7 @@ Ed25519-signed audit envelope. The implementation includes:
   - in-process per-key rate limiting (token bucket),
   - per-request timeout,
   - structured JSON access logs that never echo audit payloads,
-  - permissive-by-default CORS that becomes deny-list when configured,
+  - CORS that is off unless an allow-list is configured,
   - /healthz, /readyz, /version probes.
 
 PRIVACY-BOUNDARY WARNING
@@ -20,11 +20,13 @@ This server is **not a privacy boundary** by itself.
   - The default execution path runs the *plaintext* SlotVec model.
     Inputs are visible to the host process, the operating system, and
     any sidecar with shared memory access.
-  - Encrypted execution requires the optional ``[fhe]`` extra AND a
-    deployment that withholds the CKKS secret key from the audit host
-    (KMS / HSM / dedicated decryptor).
-  - Issuer authenticity is whatever Ed25519 key you supply. Verifiers
-    decide which ``key_id`` to trust.
+  - No encrypted path exists in this server. ``/v1/audit/*`` calls the
+    plaintext functions, so installing the optional ``[fhe]`` extra does
+    not change what the server does. The server holds no CKKS key.
+  - ``/v1/audit/*`` signs with an ephemeral Ed25519 key generated for each
+    request (self-signed ``report.v1``), so its output can verify at most as
+    ``SELF_SIGNED_ONLY``. Issuer identity comes only from a trust store the
+    verifier holds.
 
 The server logs the warning on startup and surfaces it in the
 ``/readyz`` response.
@@ -111,6 +113,7 @@ except Exception:
 
 
 from . import __version__ as LIB_VERSION
+from . import claim_labels
 from ._limits import (
     AdmissionGate,
     GateRefused,
@@ -147,10 +150,14 @@ __all__ = [
     "validate_trust_config",
 ]
 
+SERVER_EXECUTION = (
+    "plaintext-only: the audit routes run plaintext functions. The tenseal field is the version of an installed "
+    "library, not evidence of encrypted execution."
+)
 PRIVACY_WARNING = (
     "regaudit-fhe HTTP server: NOT A PRIVACY BOUNDARY by itself. The "
-    "default execution path is plaintext; encrypted execution requires "
-    "the [fhe] extra AND key custody held off-host. See server module "
+    "audit routes run plaintext functions and sign with an ephemeral key; "
+    "no encrypted path exists in this server. See server module "
     "docstring and docs/DEPLOYMENT.md before exposing publicly."
 )
 
@@ -1257,9 +1264,11 @@ def build_app(
     app = FastAPI(
         title="regaudit-fhe",
         description=(
-            "Encrypted regulatory audit primitives at CKKS "
-            "depth six. NOT a privacy boundary by itself; see "
-            "server module docstring."
+            "Regulatory audit primitives. The audit routes run plaintext "
+            "functions and sign the result; this server has no encrypted "
+            "execution path. NOT a privacy boundary by itself; see "
+            "server module docstring. A signed report can authenticate a "
+            "claim without proving that claim is true."
         ),
         version=LIB_VERSION,
     )
@@ -1357,7 +1366,14 @@ def build_app(
             },
         )
 
-    @app.get("/version")
+    @app.get(
+        "/version",
+        description=(
+            "Library and interpreter versions. `tenseal` is the version of the optional TenSEAL "
+            "package if it is installed; it is not a capability of this server and not evidence of "
+            "encrypted execution. `server_execution` states what the audit routes run."
+        ),
+    )
     def version() -> dict[str, str]:
         try:
             import tenseal
@@ -1369,6 +1385,7 @@ def build_app(
             "library_version": LIB_VERSION,
             "python": platform.python_version(),
             "tenseal": backend_version,
+            "server_execution": SERVER_EXECUTION,
         }
 
     # ----- Schemas (read scope) -------------------------------------------
@@ -1551,7 +1568,13 @@ def build_app(
         response: dict[str, Any] = result.to_dict()
         if response_format == "v2":
             # Opt-in. This server has no revocation gate, so it says revocation was not evaluated.
-            return response_v2(response, None)
+            return response_v2(
+                response,
+                None,
+                claim_labels.assess(
+                    env, trust_status=result.trust_status, accepted=result.accepted
+                ),
+            )
         return response
 
     return app

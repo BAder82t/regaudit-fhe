@@ -96,7 +96,7 @@ const STATEMENTS = [
     recorded: "Recorded as seen", checked_not_seen: "Not seen before (not recorded)", not_checked: "Not checked",
   }],
   ["encryption_claims", "Encryption claims", {
-    plaintext_stated: "Plaintext, as the signer states", declared_by_signer: "Declared by the signer, not verified",
+    plaintext_stated: "Plaintext backend declared by the signer", declared_by_signer: "Declared by the signer, not verified",
     not_stated: "Not stated",
   }],
 ];
@@ -187,6 +187,8 @@ function render(body, fileName) {
 
   const claims = body.encryption_declarations;
   $("enc-statement").textContent = claims.statement;
+  $("enc-established").textContent = claims.established_statement;
+  $("enc-invariant").textContent = claims.invariant;
   $("enc-backend").textContent = (claims.backend === null ? "none" : claims.backend + (claims.backend_shortened ? " (shortened)" : "")) + " (stated in the report)";
   $("enc-bits").textContent = claims.security_bits_text;
   $("enc-note").textContent = claims.note;

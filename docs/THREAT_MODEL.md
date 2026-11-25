@@ -16,7 +16,15 @@ It states three things explicitly:
      malicious clients, malicious auditors, collusion.
 
 Read this whole document before integrating `regaudit-fhe` into a
-regulated pipeline. The summary tables in §3 are the binding spec.
+regulated pipeline. The tables in §3 describe what the encrypted functions
+encrypt and decrypt. They are not a promise about what a deployment does:
+the command line and the HTTP server run plaintext, and the encrypted functions
+run in one process that holds the key.
+
+**What a signed report does and does not show.** A signed report can
+authenticate a claim without proving the claim is true. Successful FHE tests do
+not prove that an arbitrary signed report was produced through FHE: a report
+signed by an enrolled key is evidence of who signed it, nothing more.
 
 ---
 
@@ -29,8 +37,10 @@ legal entity, but the cryptographic contract treats them as distinct.
 | ------------- | ------------------------------------------------------ | -------------------------- |
 | **Subject**   | Plaintext per-row sensitive data (labels, predictions, protected attributes, training rows). | Trusted to encrypt before sending; never expected to decrypt. |
 | **Auditee**   | The model under audit and the encryption keys.         | Honest-but-curious. Honest about which parameters they used; curious about the audit data. |
-| **Operator**  | The host running `regaudit_fhe.audit_*`.               | Honest-but-curious. Sees only ciphertexts and auditor-public scalars. |
+| **Operator**  | The host running `regaudit_fhe.audit_*`.               | Honest-but-curious. In the intended deployment it sees only ciphertexts and auditor-public scalars. The shipped server does not meet this: it runs plaintext functions, so the host sees every input. |
 | **Auditor**   | The Ed25519 verification key chain and the regulatory rule (threshold). | Honest. Holds the secret CKKS key only when acting as the regulator-side decryptor. |
+
+The roles and key custody above describe the intended design. The shipped code does not enforce this separation: the command line and the HTTP server run the plaintext path and hold no CKKS key, and the library's encrypted functions encrypt, evaluate and decrypt in one process. The encrypted functions are experimental and have not been independently qualified.
 
 Standard configuration:
 
@@ -76,7 +86,7 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
 
 ---
 
-## 2. Cryptographic guarantees
+## 2. Cryptographic properties relied on, and their limits
 
 ### CKKS scheme
 
@@ -88,7 +98,8 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
   (see `docs/REPORT_FORMAT.md`).
 - Default parameter set of `CKKSParams`: `poly_modulus_degree = 2^15`,
   `coeff_modulus` chain `[60, 40, 40, 40, 40, 40, 40, 60]` (360 bits),
-  hybrid key switching with `dnum = 3`, scaling factor `2^40`. The
+  scaling factor `2^40`. The code does not set a key-switching `dnum`.
+  (`build_d6_context` uses a different default, `poly_modulus_degree = 2^14`.) The
   envelope's `parameter_set` block records these values only when the
   producer passes a parameter set built for the encrypted path. The CLI
   and the server sign `plaintext`, `poly_modulus_degree = 0` and
@@ -100,43 +111,58 @@ Subject ──[CKKS public key]──> Subject encrypts inputs locally
 
 ### Audit envelope
 
-- Body canonicalised under the rules in [`docs/specs/`](specs/) and
-  `regaudit_fhe.reports.canonical_json` (sorted keys, no whitespace
-  separators, UTF-8, no ASCII escapement).
-- SHA-256 over the canonical body proves the envelope has not been
-  modified since issuance.
-- Ed25519 signature over the SAME canonical body proves the envelope
-  was issued by a holder of the named `key_id` private key.
-- `parameter_set_hash` binds the envelope to a specific set of CKKS
-  parameters; verifiers reject mismatches against their pinned
-  parameter list.
-- `input_commitments[].sha256` lets an auditor confirm that the
-  Auditee submitted the same encrypted inputs the verifier holds,
-  without revealing the inputs themselves.
+- Body canonicalised under the rules in `regaudit_fhe.canonical` (`report.v2`)
+  and `regaudit_fhe.reports.canonical_json` (`report.v1`: sorted keys, no
+  whitespace separators, UTF-8, no ASCII escapement).
+- SHA-256 over the canonical body is unauthenticated. It detects accidental
+  change only; the signature check under a trust store is what means
+  something.
+- A valid Ed25519 signature over the SAME canonical body shows that the
+  holder of the key behind the receipt's public key signed these bytes. Who
+  that is depends on the verifier's trust store: in `report.v1` the `key_id`
+  and the public key are unsigned receipt fields, and the verifier checks
+  them only against its own trust store. The signature shows authenticity of
+  the claim, not that the computation was correct or encrypted. A report can be
+  signed over a result computed on plaintext, and nothing in the signature tells
+  the two cases apart.
+- `parameter_set_hash` binds the envelope to the parameter set the signer
+  declared. A verifier that holds a `parameter_set_pin` for that key in its
+  `TrustStore` refuses a different parameter-set hash. The parameters are
+  what the signer configured, not a measured or achieved security level.
+- `input_commitments[].sha256` are hashes of the inputs the issuer chose to
+  commit to, taken over the payload the caller supplied by name. Someone
+  holding the same inputs can compare them. They do not show that the inputs
+  were encrypted, and the HTTP server's path does not produce them.
 - Optional `timestamp.token_b64` field carries an RFC 3161 TSA
   response when an external timestamp authority is wired into the
-  signer.
+  signer. Without a verified token, a timestamp in a report is the signer's
+  claim, not a trusted time.
 
 ---
 
 ## 3. Per-primitive public surface
 
-Each table is binding. Anything not listed is encrypted (or never
-present in the envelope at all).
+Each table describes what the encrypted function for that primitive encrypts,
+sends to the evaluator in the clear, and decrypts. It is not a guarantee about a
+deployment: the encrypted functions encrypt, evaluate and decrypt in one process
+that also holds the plaintext inputs, and the command line and HTTP server do not
+call them. "Encrypted" below means encrypted during evaluation, with the key in
+that same process. Where a value is used in plaintext by the function (a mask or a
+count, for example), the table says so.
 
 ### 3.1 audit_fairness (EGF-IMSS)
 
 | Value                         | Encrypted? | Public? | Why acceptable?                                                     |
 | ----------------------------- | ---------- | ------- | ------------------------------------------------------------------- |
-| `y_true`                      | yes        | no      | Protected outcome label.                                            |
-| `y_pred`                      | yes        | no      | Model decision; reveals model behaviour per row.                    |
-| `group_a` indicator vector    | yes        | no      | Protected attribute; per-row membership stays encrypted.            |
-| `group_b` indicator vector    | yes        | no      | Protected attribute.                                                |
+| `y_true`                      | no (plaintext mask) | no | Protected outcome label. `fairness_encrypted` applies it as a plaintext multiplier and takes its counts in the clear, so the evaluator sees it. |
+| `y_pred`                      | yes        | no      | Model decision; reveals model behaviour per row. The only per-row vector `fairness_encrypted` encrypts. |
+| `group_a` indicator vector    | no (plaintext mask) | no | Protected attribute. Used as a plaintext mask; the evaluator sees it. |
+| `group_b` indicator vector    | no (plaintext mask) | no | Protected attribute. Same.                                          |
 | `group_count_a`, `group_count_b` | no       | yes     | Auditor-public; required to compute the group-rate denominator without an encrypted division. Group cardinality is a routine demographic statistic in NYC LL144 and EU AI Act audits. |
 | `pos_a`, `pos_b` (label-positive counts per group) | no | yes | Auditor-public for the same reason as group counts. |
 | `threshold`                   | no         | yes     | The regulatory rule itself.                                         |
 | `demographic_parity_diff`, `equal_opportunity_diff`, `predictive_parity_diff` | decrypted | yes | The audit output.                            |
-| `threshold_breached`          | decrypted  | yes     | Boolean breach decision.                                            |
+| `threshold_breached`          | decrypted  | yes     | Boolean breach decision: the decrypted values are compared with `threshold` in plaintext. |
 
 If a deployment cannot leak group cardinalities or label-positive
 counts, the Auditee MUST inflate them with composite-output noise
@@ -155,8 +181,8 @@ flooding before envelope publication; that path is documented in
 | Bucket aggregate magnitudes   | decrypted  | yes     | The audit output (top-K).                                           |
 | `topk_indices`                | decrypted  | yes     | Bucket identifiers, not row identifiers.                            |
 
-Per-row attribution magnitudes never leave the encrypted domain.
-Bucket aggregates leak only the sum of magnitudes per bucket; they do
+Per-row attribution magnitudes are encrypted during evaluation, and only the
+per-bucket sums are decrypted. Bucket aggregates leak only the sum of magnitudes per bucket; they do
 NOT identify which rows fell into which bucket from outside the
 envelope (that derivation requires `row_ids`, which the Subject
 chooses to publish or not).
@@ -169,13 +195,18 @@ chooses to publish or not).
 | `time[i]`                     | yes        | no      | Observed time; PHI.                                                 |
 | `event[i]`                    | yes        | no      | Event indicator; PHI.                                               |
 | Cohort size `N`               | no         | yes     | Required for pair enumeration.                                      |
-| Three signed sign-poly aggregates (`S1`, `S2`, `S3`) | decrypted | yes | Encrypted-domain output; recover the four concordance bins ``(A, B, C, D)`` plaintext-side via the linear system in ``docs/specs/03_esc_cia.md``. The aggregates are sums over all ordered ``i != j`` pairs and reveal only those three scalars per audit. |
+| Three signed sign-poly aggregates (`S1`, `S2`, `S3`) | decrypted | yes | Real numbers from a degree-3 sign approximation, not integer counts; recover the four concordance bins ``(A, B, C, D)`` plaintext-side via the linear system in ``docs/specs/03_esc_cia.md``. The aggregates are sums over all ordered ``i != j`` pairs and reveal only those three scalars per audit. |
 | `concordant_pairs`, `comparable_pairs` | derived | yes | Plaintext-side recovery from the three aggregates and the public event count. |
 | `c_index`                     | derived  | yes     | The audit output.                                                   |
 
-PHI never leaves the encrypted domain. The two encrypted aggregates
-are integer counts; they leak only the cohort-level pair statistics,
-never per-patient data.
+Risk, time and event are encrypted during evaluation, and only the three
+aggregates are decrypted. The aggregates are sums of values from the degree-3
+sign polynomial `(3x - x^3) / 2`, which is close to the sign only away from zero
+(error 0.31 at |x| = 0.5, 0.85 at |x| = 0.1). Pairs with nearly equal risk or
+time contribute a wrong amount, so the concordant and comparable counts and the
+C-index are approximations, not the exact Harrell values and not a proven bound.
+Do not read them as exact counts. The function normalises risk and time and
+counts events in plaintext before encrypting.
 
 ### 3.4 audit_calibration (ECP-QSSP)
 
@@ -202,8 +233,10 @@ slots is class-invariant and discloses no per-test-point information.
 | Encrypted CDF L2² distance    | decrypted  | yes     | The audit output.                                                   |
 | `drift_bit`                   | decrypted  | yes     | Boolean breach decision.                                            |
 
-Per-bin counts never leave the encrypted domain. Only the aggregate
-distance scalar is decrypted.
+Histograms are normalised in plaintext, then encrypted for evaluation. Only the
+aggregate distance scalar is decrypted. `drift_bit` is that scalar compared with
+the threshold in plaintext. The returned report object also carries a plaintext
+oracle distance computed from the inputs in the same call.
 
 ### 3.6 audit_disagreement (ECMD-JPS)
 
@@ -217,7 +250,9 @@ distance scalar is decrypted.
 | `breach`                      | decrypted  | yes     | Boolean breach decision.                                            |
 | `per_model_outputs`           | decrypted  | yes     | Mean-output-per-model summary. The function's RETURN VALUE is a single mean per model; per-row test-input data is discarded after the auditor's local mean. |
 
-Per-row test-input data never leaves the encrypted domain.
+Per-row test-input data is encrypted during evaluation and only the variance
+vector and per-model summaries are decrypted. The decision is the decrypted mean
+compared with `threshold` in plaintext.
 
 ---
 
@@ -236,8 +271,9 @@ The library does not defend against:
 - **Malicious Operator who modifies parameter_set.** A signed envelope
   binds the parameters used; an Operator who silently downgrades
   parameters BEFORE signing produces an envelope whose
-  `parameter_set_hash` will not match the Auditor's pinned list, and
-  verification rejects it. A truly malicious Operator that controls
+  `parameter_set_hash` will not match a `parameter_set_pin` the verifier
+  holds for that key, and verification rejects it only when such a pin
+  exists. The parameters are what the signer declared. A truly malicious Operator that controls
   the signing key entirely is out of scope — defense relies on
   KMS-backed signing keys and key-chain rotation handled at the
   deployment layer.
@@ -260,8 +296,9 @@ The library does not defend against:
 
 ## 5. Collusion assumptions
 
-The cryptographic guarantees hold under the following collusion
-assumptions:
+The statements in this document hold, if they hold at all, only under the
+following collusion assumptions and only for a deployment that separates the roles
+as described in §1. The shipped code does not enforce that separation.
 
 | Coalition                       | Effect                                                                                          |
 | ------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -271,7 +308,7 @@ assumptions:
 | Auditee + Auditor               | Auditor sees the decrypted aggregate by design.                                                 |
 | Subject + Auditor               | Auditor obtains plaintext inputs from the Subject; the FHE protections are bypassed by the very party who created them. The library assumes the Subject only collaborates with the Auditor when contractually permitted. |
 | Operator + Subject              | Operator gains nothing extra; Subject already encrypted the inputs and so could just as well decrypt their own data. |
-| **Operator + non-Auditor third party** | **NOT TOLERATED.** Such collusion would imply the third party gained access to ciphertexts with the cooperation of the Operator. The cryptographic protection survives by the IND-CPA property of CKKS — the third party still cannot decrypt without the secret key — but operational compromise (key exfiltration) IS possible and depends on the Operator's host security. |
+| **Operator + non-Auditor third party** | **NOT TOLERATED.** Such collusion would imply the third party gained access to ciphertexts with the cooperation of the Operator. If the CKKS scheme is secure at the parameters used (assumed here, not measured), a third party that holds only ciphertexts cannot decrypt them without the secret key; operational compromise (key exfiltration) IS possible and depends on the Operator's host security. Ciphertext security in the standard sense does not cover what an approximate-arithmetic decryptor reveals when decrypted results are shared, and this repository has not analysed that. |
 
 Production deployments should place the Operator's signing-key
 holder and the CKKS secret-key holder in distinct KMS accounts with
@@ -283,10 +320,16 @@ last category.
 ## 6. Verification checklist
 
 A regulator-side verifier MUST run the following before accepting an
-envelope:
+envelope. Passing every step shows who signed which claim and that it was not
+changed. It does not show that the claim is true, and it does not show that the
+result was computed under encryption.
 
-  1. **Schema check.** `schema == "regaudit-fhe.report.v1"` and
-     `schema_version` matches the regulator's accepted versions.
+  1. **Schema check.** The schema is one the verifier accepts
+     (`regaudit-fhe.report.v2` is the current format; `report.v1` is
+     still parsed but refused under the `confidential` and
+     `high-assurance` profiles). `regaudit_fhe.verify_report` with a
+     `VerificationPolicy` is the verification engine and performs these
+     checks; the list below describes what they establish.
   2. **Algorithm version check.** `algorithm_version` is on the
      regulator's accepted list (the regulator publishes the supported
      range; envelopes outside it are rejected pending re-issuance).
@@ -332,7 +375,7 @@ unaffected). `regaudit-fhe verify` exits `2` when `--trusted-keys` is omitted an
 `3` when it is supplied but unusable. None of this establishes that the trust
 history is complete; the O8 freshness requirement stays in force.
 
-**Trust store custody.** In the experimental code from pull request #65, not in published
+**Trust store custody.** In the unreleased 0.3.0 source, not in published
 v0.2.1, the strict profiles refuse a trust store file that another
 unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
 it cannot read, because a writer of that file decides which keys are trusted. A process under the same
@@ -340,7 +383,7 @@ account, an administrator or a restored copy can still change it and the verifie
 not notice. A store built in memory is the caller's responsibility. See
 [DEPLOYMENT.md](DEPLOYMENT.md#where-the-trust-store-can-live).
 
-**Replay file custody.** In the experimental code from pull request #65, not in published
+**Replay file custody.** In the unreleased 0.3.0 source, not in published
 v0.2.1, the strict profiles refuse a replay file that another
 unprivileged account could change, by owner and permissions, by ACLs on macOS, and refuses an ACL
 it cannot read. The records themselves

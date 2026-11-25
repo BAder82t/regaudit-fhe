@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Technical decisions O1-O7 and O10 approved by the project owner (§13). **O8 (trust-anchor custody) and the choice of any timestamp authority remain on HOLD.** Specification only: nothing in this document is implemented. |
+| **Status** | Technical decisions O1-O7 and O10 approved by the maintainer (§13). **O8 (trust-anchor custody) and the choice of any timestamp authority remain on HOLD.** Phase 3A is implemented as a candidate (Appendix C); the rest is specification only. |
 | **Applies to** | `regaudit-fhe.report.v1` (as shipped, plus Phase 1 hardening) and the proposed `report.v2` |
 | **Baseline** | Phase 1 candidate `83adc80bcef00e32fe5b63fc358ec8dce11af744` (tree `9c23f4818133330ea3a9603eab51fe1f96cd18fd`) |
 | **Gate** | Phase 3A (the approved core) is implemented as a candidate; see Appendix C. The rest of Phase 3 is on HOLD. §11 splits it into a core that does not depend on O8 and controls that do. High-assurance trust-store verification MUST NOT be implemented or advertised until the O8 organisational dependencies are satisfied. |
@@ -95,7 +95,7 @@ store: one key can sign under any name unless something in the store says which 
 that the store's statement is true, or who held the key. **No authenticated issuer enrollment exists in this version, and no
 output claims one.** A trust store is a local file.
 
-Four cases, by the owner's ruling, under the strict profiles `confidential`, `high-assurance` and `secure-v1`:
+Four cases, by the maintainer's ruling, under the strict profiles `confidential`, `high-assurance` and `secure-v1`:
 
 | Store | Strict profiles | `development` and the lenient library paths |
 |---|---|---|
@@ -254,7 +254,7 @@ Revocation data is itself attacker-targeted (A4). A signed trust-store bundle
 **does not authenticate itself**: the verifier must already hold an
 independent **trust anchor**.
 
-Requirements (owner constraints, status: design basis, distribution process
+Requirements (maintainer constraints, status: design basis, distribution process
 undecided, see O8):
 
 * The anchor is a deployment-scoped public key or key fingerprint,
@@ -292,16 +292,16 @@ mechanism, within the stated threat model, and from nothing else.
 
 **What the software cannot decide.** Software cannot establish who
 legitimately controls the trust anchor. The following are **organisational
-designations, currently PENDING owner designation**; this specification does
+designations, currently PENDING maintainer designation**; this specification does
 not name roles, organisations or credentials for them:
 
 | Field | Status |
 |---|---|
-| Anchor custodian | Pending owner designation |
-| Independent approval authority | Pending owner designation |
-| Rotation quorum and procedure | Pending owner designation |
-| Recovery arrangements (loss or compromise of the anchor) | Pending owner designation |
-| Initial distribution mechanism to each verifier | Pending owner designation |
+| Anchor custodian | Pending maintainer designation |
+| Independent approval authority | Pending maintainer designation |
+| Rotation quorum and procedure | Pending maintainer designation |
+| Recovery arrangements (loss or compromise of the anchor) | Pending maintainer designation |
+| Initial distribution mechanism to each verifier | Pending maintainer designation |
 
 Until these are designated and satisfied, trust-store verification MUST NOT
 be implemented or advertised as `high-assurance`.
@@ -744,7 +744,7 @@ one function, called by every entry point.
    **Where the line is drawn.** An invalid configuration discovered when the command
    starts is a usage/configuration error (`2`); an otherwise valid configuration whose
    required, *specified* trust or replay resource cannot be loaded or used is an
-   infrastructure failure (`3`). **Owner decision (final).**
+   infrastructure failure (`3`). **Maintainer decision (final).**
 
    **Precedence and replay.** If several errors apply, input errors (`2`) are
    reported before infrastructure errors (`3`). A replay store that cannot be
@@ -758,8 +758,8 @@ one function, called by every entry point.
    documented in the README; `3` is unused. Two present behaviours change:
    (a) a self-consistent self-signed report currently exits `0` and will exit
    `1`; (b) an unreadable or malformed `--trusted-keys` file currently exits
-   `2` and will exit `3`. `--strict` without trust material stays `2` (a
-   usage error). `serve` keeps `2` for "refusing to start". Both changes need
+   `2` and will exit `3`. `--strict` is refused with `2` (a usage error) in every
+   case: it selects no profile, so use `--profile <name>`. `serve` keeps `2` for "refusing to start". Both changes need
    a changelog entry and a README update.
 
 ### 9.4 Profiles
@@ -851,7 +851,7 @@ Each rule gets a positive control and a refused case.
 
 ---
 
-## 13. Owner decisions
+## 13. Maintainer decisions
 
 Final rulings on the exact wording of this table.
 
@@ -864,7 +864,7 @@ Final rulings on the exact wording of this table.
 | O5 | Request-time loopback enforcement | **APPROVED** | Applies to every development-only verification request including embedded `build_app()`. Two independent checks (profile and network exposure); no trust in forwarding headers; trusted-proxy policy or refusal; never `TRUSTED` or `accepted` (§9.3.3). |
 | O6 | CLI `verify` behaviour | **APPROVED** | Exit codes 0/1/2/3 per §9.3.5. Both intentional changes approved. `serve` startup refusal stays 2. Process-level exit-code and stdout/stderr tests required; README and CHANGELOG updated. |
 | O7 | Export and support `build_app()` | **APPROVED** | Exported in `__all__` and documented. Library checks must not depend on the CLI wrapper. |
-| O8 | Trust-anchor custody | **HOLD** | The technical architecture is specified (§4.5). Custody, independent approval authority, rotation quorum, recovery and initial distribution remain pending owner designation. |
+| O8 | Trust-anchor custody | **HOLD** | The technical architecture is specified (§4.5). Custody, independent approval authority, rotation quorum, recovery and initial distribution remain pending maintainer designation. |
 | O9 | Timestamp authorities | **APPROVED: NO DEFAULT ROOTS** | No built-in trusted TSA or witness. Selecting an actual authority remains on HOLD. Examples must not establish trust in the example authority. |
 | O10 | Remove `valid` | **APPROVE DEPRECATION; DEFER REMOVAL** | Keep through the first v2 release with a warning. Remove only in a subsequent explicitly breaking release (§8.4). |
 
@@ -920,7 +920,7 @@ internal subagent reviews and are not an external audit.
 Phase 3A implements the approved core. This appendix records every place where
 the implementation fixed a detail the specification left open, or differs from
 its wording, so a reviewer can accept or reject each one explicitly. Nothing here
-changes an owner ruling.
+changes a maintainer ruling.
 
 ### C.1 Implemented, held and out of scope
 
@@ -945,7 +945,7 @@ not an omission.
 1. **Consumption label.** Phase 3A records at verification time, which is not
    "after the operation completed". Rather than reuse `CONSUMED`, the result
    reports `RECORDED_LOCAL`. `RESERVED` and `CONSUMED` are not produced.
-   **Owner decision (approved):** `RECORDED_LOCAL` is now in the §6.2 table, with
+   **Maintainer decision (approved):** `RECORDED_LOCAL` is now in the §6.2 table, with
    the durability disclosure (`replay_durable`).
 2. **Reason codes added** beyond §8.3: `FINGERPRINT_MISMATCH`,
    `SIGNED_AFTER_RETIREMENT`, `SIGNED_AFTER_COMPROMISE`, `KEY_NOT_YET_VALID`,
@@ -967,7 +967,7 @@ not an omission.
    `latest_signing_time < compromised_from`; equality is refused for both
    (§4.3, "Boundary semantics"). `signed_not_after` reports `genTime`. The
    earlier Phase 3A draft accepted equality for retirement; that was corrected on
-   the owner's direction.
+   the maintainer's direction.
 7. **Chronology for unauthenticated issuers.** When the issuer is not
    authenticated, `chronology` is reported as `NONE` and `signed_not_after` is null.
 8. **`trust_history`** is reported as `UNPROVEN`, `STALE` or `FRESH`; only an
@@ -975,7 +975,7 @@ not an omission.
 9. **No trust material.** The library raises `VerificationUnavailable` unless the
    development self-signed check is enabled. The HTTP server maps this to 503. The
    CLI exits **2** when `--trusted-keys` is omitted (a usage error) and **3** when it
-   was supplied (even as an empty value) but is unusable. **Owner decision
+   was supplied (even as an empty value) but is unusable. **Maintainer decision
    (approved).**
 10. **Replay retention** is `max_age + 2 x clock_skew`. When replay checking is on
     without an explicit `max_age`, a 30-day maximum age is implied so a report
@@ -994,7 +994,7 @@ not an omission.
 13. **`report.v1` under `confidential` / `high-assurance`.** A v1 report has no
     signed `audit_run_id` and cannot be replay-checked, so it cannot satisfy a
     profile that mandates replay checking and is refused there
-    (`REPLAY_ID_MISSING`). **Owner decision (approved for now):** v1 remains
+    (`REPLAY_ID_MISSING`). **Maintainer decision (approved for now):** v1 remains
     supported in the development profile and in explicitly defined legacy
     verification modes; §7's "allowed, labelled in `confidential`" is superseded.
     A separately named restricted legacy profile would need its own threat
@@ -1002,12 +1002,12 @@ not an omission.
 14. **Required timestamps.** `require_verified_timestamp` requires authenticated
     evidence: an absent, unverified, malformed, improperly bound or cryptographically
     failed timestamp never satisfies it, while `timestamp_status` keeps `ABSENT`
-    distinct from `FAILED` for diagnostics. **Owner decision (approved).** No TSA or
+    distinct from `FAILED` for diagnostics. **Maintainer decision (approved).** No TSA or
     witness authority is approved (O9).
 15. **Unix sockets.** For the development option only, a request whose transport
     origin cannot be authenticated is refused; this covers Unix sockets and uvicorn's
     missing server address. Normal trusted verification over a Unix socket is
-    unaffected. **Owner decision (approved).** Forwarding headers are never relied on.
+    unaffected. **Maintainer decision (approved).** Forwarding headers are never relied on.
 
 ### C.3 Known gaps carried forward
 
@@ -1025,7 +1025,7 @@ not an omission.
   `TrustHistory.authenticated` true. See `docs/TRUST_LIFECYCLE_PROPOSAL.md` and
   `docs/TRUST_REVOCATION_PROTOCOL_PROPOSAL.md`.
 
-### C.4 Owner contract decisions for Phase 3A (final)
+### C.4 Maintainer contract decisions for Phase 3A (final)
 
 | # | Question | Decision | Where it lives |
 |---|---|---|---|

@@ -73,7 +73,10 @@ jobs:
       - run: python -c "import regaudit_fhe; print(regaudit_fhe.__version__)"
       - run: regaudit-fhe --help
       - run: regaudit-fhe schema --list
-      - run: pytest -q
+      - name: tests with the release-gate scope
+        # Only [dev] is installed here, so the server and TenSEAL tests cannot run. The scope says exactly
+        # which mandatory tests this job requires (see SCOPES in tests/_gate_manifest.py) and never claims the full suite.
+        run: pytest -q --gate-scope release-gate --gate-dir test-gate-release-gate
 
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
@@ -96,7 +99,23 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,server,fhe]"
-      - run: pytest tests/ -q --cov=regaudit_fhe --cov-report=term-missing --cov-fail-under=80
+      - name: tests with the test gate
+        # --gate adds the ledger and fails the job if a mandatory security test failed, was unexpectedly
+        # skipped or is missing (docs/TEST_GATES.md). REGAUDIT_REQUIRE_TENSEAL=1 also forbids any TenSEAL
+        # test from skipping. It is set per interpreter, from the wheels PyPI publishes for TenSEAL on
+        # these runners (checked 2026-11: 0.3.18 has cp311-cp313 wheels for manylinux x86_64 and macOS
+        # arm64; Python 3.10 resolves to 0.3.16, which has cp310 wheels). A new interpreter is not
+        # listed here until its wheel is confirmed, so it runs with the requirement off.
+        env:
+          REGAUDIT_REQUIRE_TENSEAL: ${{ contains(fromJSON('["3.10","3.11","3.12","3.13"]'), matrix.python-version) && '1' || '0' }}
+        run: pytest tests/ -q --gate --gate-dir test-gate --cov=regaudit_fhe --cov-report=term-missing --cov-fail-under=80
+      - name: test-gate ledger
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: test-gate-ledger-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: test-gate/
+          if-no-files-found: warn
 
   server-floor:
     # The jobs above install the NEWEST fastapi/pydantic the resolver offers. This one installs exactly the minimums
@@ -117,7 +136,11 @@ jobs:
       - run: python scripts/server_floors.py constraints > "$RUNNER_TEMP/floors.txt"
       - run: pip install -e ".[dev,server,fhe]" -c "$RUNNER_TEMP/floors.txt"
       - run: python scripts/server_floors.py check
-      - run: pytest tests/ -q
+      - name: tests with the test gate
+        # The ledger is printed in the job log; the tests job uploads it as an artifact.
+        env:
+          REGAUDIT_REQUIRE_TENSEAL: "1"  # python 3.10 and 3.13 both have TenSEAL wheels (see the tests job)
+        run: pytest tests/ -q --gate --gate-dir test-gate
 
   benchmark:
     name: benchmarks (smoke, py3.12)

@@ -33,18 +33,21 @@ print(envelope.to_json())  # ship this to the regulator
 
 | Answer | In plain words | What to do |
 | --- | --- | --- |
-| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Accept it. |
+| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Treat the signed claims as made by an enrolled key. This does not show that the audit is correct, that encryption was used, or that the report is unused elsewhere. |
 | `SELF_SIGNED_ONLY` | It has not been altered, but you gave no list of approved keys, so you cannot tell who signed it. | Do not rely on it. Useful only for development checks. |
 | `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
 
 Everything else in this section is detail layered on that one idea.
 
+**Keep this in view:** A signed report can authenticate a claim without proving the claim is true. Successful FHE tests do not prove that an arbitrary signed report was produced through FHE.
+
 ## A valid signature is not a trusted signer
 
 A report carries the public key that checks its own signature. So anyone can produce a
 report whose hash and signature are perfectly consistent: generate a key, sign, embed the key.
-Consistency proves the bytes were not changed after signing. It proves nothing about **who**
-signed. Only a key the verifier registered beforehand can answer that.
+Consistency shows the bytes match a signature made with the key inside the report, so they
+were not changed after whoever holds that key signed them. It proves nothing about **who**
+that is. Only a key the verifier registered beforehand can answer that.
 
 | What you ran | What a good result means | Does it authenticate the issuer? |
 | --- | --- | --- |
@@ -83,6 +86,12 @@ A `TRUSTED` verdict answers the first two only.
    declaration that nothing measures and `verify` never reads, so a valid signature does not substantiate it. The CLI
    and the server sign `128` for a plaintext run that performed no encryption, and a `192` or `256` can be higher than
    the parameters support. See [REPORT_FORMAT.md](REPORT_FORMAT.md#what-parameter_set-and-security_bits-mean).
+
+Verifier output states this on every verdict: "Encrypted execution not established." and "A signed report can authenticate a claim
+without proving that claim is true." The `regaudit-fhe verify` command writes these to stderr with the rest of the claim labels, and
+the versioned response carries them as `claim_assessment`. They change no decision. Declared TenSEAL parameters are not read as
+encrypted execution, and a declared plaintext backend is not read as proof of plaintext execution: absent evidence is "not
+established". See [REPORT_FORMAT.md](REPORT_FORMAT.md#how-a-verdict-labels-what-a-report-claims).
 
 A hands-on run of the whole flow, with real output, is in [docs/WALKTHROUGH.md](WALKTHROUGH.md).
 
@@ -177,7 +186,7 @@ persistent replay cache, and refuse development-only options.
 * **Replay detection is local.** `consumption` is `NOT_CHECKED`,
   `CHECKED_NOT_CONSUMED` or `RECORDED_LOCAL`. `RECORDED_LOCAL` means "recorded in this
   verifier's own store at verification time"; it does not prove the authorised operation
-  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the experimental code from pull request #65 and not in published v0.2.1. It is never
+  completed. `replay_durable` says whether that record survives a restart. The storage check behind that is in the unreleased 0.3.0 source and not in published v0.2.1. It is never
   global single-use protection or an exactly-once guarantee. Changing freshness settings on an
   existing store has its own limits: see the [replay advisory](advisories/replay-limitations-0.2.1.md).
 * **Retired or compromised keys.** They are accepted for historical reports only with
@@ -222,7 +231,7 @@ except rf.TimestampInvalid:  # an attached timestamp failed validation
 ```
 
 * `verify_receipt(env)` with no trust material only checks that the hash and embedded
-  signature agree. That proves the bytes did not change; it does **not** prove an
+  signature agree. That shows the bytes match the embedded key's signature; it does **not** prove an
   approved auditor produced them, and it emits a `DeprecationWarning` (plus a one-time
   `UserWarning`). Pass
   `trust_store=` (recommended: it enforces revocation, pins and scope) or

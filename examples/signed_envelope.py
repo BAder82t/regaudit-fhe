@@ -1,11 +1,16 @@
 """Example — Ed25519-signed envelope: build, archive, tamper-test.
 
-Walks through the signing surface that lets a regulator decide three
-questions in constant time:
+Walks through the signing surface. It lets a verifier ask three questions:
 
-    1. Who issued the envelope?         (issuer + key_id + public_key_pem)
+    1. Which key signed it?             (key_id + public_key_pem; who that key
+                                         belongs to needs a trust store)
     2. Has it been modified?            (sha256 over canonical body)
-    3. Are the inputs as claimed?       (input_commitments)
+    3. Does my copy of an input match the one the issuer committed to?
+                                        (input_commitments: hashes of the
+                                         payload the caller supplied)
+
+The signature shows authenticity of the claim, not that the computation was
+correct or that it ran under encryption.
 
 Run::
 
@@ -18,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 import regaudit_fhe as rf
+from regaudit_fhe import claim_labels
 
 
 def main() -> int:
@@ -40,7 +46,9 @@ def main() -> int:
           f"{signer.public_key_pem().splitlines()[1]}\n")
 
     print("[2/4] Running audit and binding to a parameter set + commitments...")
-    report = rf.audit_fairness(**inputs)
+    report = rf.audit_fairness(**inputs)  # plaintext path: nothing here is encrypted
+    # The parameter set below is a declaration the signer chooses to make. The audit above
+    # ran on plaintext, and nothing in the signature tells that apart from an encrypted run.
     params = rf.ParameterSet(backend="tenseal-ckks",
                              poly_modulus_degree=32768,
                              multiplicative_depth=6,
@@ -79,6 +87,7 @@ def main() -> int:
     print(f"                     signature_valid: {bad.signature_valid}")
     assert bad.trust_status == "INVALID"
     print("\nOK — fresh envelope verified, tampered envelope rejected.")
+    print(claim_labels.NOT_ESTABLISHED, claim_labels.INVARIANT)
     return 0
 
 

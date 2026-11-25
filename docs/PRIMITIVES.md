@@ -33,8 +33,9 @@ Two audiences are served by the same surface area:
 | **Regulator**  | External or in-house auditor.       | `rf.verify_report(env, policy)` with a `VerificationPolicy` over a `TrustStore`; `regaudit-fhe verify --trusted-keys ...`. |
 
 A run produces an audit envelope (JSON) with a SHA-256 receipt. The
-client archives it, ships it to the regulator, or both. The regulator
-recomputes the receipt to detect tampering between issuance and review.
+client archives it, ships it to the regulator, or both. A verifier
+checks the signature and the issuer under its own trust store. The SHA-256 receipt
+alone detects accidental change only, because anyone can recompute it.
 
 ## The six primitives
 
@@ -43,7 +44,7 @@ recomputes the receipt to detect tampering between issuance and review.
 | `egf_imss`    | `audit_fairness`          | 4                            | 4                        | NYC LL144, EU AI Act Art. 10/15, Colorado SB26-189 (fit unconfirmed), ECOA and Regulation B workflows. |
 | `etk_fpa_hbc` | `audit_provenance`        | 3                            | 3                        | EU AI Act Art. 10, 21 CFR Part 11, GDPR Art. 22, HIPAA workflows.        |
 | `esc_cia`     | `audit_concordance`       | 4                            | 5                        | FDA SaMD oncology PCCP, EU AI Act Art. 15/72, EMA workflows.             |
-| `ecp_qssp`    | `audit_calibration`       | 3                            | 4                        | FDA SaMD UQ, EU AI Act Art. 15/72, ISO/IEC 23053, UNECE WP.29 workflows. |
+| `ecp_qssp`    | `audit_calibration`       | 3                            | 4                        | FDA SaMD UQ, EU AI Act Art. 15/72, topics in ISO/IEC 23053 (no control mapping has been made), UNECE WP.29 workflows. |
 | `ew1_cdsf`    | `audit_drift`             | 1                            | 2                        | EU AI Act Art. 15/72, FDA SaMD PCCP, Basel III workflows.                |
 | `ecmd_jps`    | `audit_disagreement`      | 5                            | 5                        | SR 26-2 and OCC Bulletin 2026-13, EU AI Act Art. 15/72, FDA SaMD PCCP workflows. |
 
@@ -208,3 +209,23 @@ about 0.002 away. The disagreement sampler is one fixed input about 0.005 away.
 The biggest absolute errors in the table for those primitives are about 7e-6 or
 smaller. Zero flips shows that noise did not change the decision for these inputs.
 This does not show that noise cannot change a decision close to the threshold.
+
+### Numerical accuracy
+
+- The "Max abs err" column is the largest difference seen on the benchmark's own
+  inputs between the encrypted result and the plaintext circuit's result. It is not a
+  bound, and it says nothing about other inputs.
+- The equivalence tests compare the encrypted function with the plaintext *circuit*, not
+  with an exact calculation, and their tolerances (5e-2 for most primitives, 0.25 for
+  the concordance ratio, 2.0 for the calibration set size) are envelopes chosen
+  to pass on the test inputs, not proven error bounds.
+- Concordance and calibration use the degree-3 polynomial `(3x - x^3) / 2` as a
+  stand-in for the sign function. It is close to the sign only for inputs of about 0.75
+  or more in absolute value (its error is 0.09 at 0.75, 0.31 at 0.5, 0.85 at 0.1) and its
+  input must lie in `[-1, 1]`. Pairs or scores close to a boundary are therefore
+  counted wrongly. The plaintext circuit `audit_concordance` uses the same polynomial, so
+  its `concordant_pairs`, `comparable_pairs` and `c_index` are approximations of the exact
+  Harrell values (`c_index_oracle`), not equal to them. On three random 16-row draws
+  (checked on 2026-11-20) the C-index differed from `c_index_oracle` by 0.04 to 0.05. A
+  decision that depends on a value near a threshold can therefore differ from the exact
+  one.

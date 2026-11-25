@@ -1,9 +1,10 @@
-## regaudit-fhe HTTP audit server (production reference build)
+## regaudit-fhe HTTP audit server (reference build)
 ##
 ## Two-stage Docker build. The runtime image runs as a non-root user,
 ## ships the bundled JSON Schemas, and exposes the FastAPI server on
-## port 8080. Encrypted execution requires the [fhe] extra; uncomment
-## the install line below if you want it baked in.
+## port 8080. The server runs the plaintext functions and signs with an
+## ephemeral key; it has no encrypted path. The optional [fhe] extra only
+## makes the TenSEAL backend importable for library use.
 
 # syntax=docker/dockerfile:1.7
 
@@ -27,7 +28,8 @@ COPY docs ./docs
 
 RUN python -m pip install --upgrade pip wheel \
  && python -m pip install --prefix=/install ".[server]"
-# Uncomment to bake in the encrypted backend (adds ~120 MB to the image):
+# Uncomment to make the TenSEAL backend importable for library use (adds ~120 MB).
+# The HTTP server does not call it.
 # RUN python -m pip install --prefix=/install ".[fhe]"
 
 
@@ -39,7 +41,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # OCI labels — overridden by CI when building.
 LABEL org.opencontainers.image.title="regaudit-fhe" \
-      org.opencontainers.image.description="Encrypted regulatory audit primitives at CKKS depth six." \
+      org.opencontainers.image.description="Regulatory audit primitives with a plaintext model and an optional TenSEAL CKKS backend. The HTTP server runs plaintext functions." \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       org.opencontainers.image.vendor="VaultBytes Innovations Ltd" \
       org.opencontainers.image.source="https://github.com/BAder82t/regaudit-fhe"

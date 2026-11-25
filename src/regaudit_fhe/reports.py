@@ -9,9 +9,10 @@ constant time:
        (Ed25519 signature over the canonical body.)
     2. Has the envelope changed since issuance?
        (SHA-256 receipt over the canonical body, signed alongside.)
-    3. Were the encrypted inputs the issuer claims to have audited the
-       same inputs the verifier received?
-       (input_commitments — SHA-256 over each canonicalised input.)
+    3. Does the verifier's copy of an input match the payload the issuer
+       committed to? (input_commitments — SHA-256 over each canonicalised
+       input as the caller supplied it. This does not show that the inputs
+       were encrypted or that they were the inputs actually used.)
 
 Canonical JSON rules
 --------------------

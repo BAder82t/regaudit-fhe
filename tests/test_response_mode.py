@@ -26,7 +26,13 @@ from .experimental_revocation.gen_fixtures import NOW, dump, make_world
 
 W = make_world()
 STORE = W.store(W.old, W.new)
-ADDED = {"response_format", "revocation_evaluation", "issuer_binding", "policy_evidence"}
+ADDED = {
+    "response_format",
+    "revocation_evaluation",
+    "issuer_binding",
+    "policy_evidence",
+    "claim_assessment",
+}
 
 
 def env():
@@ -74,7 +80,8 @@ def test_cli_default_is_byte_identical_to_the_engine_dict_and_v2_only_adds(signe
     base = ("verify", "-i", "r.json", "--trusted-keys", "t.json")
     default = cli(*base, cwd=signed)
     explicit = cli(*base, "--response-format", "v1", cwd=signed)
-    assert default.stdout == explicit.stdout and default.returncode == 0 and default.stderr == ""
+    assert default.stdout == explicit.stdout and default.returncode == 0
+    assert default.stderr == explicit.stderr and default.stderr.startswith("claims:\n")
     payload = json.loads(default.stdout)
     assert list(payload) == [*list(verify_keys()), "trusted_issuer"]
     v2 = cli(*base, "--response-format", "v2", cwd=signed)

@@ -20,7 +20,7 @@ A signature shows who signed a claim. It does not show that the claim is true, t
 
 regaudit-fhe runs 6 audit calculations on an AI system: fairness, provenance, concordance, calibration, drift, and disagreement. Then it adds each result to a signed report that a regulator or auditor can check. A company can use it to show evidence on its model and the regulator would check this evidence with a list of keys it has approved.
 
-The calculations will run on plaintext by default. An optional backend can be used to run these calculations on CKKS encrypted data. In its current form, the same process would hold the key and would be able to see both the inputs and the result. This is not yet a deployment where the data holder and the evaluator are different parties.
+The calculations run on plaintext by default, and the command line and the HTTP server only run that plaintext path. The HTTP server's `/v1/audit/*` routes call the plaintext functions and sign with an ephemeral key generated for each request, so the report is self-signed `report.v1`. No encrypted path exists in the server. An optional library backend can run these calculations on CKKS encrypted data. In its current form, the same process holds the key and sees both the inputs and the result. This is not yet a deployment where the data holder and the evaluator are different parties. The encrypted backend is experimental and has not been independently qualified.
 
 > **Status.** This is a reference implementation and the verification core is a candidate. It has not had any independent external security audit. It does not make anything compliant. A report would be technical evidence that may be used to support a workflow for compliance. See [what is and isn't validated](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/STATUS.md) and [the compliance scope](https://github.com/BAder82t/regaudit-fhe/blob/master/COMPLIANCE.md).
 
@@ -88,7 +88,7 @@ Signature verification does not verify that any FHE (encrypted) computation was 
 
 ### Portal security limitation, published v0.2.1
 
-Published regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the experimental code.
+Published regaudit-fhe v0.2.1 does not enforce the strict filesystem ownership and writable-permission protections for local trust-store and replay-state files introduced in the unreleased 0.3.0 source.
 
 Users with sufficient filesystem access may be able to modify those files. A valid report signature does not prove that the signing key was enrolled by an authenticated administrator.
 
@@ -100,11 +100,13 @@ The company runs an audit and signs the result with its private key. The regulat
 
 | Answer | In plain words | What to do |
 | --- | --- | --- |
-| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Accept it. |
+| `TRUSTED` | An approved key signed it, it has not been altered, and every rule you set was met. | Treat the signed claims as made by an enrolled key. This does not show that the audit is correct, that encryption was used, or that the report is unused elsewhere. |
 | `SELF_SIGNED_ONLY` | It has not been altered, but you gave no list of approved keys, so you cannot tell who signed it. | Do not rely on it. |
 | `INVALID` | It was altered, or the key is unknown, revoked or out of scope, or it is too old, replayed, or breaks a rule. | Reject it. `blocking_reasons` says why. |
 
-Even `TRUSTED` says only that a key in your trust store signed the report, within its scope, with every policy rule met. It doesn't say that the audit is correct and it doesn't show that the calculation was done using FHE.
+**Keep this in view:** A signed report can authenticate a claim without proving the claim is true. Successful FHE tests do not prove that an arbitrary signed report was produced through FHE.
+
+Even `TRUSTED` says only that a key in your trust store signed the report, within its scope, with every policy rule met. A signature shows authenticity of the signed claim, not computational correctness. It doesn't say that the audit is correct and it doesn't show that the calculation was done using FHE. The `security_bits` and parameter fields are what the signer configured or declared, not a measured or achieved security level. The timestamp in a report is the signer's claim, not a trusted time.
 
 A report will contain the public key that can check its own signature. Anyone can make a report where the signature is consistent. Only a key that you registered beforehand will tell you who has signed the report. Decide on `result.accepted` or the exit code. Don't use the older `valid` field.
 
@@ -125,7 +127,7 @@ A report will contain the public key that can check its own signature. Anyone ca
   "algorithm_version": "0.2.1",
   "primitive": "fairness",
   "backend": "plaintext",
-  "result": { "breach": false, "disparity": 0.25 },
+  "result": { "demographic_parity_diff": 0.0, "equal_opportunity_diff": -0.333, "predictive_parity_diff": 0.5, "threshold_breached": true },
   "issuer": "acme-bank",
   "key_id": "acme-2026-04",
   "receipt": { "sha256": "26af001f…", "signature_alg": "Ed25519", "signature_b64": "lVI6L7um…" }
@@ -136,13 +138,15 @@ This is abridged. The full format is in [Report format and JSON schemas](https:/
 
 ## Limits to know first
 
-Replay detection is local to the verifier's own store. `RECORDED_LOCAL` means that this report was recorded in this store. `replay_durable` would indicate if this record would survive a restart. The storage check behind that is in the experimental code from pull request #65 and not in published v0.2.1. This is not global single-use protection.
+Replay detection is local to the verifier's own store. `RECORDED_LOCAL` means that this report was recorded in this store. `replay_durable` would indicate if this record would survive a restart. The storage check behind that is in the unreleased 0.3.0 source and not in published v0.2.1. This is not global single-use protection.
 
 A report signed with a retired or compromised key will be refused by default. Accepting one would need authenticated evidence that the signing time was strictly earlier than the retirement or compromise time. This release cannot authenticate a trust history.
 
 `report.v1` is still verified but the `confidential` and `high-assurance` profiles refuse it due to the lack of a signed run id. Use `report.v2` for new work.
 
 Four limitations of version 0.2.1 have their own advisory: [issuer attribution](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/issuer-attribution-0.2.1.md), [replay protection](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-limitations-0.2.1.md), [trust store file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/trust-store-permissions-0.2.1.md) and [replay file permissions](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/advisories/replay-file-permissions-0.2.1.md).
+
+The 0.1.1 and 0.2.0 release records use wording about review ("waived") that can be misread. An [erratum](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/releases/ERRATUM_2026-11-19_REVIEW_WAIVER_WORDING.md) explains what that wording does and does not mean. The records themselves are unchanged.
 
 ## Documentation
 
@@ -154,6 +158,7 @@ Four limitations of version 0.2.1 have their own advisory: [issuer attribution](
 | [Primitives](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/PRIMITIVES.md) | The six calculations, depth, encrypted execution, benchmarks. |
 | [Report format](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/REPORT_FORMAT.md) | The signed report and the JSON schemas. |
 | [Status](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/STATUS.md) | What is checked, what is not provided, what ships. |
+| [White paper](https://github.com/BAder82t/regaudit-fhe/blob/master/whitepaper/regaudit_fhe_whitepaper.pdf) | It describes v0.0.7 and is out of date. Where it differs from this documentation, this documentation applies. |
 | [Compliance](https://github.com/BAder82t/regaudit-fhe/blob/master/COMPLIANCE.md) | What each calculation does not prove, by regulation. |
 | [Threat model](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/THREAT_MODEL.md), [Trust specification](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/TRUST_SPEC.md) | The security model and the exact rules. |
 | [Deployment](https://github.com/BAder82t/regaudit-fhe/blob/master/docs/DEPLOYMENT.md) | Running the server. Read this before exposing it. |

@@ -261,6 +261,9 @@ def _encryption(declared: dict[str, Any]) -> dict[str, Any]:
         backend_shortened=declared["backend_shortened"],
         security_bits_text=declared["security_bits_text"],
         encryption_verified=False,
+        encrypted_execution=declared["encrypted_execution"],
+        established_statement=declared["established_statement"],
+        invariant=declared["invariant"],
         note=declared["note"],
     )
 

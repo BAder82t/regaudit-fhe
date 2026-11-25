@@ -84,7 +84,7 @@ def test_exit_0_trusted_v2_report(tmp_path, signer):
     v = _verdict(p)
     assert v["trust_status"] == "TRUSTED" and v["accepted"] is True and v["valid"] is True
     assert v["format"] == "v2" and v["trusted_issuer"] is True
-    assert p.stderr.strip() == ""
+    assert p.stderr.startswith("claims:\n")  # only the claim labels
 
 
 def test_exit_0_trusted_legacy_v1_report_keeps_a_legacy_label(tmp_path, signer):
@@ -202,26 +202,33 @@ def test_local_replay_record_then_refuse(tmp_path, signer):
 # ---------------------------------------------------------------------------
 
 
-def test_exit_2_strict_without_trust_material(tmp_path, signer):
+def test_exit_2_strict_is_a_usage_error_naming_profile(tmp_path, signer):
     report = _v2_file(tmp_path, signer)
     p = run("-i", report, "--strict")
-    assert p.returncode == 2 and p.stdout == "" and "trust" in p.stderr.lower()
+    assert p.returncode == 2 and p.stdout == ""
+    assert "--strict" in p.stderr and "--profile" in p.stderr
+    for name in ("development", "confidential", "high-assurance", "secure-v1"):
+        assert name in p.stderr
 
 
-def test_strict_changes_nothing_and_selects_no_profile(tmp_path, signer):
+def test_strict_is_refused_even_where_the_report_would_be_accepted(tmp_path, signer):
     report, store = _v2_file(tmp_path, signer), _store_file(tmp_path, signer)
-    link = tmp_path / "link.json"
-    link.symlink_to(
-        store
-    )  # a strict profile refuses a link to the store, and development only warns
-    without = run("-i", report, "--trusted-keys", str(link))
-    strict = run("-i", report, "--trusted-keys", str(link), "--strict")
-    assert without.returncode == strict.returncode == 0
-    assert without.stdout == strict.stdout and without.stderr == strict.stderr
+    without = run("-i", report, "--trusted-keys", store)
+    strict = run("-i", report, "--trusted-keys", store, "--strict")
+    assert without.returncode == 0 and _verdict(without)["accepted"] is True
+    # --strict neither selects a profile nor changes a verdict: it is a usage error and prints no verdict.
+    assert strict.returncode == 2 and strict.stdout == ""
+    assert "--profile" in strict.stderr
 
 
-def test_strict_is_described_as_having_no_effect():
-    assert "no effect" in " ".join(run("--help").stdout.split())
+def test_strict_is_refused_before_the_report_is_read(tmp_path):
+    p = run("-i", str(tmp_path / "missing.json"), "--strict")
+    assert p.returncode == 2 and p.stdout == "" and "--profile" in p.stderr
+
+
+def test_strict_help_says_it_is_refused():
+    text = " ".join(run("--help").stdout.split())
+    assert "--strict" in text and "Refused with a usage error" in text
 
 
 def test_exit_2_no_trust_material_and_no_dev_flag(tmp_path, signer):

@@ -12,6 +12,10 @@ Only the latest release receives security updates. See `CHANGELOG.md` and
 releases rely on AI-assisted testing and review. They have had no independent external
 security audit, and no production assurance is claimed.
 
+The release records for `0.1.1` and `0.2.0` use wording about review ("waived") that can be misread. An
+[erratum](docs/releases/ERRATUM_2026-11-19_REVIEW_WAIVER_WORDING.md) explains what that wording does and does not
+mean. The records themselves are unchanged.
+
 ## Known limitations
 
 The issuer attribution limitation in v0.2.1 is described in
@@ -46,7 +50,13 @@ days and provide a remediation timeline within ten business days.
 `regaudit-fhe` operates inside a standard CKKS threat model:
 
 - The audit operator (the entity running the primitives) is honest but
-  curious. Encrypted inputs are never decrypted server-side.
+  curious. This describes the intended deployment, not what ships. The shipped
+  HTTP server computes on plaintext and holds no CKKS key. Its `/v1/audit/*`
+  routes sign with an ephemeral key, so the output is self-signed `report.v1`,
+  and no encrypted path exists in the server. The library's encrypted functions
+  encrypt, evaluate and decrypt in one process, so one party sees the inputs
+  and the result. They are experimental and have not been independently
+  qualified.
 - Auditor-public quantities are the regulation citations, the audit
   envelope schema, and a set of public group-cardinality scalars
   documented in each primitive's specification under `docs/specs/`.

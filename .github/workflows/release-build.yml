@@ -149,7 +149,9 @@ jobs:
           mkdir "$RUNNER_TEMP/sdist"
           tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP/sdist"
           cd "$RUNNER_TEMP/sdist"/*/
-          CI=1 "$RUNNER_TEMP/venv/bin/python" -m pytest -p no:cacheprovider --import-mode=importlib -o addopts= -q
+          # --gate-scope sdist: this run executes the shipped tests against the installed wheel, so it must name
+          # its scope (SCOPES in tests/_gate_manifest.py). It does not claim the full suite.
+          CI=1 "$RUNNER_TEMP/venv/bin/python" -m pytest -p no:cacheprovider --import-mode=importlib -o addopts= -q --gate-scope sdist --gate-dir "$RUNNER_TEMP/test-gate-sdist"
 
   audit:
     name: pip-audit of the installed wheel's environment
