@@ -83,9 +83,9 @@ const STATEMENTS = [
     passed: "Matches the contents", failed: "Does not match the contents", not_checked: "Not checked",
   }],
   ["issuer_trust", "Issuer", {
-    established: "In your administrator's list",
-    established_with_limit: "In your administrator's list, with a limit (read the text)",
-    not_established: "Not in your administrator's list",
+    listed: "In your administrator's list",
+    listed_with_limit: "In your administrator's list, with a limit (read the text)",
+    not_listed: "Not in your administrator's list",
   }],
   ["freshness", "Age", {
     within_limit: "Within the maximum age", too_old: "Older than the maximum age",

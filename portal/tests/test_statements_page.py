@@ -77,7 +77,7 @@ FIVE = ("signature", "issuer_trust", "freshness", "replay", "encryption_claims")
 def test_the_five_statements_are_shown_in_a_fixed_order_with_the_portals_own_words():
     statuses = {
         "signature": entry("passed", "sig text", "sig limit"),
-        "issuer_trust": entry("not_established", "issuer text", "issuer limit"),
+        "issuer_trust": entry("not_listed", "issuer text", "issuer limit"),
         "freshness": entry("within_limit", "age text", None),
         "replay": entry("checked_not_seen", "replay text", "replay limit"),
         "encryption_claims": entry("declared_by_signer", "enc text", "enc limit"),
@@ -110,7 +110,7 @@ def test_every_state_the_python_side_can_return_has_fixed_wording_on_the_page():
     assert emitted <= on_page, sorted(emitted - on_page)
     states_per = {
         "signature": {"passed", "failed", "not_checked"},
-        "issuer_trust": {"established", "established_with_limit", "not_established"},
+        "issuer_trust": {"listed", "listed_with_limit", "not_listed"},
         "freshness": {"within_limit", "too_old", "from_future", "not_checked"},
         "replay": {
             "repeat_detected",

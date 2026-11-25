@@ -55,8 +55,9 @@ _SIGNATURE_LIMIT = (
     "show who holds the key."
 )
 _ISSUER_LIMIT = (
-    "This is a match against your administrator's list of keys. It is not an independent check of who the issuer is, "
-    "and a valid signature alone does not make an issuer trusted."
+    "This is only a match against the trust list your administrator configured. It does not establish who holds the "
+    "key, it is not an independent check of who the issuer is, and a valid signature alone does not make an issuer "
+    "trusted."
 )
 _TIME_LIMIT = _REASONS["CHRONOLOGY_UNAUTHENTICATED"]
 _TRUST_LIST_LIMIT = "Nothing proves your administrator's trust list is up to date. A key withdrawn elsewhere may not be marked in it."
@@ -127,15 +128,15 @@ def _issuer(result: dict[str, Any]) -> dict[str, Any]:
     if result["issuer_trusted"] is True:
         withdrawn = result["key_status"] in _WITHDRAWN
         if "KEY_NOT_YET_VALID" in blocking or (withdrawn and blocking & _LIFECYCLE_BLOCKS):
-            state = "not_established"
+            state = "not_listed"
         elif withdrawn:
-            state = "established_with_limit"
+            state = "listed_with_limit"
         elif result["key_status"] == "active":
-            state = "established"
+            state = "listed"
         else:
-            state = "not_established"
+            state = "not_listed"
     else:
-        state = "not_established"
+        state = "not_listed"
     return _status(
         state,
         _issuer_line(result),
@@ -176,8 +177,9 @@ def _freshness(result: dict[str, Any], facts: PolicyFacts) -> dict[str, Any]:
     else:
         state = "within_limit"
         text = (
-            f"Passed: the signing time the report states is within the maximum age of {_span(facts.max_age)}, "
-            f"allowing {skew} of clock difference."
+            f"Within the limit: the signing time the report states is within the maximum age of "
+            f"{_span(facts.max_age)}, allowing {skew} of clock difference. This only compares the time the report "
+            "states with the policy. It says nothing about whether the report is accepted."
         )
     trust_list = None
     if result["trust_history"] != "FRESH":
