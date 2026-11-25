@@ -109,7 +109,7 @@ def test_each_sample_has_the_five_statements_labelled_as_a_demonstration(welcome
 def test_the_trusted_sample_reads_passed_and_says_what_was_not_checked(welcome_client):
     s = welcome_client.post("/api/samples/trusted/verify").json()["statuses"]
     assert s["signature"]["state"] == "passed"
-    assert s["issuer_trust"]["state"] == "established"
+    assert s["issuer_trust"]["state"] == "listed"
     # The demonstration policy sets no maximum age and keeps no replay record: those are "not checked", with the reason.
     assert s["freshness"]["state"] == "not_checked" and "no maximum age" in s["freshness"]["text"]
     assert s["replay"]["state"] == "not_checked" and "no record" in s["replay"]["text"]
@@ -126,7 +126,7 @@ def test_trusted_customer_report_passes_and_records_nothing_in_check_mode(setup)
     assert "demonstration_label" not in s and "demonstration_label" not in s["signature"]
     assert s["verdict"] == "TRUSTED"
     assert s["signature"]["state"] == "passed"
-    assert s["issuer_trust"]["state"] == "established"
+    assert s["issuer_trust"]["state"] == "listed"
     assert s["freshness"]["state"] == "within_limit"
     assert s["freshness"]["details"]["max_age_seconds"] == 30 * 86400
     assert s["freshness"]["details"]["time_source"] == "signer_stated"
@@ -146,7 +146,7 @@ def test_a_tampered_report_fails_the_signature_and_leaves_the_issuer_not_establi
     s = body["statuses"]
     assert "HASH_MISMATCH" in body["verification"]["blocking_reasons"]
     assert s["signature"]["state"] == "failed"
-    assert s["issuer_trust"]["state"] == "not_established"
+    assert s["issuer_trust"]["state"] == "not_listed"
     assert s["replay"]["state"] == "not_checked" and "last" in s["replay"]["text"]
 
 
@@ -157,7 +157,7 @@ def test_an_unknown_issuer_is_not_checked_for_signature_and_not_established(setu
     s = body["statuses"]
     assert body["verification"]["blocking_reasons"] == ["ISSUER_UNKNOWN"]
     assert s["signature"]["state"] == "not_checked" and "no enrolled key" in s["signature"]["text"]
-    assert s["issuer_trust"]["state"] == "not_established"
+    assert s["issuer_trust"]["state"] == "not_listed"
     assert (
         s["freshness"]["details"]["time_source"] == "not_established"
     )  # the engine withholds chronology here
@@ -173,7 +173,7 @@ def test_a_wrong_issuer_name_is_not_established_although_the_signature_passes(se
     s = body["statuses"]
     assert "ISSUER_MISMATCH" in body["verification"]["blocking_reasons"]
     assert s["signature"]["state"] == "passed"
-    assert s["issuer_trust"]["state"] == "not_established"
+    assert s["issuer_trust"]["state"] == "not_listed"
 
 
 @pytest.mark.parametrize(
@@ -191,7 +191,7 @@ def test_an_over_age_or_future_report_fails_freshness_only_through_the_engines_r
     s = body["statuses"]
     assert body["verification"]["blocking_reasons"] == [code]
     assert s["freshness"]["state"] == state
-    assert s["signature"]["state"] == "passed" and s["issuer_trust"]["state"] == "established"
+    assert s["signature"]["state"] == "passed" and s["issuer_trust"]["state"] == "listed"
     assert s["freshness"]["details"]["max_age_seconds"] == 30 * 86400
 
 
@@ -273,7 +273,7 @@ def test_the_statements_are_a_function_of_the_engine_result(setup):
             "signature",
             "not_checked",
         ),
-        ({"issuer_trusted": False}, "issuer_trust", "not_established"),
+        ({"issuer_trusted": False}, "issuer_trust", "not_listed"),
         ({"blocking_reasons": ["REPORT_TOO_OLD"]}, "freshness", "too_old"),
         ({"blocking_reasons": ["REPORT_FROM_FUTURE"]}, "freshness", "from_future"),
         ({"blocking_reasons": ["MALFORMED_ENVELOPE"]}, "freshness", "not_checked"),
@@ -315,9 +315,9 @@ def test_a_withdrawn_key_is_never_called_established_when_the_engine_blocked_it(
         "blocking_reasons": ["KEY_REVOKED"],
         "integrity_valid": True,
     }
-    assert statuses_module._issuer(base)["state"] == "not_established"
+    assert statuses_module._issuer(base)["state"] == "not_listed"
     accepted = {**base, "trust_status": "TRUSTED", "blocking_reasons": []}
-    assert statuses_module._issuer(accepted)["state"] == "established_with_limit"
+    assert statuses_module._issuer(accepted)["state"] == "listed_with_limit"
 
 
 def test_a_report_with_no_max_age_policy_says_freshness_was_not_checked(setup):
@@ -360,3 +360,34 @@ def test_declarations_helper_is_what_the_encryption_statement_uses(setup):
         env, body["verification"]["trust_status"]
     )
     assert post_bytes(client, raw).status_code == 200
+
+
+def test_issuer_trust_words_say_listed_and_never_established():
+    states = {"listed", "listed_with_limit", "not_listed"}
+    for key_status, blocking, trusted in (
+        ("active", [], True),
+        ("revoked", ["KEY_REVOKED"], True),
+        ("retired", [], True),
+        ("active", ["ISSUER_UNKNOWN"], False),
+    ):
+        result = {
+            "trust_status": "INVALID",
+            "issuer_trusted": trusted,
+            "key_status": key_status,
+            "blocking_reasons": blocking,
+            "integrity_valid": trusted,
+        }
+        built = statuses_module._issuer(result)
+        assert built["state"] in states
+        assert "does not establish who holds the key" in built["limit"]
+        assert "trust list your administrator configured" in built["limit"]
+
+
+def test_a_fresh_looking_time_says_nothing_about_acceptance_even_on_an_invalid_row(setup):
+    _, _, client = setup
+    stranger = rf.Signer.generate(issuer="Northwind Test Issuer", key_id="k-other")
+    body = run(client, signed_report(stranger))
+    fresh = body["statuses"]["freshness"]
+    assert body["verification"]["trust_status"] == "INVALID" and fresh["state"] == "within_limit"
+    assert "says nothing about whether the report is accepted" in fresh["text"]
+    assert not fresh["text"].startswith("Passed")
