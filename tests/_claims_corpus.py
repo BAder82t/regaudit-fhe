@@ -163,7 +163,7 @@ def run_cli(workdir: Path) -> dict[str, dict[str, Any]]:
     import contextlib
     import io
 
-    from regaudit_fhe import cli
+    import regaudit_fhe.cli as cli
 
     t = texts()
     store_path = workdir / "store.json"

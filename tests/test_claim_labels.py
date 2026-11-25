@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from regaudit_fhe import claim_labels as labels
+import regaudit_fhe.claim_labels as labels
 from tests import _claims_corpus as corpus
 
 NOT_ESTABLISHED = "Encrypted execution not established."

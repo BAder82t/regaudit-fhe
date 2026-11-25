@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 
 import regaudit_fhe as rf
-from regaudit_fhe import claim_labels
+import regaudit_fhe.claim_labels as claim_labels
 
 
 def main(bundle_path: str, trust_store_path: str) -> int:

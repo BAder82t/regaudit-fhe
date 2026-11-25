@@ -203,6 +203,8 @@ class GatePlugin:
             )
             (directory / "test-gate-ledger.txt").write_text(text, encoding="utf-8")
         except OSError:
+            # Best effort: the refusal below is the real output. A ledger that cannot be written (read-only or
+            # missing directory) must not hide it or replace it with a different error.
             pass
         raise pytest.UsageError(f"TEST GATE: FAIL: INVOCATION_REFUSED: {message}")
 
