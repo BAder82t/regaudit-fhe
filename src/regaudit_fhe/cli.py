@@ -797,7 +797,9 @@ def _refusal_hint(trust_status: str, reason: str | None) -> str:
 
 
 def _versioned_payload(result: Any, decision: Any, env: Any) -> dict[str, Any]:
-    assessment = claim_labels.assess(env, trust_status=result.trust_status, accepted=result.accepted)
+    assessment = claim_labels.assess(
+        env, trust_status=result.trust_status, accepted=result.accepted
+    )
     return response_v2(
         result.to_dict(), None if decision is None else decision.revocation, assessment
     )

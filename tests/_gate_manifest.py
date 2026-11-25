@@ -449,8 +449,10 @@ BACKEND_QUALIFICATION: dict[str, dict[str, object]] = {
 
 # Printed in every ledger. Static: what no run of this suite can show, whatever the counts are.
 UNTESTED_NOTES: list[str] = [
-    "OpenFHE: tests/test_openfhe_backend.py runs only where the 'openfhe' package imports. The CI matrix does not "
-    "install it, so no OpenFHE ciphertext path is executed in CI; the backend is not qualified.",
+    (
+        "OpenFHE: tests/test_openfhe_backend.py runs only where the 'openfhe' package imports. The CI matrix does not "
+        "install it, so no OpenFHE ciphertext path is executed in CI; the backend is not qualified."
+    ),
     "Only the TenSEAL/SEAL build installed on the runner is exercised; other TenSEAL or SEAL builds are not.",
     "Real-key-custody (HSM/KMS) providers: only the KeyProvider interface is tested, with in-process stand-ins.",
     "Windows: no CI entry runs on Windows; POSIX-only and ACL tests are not executed there at all.",

@@ -414,7 +414,7 @@
     "test_notice_is_shown_on_a_terminal_for_the_default_profile": "f84d28aedfab484dd94312854512a34610eefae29f672a59c7dde6c79de16b9d",
     "test_notice_names_a_stricter_profile_without_claiming_more": "f26b10838a089b53d9988d148adba35adb6709e1a3b387e16f3bb29569719b62",
     "test_replay_conflict_is_checked_before_any_store_is_opened": "40637fa8b8fc23c0fecdac9c8e4efbecdfc42860a2e1f1cf09d6ba13d28b24b0",
-    "test_replay_db_with_check_or_record_still_works": "fe6724f8d73c5aaf0ba97515e8dfd384d3958ebb1f6f44e4f0f0f08a11901638",
+    "test_replay_db_with_check_or_record_still_works": "e6ab4b6b3c715a5ac13cb20a61ddfdd371381be3ca1c5710b856ca8a358901b2",
     "test_replay_db_with_effective_default_mode_off_is_a_configuration_error": "766e23134731b87ce10f69499173729ac6573ac12c396bad3183f1aef1461d77",
     "test_replay_db_with_explicit_mode_off_is_a_configuration_error": "cb43e4ca15e796b389780769650d5eba3bb6fcb8817964202863515540115f72",
     "test_replay_mode_without_db_is_still_exit_2": "d160dd659cb9cabfad4e6726ce3dbc9817b5842eb5ef2b9440255409f8eee5d6"
@@ -1258,7 +1258,7 @@
     "test_e2e_a_passing_mandatory_suite_exits_zero_and_writes_the_ledger": "195ccc3d702cd3b980534f372ae55c67978a018b56511a07efd4dd33d584279c",
     "test_e2e_deleting_a_mandatory_test_fails_the_run": "2e66d480b96cf7c528d5f8c0a7d73ab43f8ab69ad2354d557cd6b4189c6be2e7",
     "test_e2e_guard_off_a_mandatory_test_that_skips_makes_the_run_fail": "96df85d6604c233d3bddd5fc0e6fd3ea56d7359c6bdbd5745e57a94abca1f55a",
-    "test_e2e_require_tenseal_mode_forbids_a_tenseal_skip": "14c2814999e9d72a474aa630ca05a80316235a6fb02ec9c2d470e025438111a8",
+    "test_e2e_require_tenseal_mode_forbids_a_tenseal_skip": "33caae35844ddc91b3bcaeec0e1936170500a55519f8fddcd45a8ca3da76ea80",
     "test_e2e_require_tenseal_mode_refuses_to_start_when_tenseal_cannot_be_imported": "3d2e4a42ac7cb2332d7ee6e5f0fcf6243336d077f087bb6b4edf42ead543283e",
     "test_e2e_without_the_gate_flag_nothing_is_written_and_nothing_is_enforced": "fb122c7caacb6f5643f3520b735d4d925de8946dbcd261e05e1b9689af0fbe21",
     "test_every_expected_skip_rule_is_well_formed": "64bf79cb3ac2bad5feb119b432e36884f7c1f3faaf29f252eb81554d25c5dd9b",
@@ -4215,7 +4215,7 @@
   "tests/test_trust_add_storage.py": {
    "functions": {
     "test_adds_from_separate_processes_all_land": "b6c3d14d998763cc400d16d9defe84b318a48a5d6c83f0baf4e14e1c64c9de5d",
-    "test_existing_store_mode_is_kept_not_tightened": "54752c51fced30aa2f200f95ce479010aae2a4628e81d1c6f8b9efc6cbfdbb99",
+    "test_existing_store_mode_is_kept_not_tightened": "93f7b7db7e4cf6b1947ee40c441490eb228101a130e8ae2bf3b4310be8d7e732",
     "test_failure_at_the_swap_leaves_the_old_store_and_no_temp_file": "3cc40ca8dc642f48c2e65de0c3a001c53d45dbdd47802fe6202bbd19649486e4",
     "test_failure_while_writing_leaves_the_old_store_and_no_temp_file": "8b35d65b859dee3f90d8ee135489fe71aeb858cfddca852491f45774c24d5e7c",
     "test_linux_acl_that_lets_another_user_write_shows_in_the_group_bits_and_is_refused": "35dd4bfad55a06160633bec57febe2933e8f0903b5bd6203f31b622fa316f016",

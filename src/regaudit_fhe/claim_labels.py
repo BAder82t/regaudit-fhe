@@ -78,11 +78,16 @@ _DECLARED_NOT_STATED = "Execution mode declared in the report: the report names 
 _DECLARED_UNRECOGNIZED = "Execution mode declared in the report: the report names a backend this verifier does not recognise."
 
 
-def _declared_fhe(name: str) -> str:
+def _declared_fhe_text(name: str) -> str:
     return (
         f"Execution mode declared in the report: the report declares an FHE backend ({name}). This is a "
         "declaration by the signer. It is not an observation, and the parameters that go with it do not make it one."
     )
+
+
+# One fixed line per recognised backend, built here from the allow-list. A line is looked up, never built from the
+# report's own text.
+_DECLARED_FHE_LINES = {name: _declared_fhe_text(name) for name in sorted(_FHE_BACKENDS)}
 
 
 def declared_backend_kind(backend: Any) -> str:
@@ -101,7 +106,7 @@ def _declared_line(backend: Any) -> str:
     if kind == "plaintext_declared":
         return _DECLARED_PLAINTEXT
     if kind == "fhe_declared":
-        return _declared_fhe(str(backend))
+        return _DECLARED_FHE_LINES[backend]
     if kind == "unrecognized":
         return _DECLARED_UNRECOGNIZED
     return _DECLARED_NOT_STATED

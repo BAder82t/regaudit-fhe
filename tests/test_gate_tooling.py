@@ -598,7 +598,21 @@ def test_e2e_require_tenseal_mode_forbids_a_tenseal_skip(tmp_path):
     off = _inner(tmp_path, ["."], extra_env=e)
     assert off.returncode == 0, off.stdout + off.stderr
     assert _ledger(tmp_path)["counts"]["blocked_by_dependency"] == 1
-    on = _inner(tmp_path, ["."], extra_env={**e, "REGAUDIT_REQUIRE_TENSEAL": "1"})
+    # An empty stand-in package makes TenSEAL importable for the inner run, so this test checks the skip rule
+    # whether or not the real package is installed. Without it, a missing TenSEAL makes the gate refuse to start
+    # (covered by the next test) and no new ledger is written.
+    stub = tmp_path / "tenseal_stub"
+    (stub / "tenseal").mkdir(parents=True)
+    (stub / "tenseal" / "__init__.py").write_text("", encoding="utf-8")
+    on_env = {
+        **e,
+        "REGAUDIT_REQUIRE_TENSEAL": "1",
+        "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "src"), str(stub)]),
+    }
+    (
+        tmp_path / "ledger" / "test-gate-ledger.json"
+    ).unlink()  # a stale ledger must not decide this test
+    on = _inner(tmp_path, ["."], extra_env=on_env)
     assert on.returncode != 0
     assert "REQUIRED_UNEXPECTEDLY_SKIPPED" in codes(_ledger(tmp_path))
 

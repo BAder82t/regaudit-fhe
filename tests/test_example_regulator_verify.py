@@ -83,8 +83,16 @@ def test_example_carries_the_label_and_the_invariant() -> None:
     proc = _run()
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "Encrypted execution not established." in proc.stdout
-    assert "A signed report can authenticate a claim without proving that claim is true." in proc.stdout
+    assert (
+        "A signed report can authenticate a claim without proving that claim is true."
+        in proc.stdout
+    )
     assert "declare a plaintext backend" in proc.stdout
-    for phrase in ("encrypted audit", "computed under encryption", "fhe verified", "privacy preserved"):
+    for phrase in (
+        "encrypted audit",
+        "computed under encryption",
+        "fhe verified",
+        "privacy preserved",
+    ):
         assert phrase not in proc.stdout.lower()
     assert "These reports came from the plaintext path" not in proc.stdout

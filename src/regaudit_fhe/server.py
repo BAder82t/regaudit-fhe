@@ -1571,7 +1571,9 @@ def build_app(
             return response_v2(
                 response,
                 None,
-                claim_labels.assess(env, trust_status=result.trust_status, accepted=result.accepted),
+                claim_labels.assess(
+                    env, trust_status=result.trust_status, accepted=result.accepted
+                ),
             )
         return response
 

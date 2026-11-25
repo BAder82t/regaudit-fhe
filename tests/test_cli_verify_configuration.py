@@ -74,8 +74,16 @@ def test_replay_db_with_effective_default_mode_off_is_a_configuration_error(file
 @pytest.mark.parametrize("mode", ["check", "record"])
 def test_replay_db_with_check_or_record_still_works(files, tmp_path, mode):
     report, store = files
-    p = run("-i", report, "--trusted-keys", store, "--replay-db", str(tmp_path / "r.db"),
-            "--replay-mode", mode)
+    p = run(
+        "-i",
+        report,
+        "--trusted-keys",
+        store,
+        "--replay-db",
+        str(tmp_path / "r.db"),
+        "--replay-mode",
+        mode,
+    )
     assert p.returncode == 0, p.stderr
     assert json.loads(p.stdout)["accepted"] is True
 
