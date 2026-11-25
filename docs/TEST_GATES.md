@@ -80,6 +80,7 @@ nothing about the gate.
 | `full` | `ci.yml` jobs `test` and `server-floor` | all 68 security-tier modules (3063 test ids) and, with `REGAUDIT_REQUIRE_TENSEAL=1`, the 7 TenSEAL-tier modules (152 ids); every one of the 106 test modules in the inventory must also be collected | yes |
 | `sdist` | `release-build.yml`, the sdist test run against the installed wheel | the same, minus `tests/test_gate_workflows.py` (an sdist has no workflows) and `tests/test_gate_inventory.py` (needs every optional package): 3053 security ids | no |
 | `release-gate` | `ci.yml` job `release-gate`, which installs only `[dev]` | 49 security-tier modules (2027 ids). The modules that need the server extra (fastapi, uvicorn), TenSEAL, or the full set of packages are left out, 26 in all, each with its reason in `SCOPES` | no |
+| `openfhe` | `ci.yml` job `openfhe`: `[dev]` plus the pinned OpenFHE wheel, Linux x86_64, Python 3.12 | the same 49 security-tier modules as `release-gate` (2027 ids); `tests/test_openfhe_backend.py` is optional in the gate, so the job's last step requires it to have run, passed all 10 tests and skipped none | no |
 
 A module a partial scope leaves out is optional in that run: its tests are not required and their skips are not
 violations. What those tests check is not covered by that run. The `release-gate` job therefore does not exercise
@@ -99,6 +100,7 @@ gate.
 | Workflow | Job | Scope | Gated |
 | --- | --- | --- | --- |
 | ci.yml | release-gate | release-gate | yes |
+| ci.yml | openfhe | openfhe | yes |
 | ci.yml | test (matrix) | full | yes |
 | ci.yml | server-floor | full | yes |
 | release-build.yml | smoke (sdist test run) | sdist | yes |
@@ -150,8 +152,15 @@ With `REGAUDIT_REQUIRE_TENSEAL=1`:
 CI sets it for the interpreters that have a TenSEAL wheel (see the comment in `.github/workflows/ci.yml`). Without
 it, a missing TenSEAL is reported as "blocked by unavailable dependency".
 
-A backend is reported as `executed` only if its test modules ran, passed and skipped nothing. OpenFHE is not
-installed in CI, so the ledger reports it as `NOT QUALIFIED`. The TenSEAL line also reads `NOT QUALIFIED` whenever
+A backend is reported as `executed` only if its test modules ran, passed and skipped nothing. The main CI matrix does
+not install OpenFHE, so its ledgers report it as `NOT QUALIFIED`. The separate `openfhe` job (Linux x86_64, Python
+3.12, the PyPI wheel pinned by hash in `scripts/openfhe-requirements.lock`) is the one place it can read `executed`.
+That job imports the package without the repo's guard first, because the guarded import in
+`regaudit_fhe.fhe.openfhe` turns an import failure into a silent skip, then runs `--gate-scope openfhe`, then fails
+unless the ledger's `openfhe-ckks` line says `executed` with at least 10 passed, none failed and none skipped. The
+wheel ships `libgomp.so` without the `libgomp.so.1` name its extension asks for, so the job links it when the system
+has none. `executed` is not `qualified`: those 10 tests do not cover provenance, drift or disagreement accuracy,
+depth budgets, a real-context parameter set, key custody or serialization, and concordance is unsupported. The TenSEAL line also reads `NOT QUALIFIED` whenever
 a declared skip exists in its modules (three, in `tests/test_fhe_equivalence_matrix.py`), so it cannot read
 `executed` today. The ledger also prints what no run of this suite can show (`UNTESTED_NOTES`).
 

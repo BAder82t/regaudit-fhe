@@ -78,6 +78,72 @@ jobs:
         # which mandatory tests this job requires (see SCOPES in tests/_gate_manifest.py) and never claims the full suite.
         run: pytest -q --gate-scope release-gate --gate-dir test-gate-release-gate
 
+  openfhe:
+    # Executes the OpenFHE backend on the one platform its PyPI wheel supports (Linux x86_64, CPython 3.12, glibc
+    # 2.38 or newer). The main matrix does not install OpenFHE, so without this job no OpenFHE ciphertext path runs in
+    # CI. Running the tests is not a qualification: the ledger and docs/TEST_GATES.md say what they do not cover.
+    # The repo's guarded import (_HAVE_OPENFHE) turns an import failure into a silent skip, so this job imports the
+    # package on purpose, first, and fails if it cannot, if the module's tests did not all run, or if any skipped.
+    name: openfhe (linux x86_64, py3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: install the pinned OpenFHE wheel, by hash only
+        run: |
+          pip install --require-hashes --only-binary=:all: --no-deps --no-cache-dir -r scripts/openfhe-requirements.lock
+          pip check
+      - name: libgomp (the wheel ships libgomp.so without the .so.1 name its extension asks for)
+        run: |
+          if ldconfig -p | grep -q 'libgomp\.so\.1 '; then
+            echo "the system provides libgomp.so.1"
+          else
+            pkg="$(python -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("openfhe").origin).resolve().parent)')"
+            mkdir -p "$RUNNER_TEMP/libgomp"
+            ln -sf "$pkg/lib/libgomp.so" "$RUNNER_TEMP/libgomp/libgomp.so.1"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/libgomp${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+            echo "linked the wheel's own libgomp.so as libgomp.so.1"
+          fi
+      - name: the package must import, here and through the repo's own guard
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import openfhe  # no guard: an ImportError fails the job
+          from regaudit_fhe.fhe import openfhe as backend
+          version = importlib.metadata.version("openfhe")
+          assert version == "1.6.1.0.24.4", version
+          assert backend._HAVE_OPENFHE, "the repo's guarded import reports OpenFHE as unavailable"
+          print("openfhe", version, "imports; the repo's guard reports it available")
+          PY
+      - name: tests with the openfhe gate scope
+        # Same limits as release-gate (no server extra, no TenSEAL) plus the OpenFHE module, which is optional in
+        # the gate, so the next step is what makes it required here.
+        run: pytest -q --gate-scope openfhe --gate-dir test-gate-openfhe
+      - name: the OpenFHE tests ran, all passed, none skipped
+        run: |
+          python - <<'PY'
+          import json
+          ledger = json.load(open("test-gate-openfhe/test-gate-ledger.json"))
+          backend = ledger["backends"]["openfhe-ckks"]
+          print(backend)
+          assert backend["package_installed"] and backend["status"] == "executed", backend
+          assert backend["tests_passed"] >= 10, backend
+          assert backend["tests_failed"] == 0 and backend["tests_skipped"] == 0, backend
+          PY
+      - name: test-gate ledger
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: test-gate-ledger-openfhe
+          path: test-gate-openfhe/
+          if-no-files-found: warn
+
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

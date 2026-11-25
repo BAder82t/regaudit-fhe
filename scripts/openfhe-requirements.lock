@@ -1,0 +1,8 @@
+# The OpenFHE wheel the ci.yml "openfhe" job installs, by hash only (pip install --require-hashes --no-deps).
+# openfhe 1.6.1.0.24.4 from PyPI: sha256 as published on 2026-10-27. Its only dependency, numpy, is already installed
+# by the project itself. The wheel's tag says py3-none-any, but it holds a CPython 3.12 extension built for Linux
+# x86_64 (glibc 2.38 or newer), so it works on that platform and Python version only.
+# To change the version: download the new wheel, compare its sha256 with the one PyPI lists, read what changed, and
+# edit this file in a reviewed pull request. Never loosen the pin.
+openfhe==1.6.1.0.24.4 \
+    --hash=sha256:8fcd65a0862d6640a255408b55a0df639790bac2cce2aec5f7df810b53af043a

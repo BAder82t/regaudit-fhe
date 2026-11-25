@@ -454,8 +454,11 @@ BACKEND_QUALIFICATION: dict[str, dict[str, object]] = {
 # Printed in every ledger. Static: what no run of this suite can show, whatever the counts are.
 UNTESTED_NOTES: list[str] = [
     (
-        "OpenFHE: tests/test_openfhe_backend.py runs only where the 'openfhe' package imports. The CI matrix does not "
-        "install it, so no OpenFHE ciphertext path is executed in CI; the backend is not qualified."
+        "OpenFHE: tests/test_openfhe_backend.py runs only where the 'openfhe' package imports. The main CI matrix does "
+        "not install it. One separate job (ci.yml 'openfhe', Linux x86_64, Python 3.12) installs a pinned wheel and "
+        "executes that module. Executing is not qualifying: those tests do not cover provenance, drift or "
+        "disagreement accuracy, depth budgets, a real-context parameter set, key custody or serialization, and "
+        "concordance is unsupported."
     ),
     "Only the TenSEAL/SEAL build installed on the runner is exercised; other TenSEAL or SEAL builds are not.",
     "Real-key-custody (HSM/KMS) providers: only the KeyProvider interface is tested, with in-process stand-ins.",
@@ -512,4 +515,14 @@ SCOPES: dict[str, dict[str, object]] = {
             "tests/test_gate_inventory.py": "needs every optional package to collect the whole suite",
         },
     },
+}
+
+
+# The OpenFHE lane (ci.yml job "openfhe") installs only [dev] plus the pinned OpenFHE wheel, so it has the same
+# limits as release-gate: no server extra and no TenSEAL. It is a separate scope so that its ledger names what it ran.
+# It exists to execute tests/test_openfhe_backend.py; the job also fails if that module did not run, passed fewer
+# than its tests or skipped any (see the "openfhe" job). Executing the backend is not qualifying it.
+SCOPES["openfhe"] = {
+    "description": "a [dev] install plus the pinned OpenFHE wheel on Linux x86_64 (ci.yml openfhe): no server extra, no TenSEAL",
+    "exclude_modules": dict(SCOPES["release-gate"]["exclude_modules"]),  # type: ignore[call-overload]
 }
