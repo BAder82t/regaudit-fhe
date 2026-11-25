@@ -41,7 +41,7 @@ FHE_TESTS_NOTE = (
 )
 
 # The seven kinds of statement, in display order. The values are fixed text, never built from report content.
-OBSERVED_BY_TRUSTED = "Execution mode observed by a trusted component: none. No signed field and no independent check records one."
+OBSERVED_BY_COMPONENT = "Execution mode observed by a trusted component: none. No signed field and no independent check records one."
 ESTABLISHED_FROM_EVIDENCE = (
     "Execution mode established from the available evidence: cannot be established."
 )
@@ -55,11 +55,11 @@ UNSUPPORTED = (
     "privacy holds, and that any regulation is met."
 )
 
-_AUTH_TRUSTED = (
+_AUTH_ACCEPTED = (
     "Authenticated report content: these exact report bytes were signed by a key in your trust store. "
     "That says who signed them, not that what they say is true."
 )
-_AUTH_NOT_TRUSTED = (
+_AUTH_NOT_ACCEPTED = (
     "Authenticated report content: none. This report was not accepted as signed by a trusted issuer, so its "
     "contents are only what the file says."
 )
@@ -116,8 +116,8 @@ def _authenticated_line(trust_status: str | None, accepted: bool | None) -> str:
     if trust_status is None:
         return _AUTH_UNKNOWN
     if trust_status == "TRUSTED" and accepted is not False:
-        return _AUTH_TRUSTED
-    return _AUTH_NOT_TRUSTED
+        return _AUTH_ACCEPTED
+    return _AUTH_NOT_ACCEPTED
 
 
 def assess(
@@ -159,7 +159,7 @@ def claim_lines(
     return [
         NOT_ESTABLISHED,
         INVARIANT,
-        OBSERVED_BY_TRUSTED,
+        OBSERVED_BY_COMPONENT,
         _declared_line(getattr(report, "backend", None)),
         ESTABLISHED_FROM_EVIDENCE,
         CONFIGURATION,

@@ -109,8 +109,12 @@ SECURITY_GATE_MODULES: dict[str, dict[str, object]] = {
         "min_tests": 15,
         "why": "storage policy: durability outcomes, lock and recovery",
     },
+    "tests/test_claim_labels_http.py": {
+        "min_tests": 3,
+        "why": "verification output over HTTP: default body unchanged, the assessment only in v2, /version not suggesting encryption",
+    },
     "tests/test_claim_labels.py": {
-        "min_tests": 40,
+        "min_tests": 37,
         "why": "verification output: claim labels never present plaintext or unknown runs as proven encrypted",
     },
     "tests/test_claims_equivalence.py": {
@@ -497,6 +501,7 @@ SCOPES: dict[str, dict[str, object]] = {
             "tests/test_server_trust.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
             "tests/test_storage_policy_paths.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
             "tests/test_trust_store_storage_policy.py": "needs the server extra (fastapi, uvicorn), which a [dev] install lacks",
+            "tests/test_claim_labels_http.py": "needs the server extra (fastapi, httpx), which a [dev] install lacks",
             "tests/test_tenseal_backend.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
             "tests/test_fhe_equivalence_matrix.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",
             "tests/test_precision_bounds.py": "needs TenSEAL (the fhe extra), which a [dev] install lacks",

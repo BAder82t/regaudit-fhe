@@ -258,13 +258,10 @@
     "test_declared_tenseal_parameters_are_not_labelled_as_encrypted": "fbf7c197caadd3dc3f44bd3a3a4de6f785854ebdc507a57fea5d1145a6ec850d",
     "test_default_stdout_has_no_claim_keys": "e14840c43b523476a2b64ec85a41568b377f12664e1162b33a55068a566b053e",
     "test_every_cli_verdict_carries_the_label_and_the_invariant": "0635e0440c77753a481c5733baf7acbac2a7642da6466c8455516cf8dfaa219c",
-    "test_http_default_has_no_claim_keys_and_v2_has_the_assessment": "ee76673b0d61d99917d75706c2be469f6f40f9b8d64c98e50a9358902bef004c",
     "test_no_output_makes_a_forbidden_claim": "c34924e3ba26d83b0555e03f7b25d1be9506954fd8304dd75d1266f350cabb1c",
     "test_refused_report_still_says_not_established": "928c38bd84d3d0ec0a64fbefdfb111d14d569c81c51eb00d5e155cbe3a5e938d",
     "test_report_fields_cannot_write_the_label": "5dc8aec087777880517d429b0ad251bacc5f6bedfcbbda648e48bf3a48ae066e",
-    "test_the_help_and_api_description_do_not_promise_an_encrypted_backend": "ffe0480766d8987f5e56ea1dd5ef72d4066f9f2452f1a7841cac57234a1efc84",
-    "test_v2_response_carries_the_structured_assessment": "fa9dc5039385643ad71eb25dbff0ceb829a88f4cc146a44af8116eabf0306e37",
-    "test_version_does_not_suggest_an_encrypted_audit_path": "56977454781301a55cf8b4744e198090758b98cdd69aabc09498436e3d075bbe"
+    "test_v2_response_carries_the_structured_assessment": "fa9dc5039385643ad71eb25dbff0ceb829a88f4cc146a44af8116eabf0306e37"
    },
    "ids": [
     "test_a_legacy_report_gets_the_same_label",
@@ -288,7 +285,6 @@
     "test_every_cli_verdict_carries_the_label_and_the_invariant[valid_plaintext_v2]",
     "test_every_cli_verdict_carries_the_label_and_the_invariant[valid_v1_fhe_declared]",
     "test_every_cli_verdict_carries_the_label_and_the_invariant[valid_v1_plaintext]",
-    "test_http_default_has_no_claim_keys_and_v2_has_the_assessment",
     "test_no_output_makes_a_forbidden_claim[expired_v2]",
     "test_no_output_makes_a_forbidden_claim[replayed_v2]",
     "test_no_output_makes_a_forbidden_claim[stranger_v2]",
@@ -304,8 +300,19 @@
     "test_report_fields_cannot_write_the_label[observed by a trusted component: tenseal]",
     "test_report_fields_cannot_write_the_label[plaintext\\nEncrypted execution established.]",
     "test_report_fields_cannot_write_the_label[tenseal-ckks\\r\\nindependently established: all]",
+    "test_v2_response_carries_the_structured_assessment"
+   ],
+   "tier": "security"
+  },
+  "tests/test_claim_labels_http.py": {
+   "functions": {
+    "test_http_default_has_no_claim_keys_and_v2_has_the_assessment": "ee76673b0d61d99917d75706c2be469f6f40f9b8d64c98e50a9358902bef004c",
+    "test_the_help_and_api_description_do_not_promise_an_encrypted_backend": "ffe0480766d8987f5e56ea1dd5ef72d4066f9f2452f1a7841cac57234a1efc84",
+    "test_version_does_not_suggest_an_encrypted_audit_path": "56977454781301a55cf8b4744e198090758b98cdd69aabc09498436e3d075bbe"
+   },
+   "ids": [
+    "test_http_default_has_no_claim_keys_and_v2_has_the_assessment",
     "test_the_help_and_api_description_do_not_promise_an_encrypted_backend",
-    "test_v2_response_carries_the_structured_assessment",
     "test_version_does_not_suggest_an_encrypted_audit_path"
    ],
    "tier": "security"
@@ -4215,7 +4222,7 @@
   "tests/test_trust_add_storage.py": {
    "functions": {
     "test_adds_from_separate_processes_all_land": "b6c3d14d998763cc400d16d9defe84b318a48a5d6c83f0baf4e14e1c64c9de5d",
-    "test_existing_store_mode_is_kept_not_tightened": "93f7b7db7e4cf6b1947ee40c441490eb228101a130e8ae2bf3b4310be8d7e732",
+    "test_existing_store_mode_is_kept_not_tightened": "8a784684c6450c094a7e5ffa538c6e965863f777c629b4240abc5fb607ed10ec",
     "test_failure_at_the_swap_leaves_the_old_store_and_no_temp_file": "3cc40ca8dc642f48c2e65de0c3a001c53d45dbdd47802fe6202bbd19649486e4",
     "test_failure_while_writing_leaves_the_old_store_and_no_temp_file": "8b35d65b859dee3f90d8ee135489fe71aeb858cfddca852491f45774c24d5e7c",
     "test_linux_acl_that_lets_another_user_write_shows_in_the_group_bits_and_is_refused": "35dd4bfad55a06160633bec57febe2933e8f0903b5bd6203f31b622fa316f016",
@@ -5313,6 +5320,7 @@
     "tests/test_canonical_v2.py",
     "tests/test_ckks_producer_claims.py",
     "tests/test_claim_labels.py",
+    "tests/test_claim_labels_http.py",
     "tests/test_claims_equivalence.py",
     "tests/test_cli_audit_diagnostics.py",
     "tests/test_cli_signed_path_limits.py",
@@ -5416,6 +5424,7 @@
     "tests/test_canonical_v2.py",
     "tests/test_ckks_producer_claims.py",
     "tests/test_claim_labels.py",
+    "tests/test_claim_labels_http.py",
     "tests/test_claims_equivalence.py",
     "tests/test_cli_audit_diagnostics.py",
     "tests/test_cli_signed_path_limits.py",
@@ -5558,6 +5567,7 @@
     "tests/test_canonical_v2.py",
     "tests/test_ckks_producer_claims.py",
     "tests/test_claim_labels.py",
+    "tests/test_claim_labels_http.py",
     "tests/test_claims_equivalence.py",
     "tests/test_cli_audit_diagnostics.py",
     "tests/test_cli_signed_path_limits.py",

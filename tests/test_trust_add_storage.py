@@ -97,9 +97,9 @@ def test_new_store_is_created_owner_only_whatever_the_umask(tmp_path, keys, caps
 def test_existing_store_mode_is_kept_not_tightened(tmp_path, keys):
     store = tmp_path / "store.json"
     assert _add(store, keys[0]) == 0
-    os.chmod(store, 0o640)
+    os.chmod(store, 0o400)
     assert _add(store, keys[1]) == 0
-    assert stat.S_IMODE(store.stat().st_mode) == 0o640
+    assert stat.S_IMODE(store.stat().st_mode) == 0o400
     assert _ids(store) == {"k-0", "k-1"}
 
 
