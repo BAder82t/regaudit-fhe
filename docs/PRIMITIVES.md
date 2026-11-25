@@ -154,6 +154,8 @@ report = enc.fairness_encrypted(
 )  # same report type as audit_fairness
 ```
 
+A group with no members is refused with a `ValueError` (`group_a has zero members; ...`) by the plaintext oracle, the slot circuit and `fairness_encrypted` alike, because a disparity between two groups is undefined when one is empty. The check runs before anything is encrypted.
+
 `ctx` holds the secret key and the call decrypts the aggregate scalars, so in this form the
 same process sees both the inputs and the result: it demonstrates that the encrypted circuit
 matches the plaintext one, not a deployment where the data holder and the evaluator differ.

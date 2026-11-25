@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 
 from .._slot import pad_pow2
+from .._validation import assert_at_least_one_member
 from ..ecmd_jps import DisagreementReport
 from ..ecp_qssp import ConformalReport
 from ..egf_imss import FairnessReport
@@ -120,6 +121,10 @@ def fairness_encrypted(
     group_b: np.ndarray,
     threshold: float = 0.1,
 ) -> FairnessReport:
+    # A disparity between two groups is undefined when one is empty. The plaintext oracle and the slot circuit refuse
+    # this input with the same message, so refuse it here before anything is encrypted (decision D4, 2026-11-25).
+    assert_at_least_one_member("group_a", group_a)
+    assert_at_least_one_member("group_b", group_b)
     SV, _sign_poly = _resolve_backend(ctx)
     y_true_p = pad_pow2(y_true)
     y_pred_p = pad_pow2(y_pred)
