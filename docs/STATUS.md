@@ -24,9 +24,9 @@ exactly what is checked automatically, what is only partly done, and what is not
 | Real CKKS encrypted backend (TenSEAL)   | Shipped under `[fhe]`; compared with the plaintext model within test tolerances (envelopes, not proven bounds). Library only: not used by the CLI or the |
 |                                         | server. Experimental; not independently qualified.                                  |
 | OpenFHE CKKS backend (experimental)     | Shipped under `[openfhe]`; registry-selectable; covers 5 of the 6 primitives        |
-|                                         | (rectangular `mm_pt` pending). CI does not install it and its tests skip without    |
-|                                         | OpenFHE: the repository records no qualification run against a real OpenFHE        |
-|                                         | installation. Not the verified reference.                                           |
+|                                         | (rectangular `mm_pt` pending). The main CI matrix does not install it; one separate |
+|                                         | job runs its 10 tests on Linux x86_64 with a pinned wheel. That executes the backend |
+|                                         | and does not qualify it. Not the verified reference.                                 |
 | External key custody (KMS / HSM)        | `CallableKeyProvider` keeps the signing key off-host; fails closed on bad sig.      |
 | Differential-privacy output noise       | Optional `regaudit_fhe.dp` (Laplace / Gaussian); signed `dp` block. Epsilon, delta  |
 |                                         | and sensitivity are self-declared by the caller. The library calibrates noise to them; it |
