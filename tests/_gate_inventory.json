@@ -1160,7 +1160,7 @@
     "test_the_full_scope_fails_when_a_module_the_partial_scope_leaves_out_is_missing": "2d268a8c1050673ecb77e962756e12fc8dff629debdb396cf357ba81d08d69fd",
     "test_the_inventory_script_check_reports_drift_in_both_directions": "cd722f055ec2a83dddb00a1a63d25b96e259e6ca05a6620da239a11816ae1430",
     "test_the_same_reason_on_the_optional_test_the_rule_names_is_declared": "e521baabb00e20501d94c2f0e54dd1dd2c1e6c18edc4db925f9be1d834806e79",
-    "test_the_tenseal_tier_identities_are_required_only_in_require_mode": "aa76f3aa3156f728f11da4c23dba061dfb48e587d65f0384f3a3abdf8cac7b9e",
+    "test_the_tenseal_tier_identities_are_required_only_in_require_mode": "0c242d1cdb04b144072aa6e6a56c776407433754b1274937a95f8f0d17ddbf2c",
     "test_without_the_gate_a_selection_option_is_allowed_and_nothing_is_written": "1ca864d60e6f1b6e4af3de1dfa2ab665a8b90f41dc3584ce31f8db3530cb0fe3",
     "test_x_with_everything_passing_is_an_ordinary_full_run": "f1b55495db79390877e4f97d6cd07eed9d67525f673f0e0327714bb790c33d83"
    },

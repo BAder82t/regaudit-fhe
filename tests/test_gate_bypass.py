@@ -179,9 +179,19 @@ def test_a_full_run_passes_and_the_ledger_accounts_for_every_required_test(proje
 
 
 def test_the_tenseal_tier_identities_are_required_only_in_require_mode(project):
-    proc = gate(project, ["."], extra_env={"REGAUDIT_REQUIRE_TENSEAL": "1"})
-    if proc.returncode != 0 and "cannot be imported" in proc.stdout + proc.stderr:
-        pytest.skip("could not import 'tenseal'")
+    # An empty stand-in package makes TenSEAL importable for the inner run, so the test does not depend on whether
+    # the real package is installed (a skip here would fail the gate in a scope that has no TenSEAL).
+    stub = project / "tenseal_stub"
+    (stub / "tenseal").mkdir(parents=True)
+    (stub / "tenseal" / "__init__.py").write_text("", encoding="utf-8")
+    proc = gate(
+        project,
+        ["."],
+        extra_env={
+            "REGAUDIT_REQUIRE_TENSEAL": "1",
+            "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "src"), str(stub)]),
+        },
+    )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert ledger(project)["scope"]["expected"] == 6
 
