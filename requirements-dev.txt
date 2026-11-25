@@ -71,7 +71,7 @@ pluggy==1.7.0
     #   pytest-cov
 psutil==7.2.2
     # via regaudit-fhe (pyproject.toml)
-pycparser==3.0
+pycparser==3.11
     # via cffi
 pydantic==2.14.4
     # via
