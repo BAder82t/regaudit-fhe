@@ -45,6 +45,11 @@ from .profiles import explain, guide
 
 HOST = "127.0.0.1"
 
+# The longest a problem's text may be on the status page. It is text from the administrator's own files (an unknown
+# member name, a key id) inside the engine's wording, so its length is the file's, not ours: cap it, as the issuers list
+# and the admin commands already do with ``shown``, so that one hostile file cannot make the answer large.
+MESSAGE_LIMIT = 600
+
 
 def _row(
     row_id: str,
@@ -221,7 +226,9 @@ def readiness(
         places += [settings.store_path, settings.replay_path]
 
     def say(text: str) -> str:
-        return hide_paths(text, *places)
+        # Paths first, so a place is shortened to its ~/... form before the length is counted. Then the cap, with each
+        # invisible character shown as a visible escape.
+        return shown(hide_paths(text, *places), MESSAGE_LIMIT)
 
     def in_folder(step: str, folder: Path) -> str:
         """A next step that means opening a file in this folder, with how to reach it in Finder when it is hidden."""
