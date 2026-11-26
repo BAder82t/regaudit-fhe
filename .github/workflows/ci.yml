@@ -78,13 +78,45 @@ jobs:
         # which mandatory tests this job requires (see SCOPES in tests/_gate_manifest.py) and never claims the full suite.
         run: pytest -q --gate-scope release-gate --gate-dir test-gate-release-gate
 
+  changes:
+    # Decides whether the openfhe job below applies. It takes about 13 minutes, so a pull request that cannot affect it
+    # (documentation, the portal, the examples, other workflows) skips it. Every other event always runs it: a push to
+    # master, a manual run, anything that is not a pull request. The rule is scripts/openfhe_lane_needed.py, which errs
+    # towards running. Untrusted event values go through env, never into the shell text.
+    name: changes (does the openfhe job apply?)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      openfhe: ${{ steps.scope.outputs.openfhe }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            answer="$(git diff --name-only "$BASE...$HEAD" | python3 scripts/openfhe_lane_needed.py)"
+          else
+            answer=true
+          fi
+          echo "openfhe=$answer" >> "$GITHUB_OUTPUT"
+          echo "the openfhe job is needed: $answer"
+
   openfhe:
     # Executes the OpenFHE backend on the one platform its PyPI wheel supports (Linux x86_64, CPython 3.12, glibc
     # 2.38 or newer). The main matrix does not install OpenFHE, so without this job no OpenFHE ciphertext path runs in
     # CI. Running the tests is not a qualification: the ledger and docs/TEST_GATES.md say what they do not cover.
     # The repo's guarded import (_HAVE_OPENFHE) turns an import failure into a silent skip, so this job imports the
     # package on purpose, first, and fails if it cannot, if the module's tests did not all run, or if any skipped.
+    # A pull request that changes nothing it could affect skips it (see the changes job).
     name: openfhe (linux x86_64, py3.12)
+    needs: changes
+    if: needs.changes.outputs.openfhe == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
