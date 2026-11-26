@@ -5356,6 +5356,7 @@
     "tests/test_legacy_bool_apis_deprecation.py",
     "tests/test_migration_operator_declared.py",
     "tests/test_openfhe_backend.py",
+    "tests/test_openfhe_lane_paths.py",
     "tests/test_openfhe_register.py",
     "tests/test_params_validation.py",
     "tests/test_phase3a_contract.py",

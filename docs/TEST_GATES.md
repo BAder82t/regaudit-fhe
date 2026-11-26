@@ -159,7 +159,12 @@ That job imports the package without the repo's guard first, because the guarded
 `regaudit_fhe.fhe.openfhe` turns an import failure into a silent skip, then runs `--gate-scope openfhe`, then fails
 unless the ledger's `openfhe-ckks` line says `executed` with at least 10 passed, none failed and none skipped. The
 wheel ships `libgomp.so` without the `libgomp.so.1` name its extension asks for, so the job links it when the system
-has none. `executed` is not `qualified`: those 10 tests do not cover provenance, drift or disagreement accuracy,
+has none.
+The job takes about 13 minutes, so on a pull request a small `changes` job decides whether it applies: it runs
+`scripts/openfhe_lane_needed.py` over the files the pull request changed and skips the job only when none of them can
+affect it (anything under `src/`, the gate machinery `tests/_gate*`, the OpenFHE tests, the pinned wheel, `pyproject.toml`
+and `ci.yml` count; documentation, the portal, the examples and other workflows do not). A push to `master`, a manual run
+and every other event always run it, and an empty or unreadable change list means run. A skipped job shows as `skipped`. `executed` is not `qualified`: those 10 tests do not cover provenance, drift or disagreement accuracy,
 depth budgets, a real-context parameter set, key custody or serialization, and concordance is unsupported. The TenSEAL line also reads `NOT QUALIFIED` whenever
 a declared skip exists in its modules (three, in `tests/test_fhe_equivalence_matrix.py`), so it cannot read
 `executed` today. The ledger also prints what no run of this suite can show (`UNTESTED_NOTES`).
