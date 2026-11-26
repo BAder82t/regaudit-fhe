@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 import regaudit_fhe as rf
-from regaudit_fhe import cli
+import regaudit_fhe.cli as cli
 from regaudit_fhe.report_v2 import envelope_v2
 
 

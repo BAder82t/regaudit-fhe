@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import regaudit_fhe as rf
-from regaudit_fhe import claim_labels
+import regaudit_fhe.claim_labels as claim_labels
 
 ISSUER, KEY_ID, VERIFIER = "example-vendor.example", "vendor-2026-q2", "regulator-a"
 
