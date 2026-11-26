@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 from helpers import client_for, fake_home, install_configuration
 from regaudit_portal.paths import default_config_folder
+from regaudit_portal.setup import MESSAGE_LIMIT
 
 CANARY = "LEAK-CANARY-7f3a91c2d4e85b60"
 STORE = "trust-store.json"
@@ -260,3 +261,41 @@ def test_the_issuers_list_shows_names_bounded_and_with_invisible_characters_made
         "a right-to-left override must be shown as a visible escape, never applied"
     )
     assert "\u202e" not in shown.lower().replace("\\u{202e}", "")
+
+
+# ----------------------------------------------------------------------------- length
+
+
+def _hostile_key_id(folder: Path, name: str) -> None:
+    store = _store(folder)
+    entry = next(iter(store["entries"].values()))
+    store["entries"] = {name: {**entry, "public_key_pem": "x"}}
+    _write(folder / STORE, json.dumps(store))
+
+
+def _hostile_member_name(folder: Path, name: str) -> None:
+    _write(folder / CONFIG, json.dumps({**_config(folder), name: 1}))
+
+
+@pytest.mark.parametrize(
+    ("row", "build"), [("trust_list", _hostile_key_id), ("configuration", _hostile_member_name)]
+)
+def test_a_very_long_identifier_in_an_error_message_is_capped(place, row, build):
+    """An identifier from the administrator's file is shown inside an error message. Its length is the file's, so the
+    page caps the message: a 20,000-character key id or member name must not make a 20,000-character answer."""
+    folder, config = place
+    hostile = "K" * 20_000
+    build(folder, hostile)
+    body = _body(config)
+    detail = next(r for r in body["rows"] if r["id"] == row)["detail"]
+    assert detail.endswith(" (shortened)")
+    assert len(detail) <= MESSAGE_LIMIT + len(" (shortened)")
+    assert hostile not in json.dumps(body)
+    assert len(json.dumps(body)) < 12_000, "the whole answer stays small"
+
+
+def test_an_ordinary_error_message_is_not_shortened(place):
+    folder, config = place
+    _hostile_key_id(folder, "northwind-2026")
+    detail = next(r for r in _body(config)["rows"] if r["id"] == "trust_list")["detail"]
+    assert "northwind-2026" in detail and "(shortened)" not in detail
